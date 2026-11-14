@@ -6,12 +6,14 @@ import { Radio } from '/voice.js';
 import { buildWorld } from '/world.js';
 import { buildFixtures } from '/stations.js';
 import { buildInterior, ROOM } from '/interior.js';
-import { CFG, CREW, ROLES, PLACES, covers } from '/shared/config.js';
+import { CFG, PLACES } from '/shared/config.js';
 import { beltWeight, sheltered } from '/shared/rules.js';
-import { seatTaken, kicked } from '/seat.js';
+import { seatRefused, seatTaken, kicked } from '/seat.js';
 import { buildArm } from '/arm.js';
 import { PAL } from '/shared/palette.js';
 import { createLobby } from '/lobby.js';
+import { buildWaitingRoom } from '/waitingroom.js';
+import { isHeadset } from '/device.js';
 import { music } from '/music.js';
 
 const REACH = 3.2;        // metres: how far away the mouse can work something
@@ -132,56 +134,49 @@ function drawGauges(now) {
 }
 function show(what, seconds) { flash = what; flashUntil = performance.now() / 1000 + seconds; }
 
-// ---------- the READY board: how the astronaut readies up, from inside the headset ----------
-// It stands just in front of the spawn point while the crew is in the lobby, so the mission can
-// never start while the headset is still in someone's hand.
-const boardCanvas = document.createElement('canvas');
-boardCanvas.width = 768; boardCanvas.height = 480;
-const board2d = boardCanvas.getContext('2d');
-const boardTex = new THREE.CanvasTexture(boardCanvas);
-boardTex.colorSpace = THREE.SRGBColorSpace;
-const board = new THREE.Mesh(new THREE.PlaneGeometry(1.0, 0.625), new THREE.MeshBasicMaterial({ map: boardTex, toneMapped: false }));
-board.position.set(CFG.spawn.x, 1.65, CFG.spawn.z - 1.7); // eye height
-scene.add(board);
-let boardKey = '';
+// ---------- the waiting room: how the astronaut readies up, from inside the headset ----------
+// A card per seat stands in an arc in front of the spawn point while the crew is in the lobby
+// (client/waitingroom.js), so the mission can never start while the headset is still in someone's
+// hand. Only the Astronaut's own card can be used: point at it and pull the trigger to ready up.
+const room = buildWaitingRoom(THREE, scene, { at: CFG.spawn, facing: 0 });
 const iAmReady = () => !!state && (state.ready || []).includes('astronaut');
-function drawBoard() {
-  const s = state;
-  board.visible = !!s && s.phase === 'lobby';
-  if (!board.visible) return;
-  const missing = CREW.filter(r => !s.crew.some(h => covers(h, r)));
-  const waiting = CREW.filter(r => r !== 'astronaut' && !(s.ready || []).some(h => covers(h, r)));
-  const n = s.countdown == null ? null : Math.max(1, Math.ceil(s.countdown));
-  const key = [iAmReady(), missing, waiting, n].join('|');
-  if (key === boardKey) return;
-  boardKey = key;
-  const g = board2d, W = boardCanvas.width, H = boardCanvas.height, go = iAmReady();
-  g.fillStyle = '#05080a'; g.fillRect(0, 0, W, H);
-  g.strokeStyle = go ? '#58e08a' : '#ffb84a'; g.lineWidth = 14; g.strokeRect(7, 7, W - 14, H - 14);
-  g.textAlign = 'center'; g.textBaseline = 'middle';
-  g.fillStyle = go ? '#58e08a' : '#ffb84a';
-  g.font = 'bold 150px monospace'; g.fillText(n != null ? String(n) : go ? 'GO' : 'READY?', W / 2, 170);
-  g.fillStyle = '#d6e6e0'; g.font = 'bold 30px monospace';
-  g.fillText(n != null ? 'All four GO. Launching...' : go ? 'Trigger again to stand down' : 'Pull the trigger here when set', W / 2, 300);
-  g.fillStyle = '#7d909c'; g.font = '26px monospace';
-  const wait = missing.length ? 'Seats open: ' + missing.map(r => ROLES[r]).join(', ') : waiting.length ? 'Not ready yet: ' + waiting.map(r => ROLES[r]).join(', ') : 'Mission control is GO';
-  g.fillText(n != null ? '' : wait, W / 2, 380);
-  boardTex.needsUpdate = true;
-}
 function useBoard(controller) {
-  if (!board.visible) return false;
+  if (!room.group.visible) return false;
   aim(controller);
-  if (!raycaster.intersectObject(board, false).length) return false;
-  net.send({ t: 'ready', on: !iAmReady() });
-  radio.sfx(iAmReady() ? 'mistake' : 'solve');
+  if (!raycaster.intersectObject(room.own, false).length) return false;
+  setReady(!iAmReady());
   return true;
+}
+function setReady(on) {
+  if (on === iAmReady()) return;
+  net.send({ t: 'ready', on });
+  radio.sfx(on ? 'solve' : 'mistake');
+}
+// For a laptop player and the tests: turn to face your own card, then use it as a click would.
+function faceOwnCard() {
+  rig.updateMatrixWorld(true);
+  const at = room.own.getWorldPosition(new THREE.Vector3()), head = camera.getWorldPosition(new THREE.Vector3());
+  rig.rotation.y = Math.atan2(-(at.x - head.x), -(at.z - head.z));
+  camera.rotation.x = Math.atan2(at.y - head.y, Math.hypot(at.x - head.x, at.z - head.z));
+  rig.updateMatrixWorld(true);
 }
 
 // ---------- network ----------
 // Take the server's word as it arrives, not once per frame: what can be grabbed must never lag behind what exists.
 const NOTHING = { belt: [], locker: [], scene: null, suit: false };
-net.onState = s => { state = s; lobby.update(s); fx.sync(s.phase === 'run' ? s : NOTHING); };
-net.onTaken = seatTaken;
+net.onState = s => { state = s; if (waitNote) { waitNote.remove(); waitNote = null; } lobby.update(s); fx.sync(s.phase === 'run' ? s : NOTHING); };
+// A headset can only ever be the Astronaut: if the seat is held, it waits for it instead of being sent away.
+let headset = false, waitNote = null;
+net.onTaken = role => {
+  if (!headset) { seatTaken(role); return; }
+  if (!waitNote) {
+    waitNote = document.createElement('div'); waitNote.id = 'taken';
+    waitNote.innerHTML = '<div><h1>ASTRONAUT SEAT TAKEN</h1><p>Someone else is the Astronaut right now. You will be seated as soon as they leave.</p></div>';
+    document.body.appendChild(waitNote);
+  }
+  setTimeout(() => net.retry(), 3000);
+};
+net.onRefused = seatRefused;
 net.onKicked = kicked;
 net.onBinary = buf => radio.receive(buf);
 net.onMsg = m => { if (m.t === 'ptt') { rx = m.on; radio.rxMarker(m.on); } };
@@ -295,6 +290,7 @@ function inModule(x, z) {
   return null;
 }
 function groundTarget(controller, out) {
+  if (mode === 'vr' && state?.phase === 'lobby') return null; // no teleporting out of the waiting room
   aim(controller);
   const p = raycaster.ray.intersectPlane(ground, out);
   if (!p || p.distanceTo(raycaster.ray.origin) > TELEPORT_MAX) return null;
@@ -634,6 +630,7 @@ function passageStep(dt) {
 let vy = 0, turnArmed = true, lastPose = 0, shake = 0;
 function control(dt, now) {
   let mx = 0, mz = 0, jump = false, ptt = mode === 'desk' && !!keys.tab;
+  const waiting = mode === 'vr' && !!state && state.phase === 'lobby'; // in the waiting room: look around, but stay put
   const session = renderer.xr.getSession();
   camera.getWorldPosition(headPos);
   camera.getWorldDirection(fwd); fwd.y = 0; fwd.normalize();
@@ -666,6 +663,7 @@ function control(dt, now) {
     if (keys.g) fx.pullCord();
   }
 
+  if (waiting) mx = mz = 0, jump = false;
   const speed = WALK * dt;
   rig.position.x += (-mz * fwd.x + mx * -fwd.z) * speed;
   rig.position.z += (-mz * fwd.z + mx * fwd.x) * speed;
@@ -779,7 +777,7 @@ renderer.setAnimationLoop(() => {
   radio.listen(headPos, tmpV);
   shake *= 0.86;
   if (mode === 'desk') camera.rotation.z = (Math.random() - 0.5) * shake;
-  drawBoard();
+  room.update(s);
   // On a laptop the radio key swings the arm up. In a headset it is on your own arm (see followArm).
   if (!arm.tracked) arm.update(Math.min(0.25, now - armFrame), keyed); // real time, so the arm is as quick on a slow machine
   armFrame = now;
@@ -791,7 +789,7 @@ renderer.setAnimationLoop(() => {
 });
 
 // For debugging from the browser console, and for the tests: moonbase.state(), moonbase.fx.targets() ...
-window.moonbase = { resetStanding: () => { standing = 1.2; }, state: () => state, fx, world, interior, radio, rig, camera, net, board, THREE, scene, use: () => use(null), useBoard: () => useBoard(null), useHatch: () => useHatch(null), sendPose, myPose, teleport, turnRig,
+window.moonbase = { resetStanding: () => { standing = 1.2; }, state: () => state, fx, world, interior, radio, rig, camera, net, board: room.own, THREE, scene, use: () => use(null), useBoard: () => { if (mode === 'desk') faceOwnCard(); return useBoard(null); }, room, headset: () => headset, useHatch: () => useHatch(null), sendPose, myPose, teleport, turnRig,
   where: () => where, place, renderer, outage: on => { debugOutage = on; }, wreck: on => { debugDamage = on; },
   zoom: () => zoom, setZoom, controllers, handControls, scope: scopeMesh, arm, snap, radioState: () => ({ keyed, talking, rx, reading, shown: radioState() }) };
 
@@ -807,5 +805,14 @@ $('radioBtn').onclick = async () => {
 $('vrSlot').appendChild(VRButton.createButton(renderer, { optionalFeatures: ['hand-tracking'] }));
 $('deskBtn').onclick = () => { mode = 'desk'; keys.tab = false; $('deskBtn').blur(); lobby.show(false); $('cross').hidden = false; lockPointer(); };
 // In a headset the arm lives in the room with the hands, and follows the left one; on a laptop it hangs off the view.
+// Leaving VR, or taking the headset off, before the start makes the Astronaut not ready.
+const standDown = () => { if (state?.phase === 'lobby') setReady(false); };
+renderer.xr.addEventListener('sessionstart', () => {
+  const session = renderer.xr.getSession();
+  session.addEventListener('visibilitychange', () => { if (session.visibilityState === 'hidden') standDown(); });
+});
+// A headset is only ever the Astronaut: it has nothing to choose but entering VR.
+isHeadset().then(h => { headset = h; if (h) { $('deskBtn').hidden = true; document.body.classList.add('headset'); } });
 renderer.xr.addEventListener('sessionstart', () => { music.unlock(); mode = 'vr'; rig.add(arm.group); arm.setTracked(true); lobby.show(false); });
-renderer.xr.addEventListener('sessionend', () => { exitHeld = 0; exitTouched = exitGone = false; arm.pressExit(0); mode = null; zoom = 1; zoomGrab = null; reading = false; readFor = 0; camera.add(arm.group); arm.setTracked(false); lobby.show(true); });
+renderer.xr.addEventListener('sessionend', () => {
+  standDown(); exitHeld = 0; exitTouched = exitGone = false; arm.pressExit(0); mode = null; zoom = 1; zoomGrab = null; reading = false; readFor = 0; camera.add(arm.group); arm.setTracked(false); lobby.show(true); });

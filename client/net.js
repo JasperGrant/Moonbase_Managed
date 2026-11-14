@@ -1,9 +1,12 @@
 // One WebSocket to the server. Reconnects by itself.
+import { keepDevice } from '/device.js';
 export function connect(role, hello = {}) {
-  const api = { onState: null, onMsg: null, onBinary: null, onTaken: null, onKicked: null, onDenied: null, open: false, send, sendBin };
+  const api = { onState: null, onMsg: null, onBinary: null, onTaken: null, onRefused: null, onKicked: null, onDenied: null, open: false, send, sendBin, retry };
   let ws, lastN = 0, stopped = false; // stopped: told to go away (seat taken, kicked, wrong key); no reconnect
   function send(obj) { if (ws && ws.readyState === 1) ws.send(JSON.stringify(obj)); }
   function sendBin(buf) { if (ws && ws.readyState === 1) ws.send(buf); }
+  // Ask for the seat again after being told it was taken (the headset waits for the Astronaut seat).
+  function retry() { if (!stopped) return; stopped = false; open(); }
   function open() {
     ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`);
     ws.binaryType = 'arraybuffer';
@@ -13,6 +16,8 @@ export function connect(role, hello = {}) {
       if (typeof e.data !== 'string') { api.onBinary?.(e.data); return; }
       const m = JSON.parse(e.data);
       if (m.t === 'taken') { stopped = true; ws.close(); api.onTaken?.(m.role); return; } // someone already has this seat
+      if (m.t === 'refused') { stopped = true; ws.close(); api.onRefused?.(m); return; }   // this game has no such seat, or no game is chosen yet
+      if (m.t === 'home') { stopped = true; ws.close(); location.assign(keepDevice('/')); return; } // the game was reset: choose 2 or 4 players again
       if (m.t === 'kicked') { stopped = true; ws.close(); api.onKicked?.(); return; }      // the admin removed us
       if (m.t === 'denied') { stopped = true; ws.close(); api.onDenied?.(); return; }      // admin console: wrong key
       if (m.t !== 'state') { api.onMsg?.(m); return; }

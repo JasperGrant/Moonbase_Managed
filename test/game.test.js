@@ -101,6 +101,7 @@ const kit = (g, ...tools) => { at(g, PLACES.locker); for (const t of [...g.belt]
 // ---------- power: battery, blackout, radio, generator ----------
 {
   const hub = new Hub(new Game(rng));
+  hub.choosePlayers(4); // a 4-player game, so the Astronaut and Mission Ops seats can be taken
   const g = hub.game;
   const seat = role => { const c = { got: [], send(d) { this.got.push(d); } }; hub.add(c); hub.message(c, JSON.stringify({ t: 'hello', role })); return c; };
   const astro = seat('astronaut'), ops = seat('ops');

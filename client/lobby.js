@@ -1,10 +1,12 @@
 // The lobby: four role scenes side by side. A scene is grey while its seat is open and comes to
 // life, in colour, with its own motion and sound, when someone takes the seat. Everyone presses
 // Ready, and the server starts the mission once all four roles are held and ready.
-// Used by the landing page (nobody seated yet) and by every seat page while the game is in the lobby.
+// Used by the landing page (the seat picker, once 2 or 4 players is chosen) and by every seat page
+// while the game is in the lobby. A 2-player game shows two panels: the Astronaut, and the Mission
+// Operator, who is drawn in the Mission Ops panel and holds every Earth-side screen (the 'all' seat).
 //
 //   const lobby = createLobby(el, { mine: 'tech', onReady: on => ..., onPick: role => ... });
-//   lobby.update({ crew, ready, countdown, phase });
+//   lobby.update({ crew, ready, countdown, phase, players });
 //
 // The art is client/lobby/<role>.svg, 900 x 1800. Drop in a finished painting with the same name
 // and framing and nothing else changes; the motion overlays below are drawn on top of it.
@@ -18,6 +20,8 @@ const INFO = {
   sci: { name: 'Scientist', line: 'The gauges. Knows what is wrong', url: '/sci' },
   tech: { name: 'Technician', line: 'The radar and the rover. Knows where', url: '/tech' },
 };
+// In a 2-player game the Mission Ops panel stands for the one person on Earth.
+const OPERATOR = { name: 'Mission Operator', line: 'Radio, gauges, wiring, radar and rover' };
 const ARC = { x: 355, y: 1096 }; // where the welding torch touches VIPER, in the art's coordinates
 
 // ---------- motion overlays, one per scene, in the art's 900 x 1800 coordinates ----------
@@ -118,6 +122,11 @@ export function createLobby(root, opts = {}) {
     if (soundOn) amb.start(); else amb.stop();
   });
 
+  // ---------- which panels this game has ----------
+  let players = opts.players || null;
+  const roles = () => players === 2 ? ['astronaut', 'ops'] : ORDER;
+  const info = r => players === 2 && r === 'ops' ? OPERATOR : INFO[r];
+
   // ---------- pointing and clicking ----------
   let st = { crew: [], ready: [], countdown: null, phase: 'lobby' };
   for (const r of ORDER) {
@@ -126,7 +135,7 @@ export function createLobby(root, opts = {}) {
     p.addEventListener('pointerleave', () => amb.setFocus(null));
     p.addEventListener('focus', () => amb.setFocus(r));
     p.addEventListener('blur', () => amb.setFocus(null));
-    const pick = () => { if (opts.onPick && !held(r)) opts.onPick(r); };
+    const pick = () => { if (opts.onPick && !held(r) && roles().includes(r)) opts.onPick(r, players); };
     p.addEventListener('click', e => {
       if (e.target.closest('[data-ready]')) { opts.onReady?.(!isReady(r)); return; }
       if (e.target.closest('button, a, input, label')) return;
@@ -176,16 +185,24 @@ export function createLobby(root, opts = {}) {
   raf = requestAnimationFrame(frame);
 
   // ---------- drawing the state ----------
-  let wasHeld = null, lastCount = null, actKey = {};
+  let wasHeld = null, lastCount = null, actKey = {}, extraNote = '';
   function update(s) {
     st = { crew: s.crew || [], ready: s.ready || [], countdown: s.countdown ?? null, phase: s.phase || 'lobby' };
-    const locked = st.phase !== 'lobby';
-    const nowHeld = ORDER.filter(held);
+    if (s.players !== undefined) players = s.players;
+    const locked = st.phase !== 'lobby', shown = roles();
+    const nowHeld = shown.filter(held);
+    root.classList.toggle('two', players === 2);
     root.classList.toggle('locked', locked);
     root.classList.toggle('pickable', !!opts.onPick);
 
     for (const r of ORDER) {
       const p = panel(r), h = held(r), rd = h && isReady(r);
+      p.hidden = !shown.includes(r);
+      if (p.dataset.name !== info(r).name) {
+        p.dataset.name = info(r).name;
+        p.setAttribute('aria-label', info(r).name);
+        p.querySelector('.lb-top').innerHTML = `<h2>${info(r).name}</h2><p>${info(r).line}</p>`;
+      }
       p.classList.toggle('open', !h);
       p.classList.toggle('lit', h);
       p.classList.toggle('ready', rd);
@@ -215,16 +232,15 @@ export function createLobby(root, opts = {}) {
     }
 
     // The status bar: who is missing, how many are ready.
-    const missing = ORDER.filter(r => !held(r)).map(r => INFO[r].name);
-    const ready = ORDER.filter(r => held(r) && isReady(r)).length;
+    const missing = shown.filter(r => !held(r)).map(r => info(r).name);
+    const ready = shown.filter(r => held(r) && isReady(r)).length, all = shown.length;
     let text;
     if (locked) text = st.phase === 'run' ? 'Mission in progress. An open seat can still be taken to rejoin.' : 'Mission over. Mission Ops can fly again.';
-    else if (n != null) text = `All four GO. Launching in ${n}...`;
-    else if (missing.length) text = `Waiting for ${list(missing)}. ${ready} of 4 ready.`;
-    else text = `Crew complete. ${ready} of 4 ready.${ready < 4 ? ' Everyone presses Ready.' : ''}`;
+    else if (n != null) text = `All ${all === 2 ? 'both' : 'four'} GO. Launching in ${n}...`;
+    else if (missing.length) text = `Waiting for ${list(missing)}. ${ready} of ${all} ready.`;
+    else text = `Crew complete. ${ready} of ${all} ready.${ready < all ? ' Everyone presses Ready.' : ''}`;
     $('.lb-status').textContent = text;
-    const twoPlayer = opts.onPick && ['ops', 'sci', 'tech'].every(r => !held(r));
-    $('.lb-links').innerHTML = twoPlayer ? '<a href="/control">2-player mode: one person takes Mission Ops, Scientist and Technician</a>' : '';
+    $('.lb-links').textContent = [players ? `${players}-player game` : '', extraNote].filter(Boolean).join(' · ');
   }
 
   function show(on) {
@@ -233,7 +249,9 @@ export function createLobby(root, opts = {}) {
   }
 
   update(st);
-  return { update, show, ambience: amb, destroy() { cancelAnimationFrame(raf); amb.stop(); } };
+  // A line for the status bar from the page (the landing page: "someone just started a 4-player game").
+  function note(text) { if (text !== extraNote) { extraNote = text; update({ ...st, players }); } }
+  return { update, show, note, ambience: amb, destroy() { cancelAnimationFrame(raf); amb.stop(); } };
 }
 
 function list(names) { return names.length < 2 ? names.join('') : names.slice(0, -1).join(', ') + ' and ' + names.at(-1); }

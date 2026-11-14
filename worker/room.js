@@ -10,9 +10,14 @@ export class GameRoom {
     this.timer = null;
   }
 
-  fetch(request) {
+  async fetch(request) {
     if (request.headers.get('Upgrade')?.toLowerCase() !== 'websocket') {
-      if (new URL(request.url).pathname === '/seats') return Response.json(this.hub.seats(), { headers: { 'Cache-Control': 'no-store' } });
+      const path = new URL(request.url).pathname;
+      if (path === '/players' && request.method === 'POST') {
+        const body = await request.json().catch(() => ({}));
+        return Response.json(this.hub.choosePlayers(body?.players), { headers: { 'Cache-Control': 'no-store' } });
+      }
+      if (path === '/seats') return Response.json(this.hub.seats(), { headers: { 'Cache-Control': 'no-store' } });
       return new Response('Expected a WebSocket', { status: 426 });
     }
     const pair = new WebSocketPair();

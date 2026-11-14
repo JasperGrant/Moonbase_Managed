@@ -41,7 +41,9 @@ export const CFG = {
 
   // The lobby: every role is picked and ready, then a short countdown starts the mission.
   // requireFullCrew: false lets one developer ready up alone (or run the server with SOLO=1).
-  lobby: { requireFullCrew: true, countdownSeconds: 3 },
+  // emptyModeSeconds: a 2- or 4-player game nobody has sat down in for this long is forgotten, so the
+  // next visitor to the landing page can choose again.
+  lobby: { requireFullCrew: true, countdownSeconds: 3, emptyModeSeconds: 60 },
   // Power outage inside the habitat: the roof lights die, the room is dark for darkMs, then the red
   // backup lights ramp up over rampMs. Once fixed, the roof lights re-strike one row every restrikeMs.
   power: { darkMs: 1500, rampMs: 400, restrikeMs: 120 },
@@ -50,6 +52,10 @@ export const CFG = {
 // The four roles that must be filled before a mission starts. "all" (2-player mode) covers the last three.
 export const CREW = ['astronaut', 'ops', 'sci', 'tech'];
 export const covers = (held, role) => held === role || (held === 'all' && role !== 'astronaut');
+// How many play, chosen once per game on the landing page, and the seats each game has.
+// 2 players: the Astronaut and one Mission Operator, who has every Earth-side screen (the 'all' seat).
+// 4 players: one person per role. Nobody can take a seat the game does not have.
+export const PLAYERS = { 2: ['astronaut', 'all'], 4: ['astronaut', 'ops', 'sci', 'tech'] };
 
 // The tool belt. Welder + brush + patch kit fill it exactly, so the tire or the
 // generator always means leaving something behind.
