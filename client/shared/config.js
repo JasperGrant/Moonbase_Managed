@@ -31,7 +31,7 @@ export const CFG = {
   roverSpeed: 2.7,            // m/s, about 6 mph (crewed lunar terrain vehicle class)
   bounds: 22,                 // metres from the habitat that players and rover may go
   habRadius: 2.9,
-  spawn: { x: -2.2, z: 7.0 }, // facing the tool locker
+  spawn: { x: -3.6, z: 7.0 }, // facing the tool locker
 
   // Free play: after the scripted opening, random faults and showers.
   freeFaultEvery: [25, 35],   // seconds between random faults
@@ -77,7 +77,7 @@ export const CRACK_POINTS = 6;
 // stands on its local +z side.
 const CRACK_ANGLES = [45, 135, 195, 255, 285, 345]; // degrees round the dome, between the ribs
 export const PLACES = {
-  locker: { x: -2.2, z: 4.6, ry: 0 },
+  locker: { x: -3.6, z: 4.6, ry: 0 },
   board:  { x: 4.2, z: 3.4, ry: 0 },
   panels: [{ x: 9, z: 8 }, { x: 9, z: 11 }, { x: 9, z: 14 }],
   canopy: { x0: -1.5, x1: 1.5, z0: 2.6, z1: 5.8 },

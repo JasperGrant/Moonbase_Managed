@@ -100,6 +100,7 @@ function render() {
   $('score').textContent = s.score;
   const bar = $('o2bar');
   bar.style.width = dark ? '0%' : `${Math.min(100, ((s.oxygen ?? CFG.o2Start) / (s.o2Max ?? CFG.o2Start)) * 100)}%`;
+  bar.style.visibility = dark ? 'hidden' : '';
   bar.className = s.oxygen < 25 ? 'low' : '';
   $('crew').innerHTML = ['astronaut', 'ops', 'tech', 'sci'].map(r =>
     `<i class="${s.crew.includes(r) || (r !== 'astronaut' && s.crew.includes('all')) ? 'on' : ''}">${ROLES[r]}</i>`).join('');
@@ -182,8 +183,8 @@ function dial(g, x, y, r, value, max, name, { redBelow = 0, redAbove = Infinity,
   g.strokeStyle = bad ? C.red : C.green; g.lineWidth = 5; g.lineCap = 'round';
   g.beginPath(); g.moveTo(x, y); g.lineTo(x + Math.cos(a) * r * 0.92, y + Math.sin(a) * r * 0.92); g.stroke();
   g.fillStyle = C.ink; g.beginPath(); g.arc(x, y, 7, 0, 7); g.fill();
-  label(g, name, x, y + 26, 16, C.dim);
-  label(g, `${Math.round(value)}${unit}`, x, y - r * 0.42, 24, bad ? C.red : C.ink);
+  label(g, `${Math.round(value)}${unit}`, x, y + 32, 30, bad ? C.red : C.ink);
+  label(g, name, x, y + 62, 16, C.dim);
 }
 
 // ---------- Mission Ops: the belt and the locker ----------
@@ -294,16 +295,16 @@ function drawPower(s) {
   label(g, `${Math.round(p.battery)}%`, bx + bw / 2, by + bh / 2, 46, p.battery > 55 && !low ? '#05130a' : C.ink);
   label(g, 'BATTERY', bx + bw / 2, by + bh + 22, 16);
   // Where the power is lost: coming in from the sun, or going out through the board.
-  dial(g, W * 0.27, 320, 105, p.solar, 100, 'SOLAR IN', { redBelow: 60, unit: '%' });
-  dial(g, W * 0.73, 320, 105, p.board, 100, 'BOARD OUT', { redBelow: 60, unit: '%' });
-  g.strokeStyle = C.line; g.lineWidth = 3; g.beginPath(); g.moveTo(W * 0.27 + 120, 300); g.lineTo(W * 0.73 - 120, 300); g.stroke();
-  g.fillStyle = C.line; g.beginPath(); g.moveTo(W * 0.73 - 120, 290); g.lineTo(W * 0.73 - 104, 300); g.lineTo(W * 0.73 - 120, 310); g.fill();
+  dial(g, W * 0.27, 296, 100, p.solar, 100, 'SOLAR IN', { redBelow: 60, unit: '%' });
+  dial(g, W * 0.73, 296, 100, p.board, 100, 'BOARD OUT', { redBelow: 60, unit: '%' });
+  g.strokeStyle = C.line; g.lineWidth = 3; g.beginPath(); g.moveTo(W * 0.27 + 112, 250); g.lineTo(W * 0.73 - 122, 250); g.stroke();
+  g.fillStyle = C.line; g.beginPath(); g.moveTo(W * 0.73 - 122, 240); g.lineTo(W * 0.73 - 108, 250); g.lineTo(W * 0.73 - 122, 260); g.fill();
   // The wiring diagram: each loose cable and the socket it belongs in.
   if (s.wiring) {
-    g.strokeStyle = C.line; g.lineWidth = 2; g.strokeRect(20, 380, W - 40, H - 400);
-    const n = s.wiring.length, row = (H - 420) / Math.max(1, n);
+    g.strokeStyle = C.line; g.lineWidth = 2; g.strokeRect(20, 392, W - 40, H - 408);
+    const n = s.wiring.length, row = (H - 424) / Math.max(1, n);
     s.wiring.forEach((w, i) => {
-      const y = 392 + row * i + row / 2, col = CABLE[w.color];
+      const y = 400 + row * i + row / 2, col = CABLE[w.color];
       g.fillStyle = col; g.fillRect(70, y - 13, 60, 26); g.fillRect(130, y - 7, 16, 14);    // the plug
       g.strokeStyle = col; g.lineWidth = 6; g.beginPath(); g.moveTo(152, y); g.lineTo(W - 190, y); g.stroke();
       g.fillStyle = col; g.beginPath(); g.moveTo(W - 190, y - 12); g.lineTo(W - 166, y); g.lineTo(W - 190, y + 12); g.fill();

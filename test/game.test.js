@@ -273,6 +273,16 @@ const kit = (g, ...tools) => { at(g, PLACES.locker); for (const t of [...g.belt]
   console.log(`idle crew, demo mission: lost after ${Math.round(g.elapsed)} s, blackouts ${g.result.blackouts}, meteor hits ${g.result.hits}`);
 }
 
+// ---------- hiding is not a plan: take cover but fix nothing, and the leaks finish you ----------
+{
+  const g = new Game(rng);
+  g.start();
+  at(g, { x: 0, z: 4 }); // under the canopy for the whole shift
+  run(g, CFG.roundSeconds + 5);
+  assert.equal(g.result.won, false, 'an unrepaired hull breach must not be survivable');
+  assert.equal(g.result.hits, 0);
+}
+
 // ---------- free play keeps throwing things, never two of a kind ----------
 {
   const g = new Game(rng);

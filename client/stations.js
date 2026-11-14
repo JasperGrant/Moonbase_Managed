@@ -14,7 +14,9 @@ const GRAB = 0.24;          // metres: how close a hand must be to grab somethin
 const BELT_R = 0.3;         // metres from the body to a belt slot
 const BELT_SLOT = { gen: -1.3, brush: -0.65, patch: 0, welder: 0.65, tire: 1.3 }; // radians round the waist, left to right
 const BELT_SCALE = { brush: 0.8, patch: 1, welder: 0.8, tire: 0.36, gen: 0.42 };
-const RACK_TURN = { tire: Math.PI / 2 }; // the tire hangs flat against the back of the rack
+// How each tool hangs on the rack, so you see its side and not its end: [x, y] rotation in radians.
+const RACK_TURN = { brush: [Math.PI / 2, 0], welder: [0, Math.PI / 2], tire: [0, Math.PI / 2] };
+const RACK_SCALE = { brush: 1.3, patch: 1.3, welder: 1.3 };
 const WELD_DWELL = 0.4;     // seconds the tip must stay on one point of the crack
 const WELD_RANGE = 0.12;
 
@@ -98,11 +100,12 @@ export function buildFixtures(THREE, world, { rig, camera, send, sfx = () => {} 
       () => { if (st.locker.includes(id)) take(id); else pullCord(); });
     // And an outline in its place on the rack while it is on the belt: point at it to put the tool back.
     const slot = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(w, h, d)), ghostEdge);
-    slot.position.copy(F.lockerSlots[id]); slot.position.z += z;
-    slot.rotation.y = RACK_TURN[id] || 0;
+    slot.position.copy(F.lockerSlots[id]);
+    slot.geometry.translate(0, 0, z); // the box is centred on the tool, not on its grip
+    slot.rotation.set(...(RACK_TURN[id] || [0, 0]), 0); slot.scale.setScalar(RACK_SCALE[id] || 1);
     F.locker.add(slot);
-    const back = add(F.locker, new THREE.BoxGeometry(w, h, d), ghost, slot.position.x, slot.position.y, slot.position.z);
-    back.rotation.y = slot.rotation.y;
+    const back = add(F.locker, new THREE.BoxGeometry(w, h, d).translate(0, 0, z), ghost, slot.position.x, slot.position.y, slot.position.z);
+    back.rotation.copy(slot.rotation); back.scale.copy(slot.scale);
     target(back, () => st.belt.includes(id), () => stow(id));
     g.userData.slot = slot;
   }
@@ -264,7 +267,7 @@ export function buildFixtures(THREE, world, { rig, camera, send, sfx = () => {} 
         if (!g.visible) { if (g.parent) g.parent.remove(g); continue; }
         const parent = onRack ? F.locker : hand >= 0 ? hands[hand].obj : beltGroup;
         if (g.parent !== parent) parent.add(g);
-        if (onRack) { g.position.copy(F.lockerSlots[id]); g.rotation.set(0, RACK_TURN[id] || 0, 0); g.scale.setScalar(1); }
+        if (onRack) { g.position.copy(F.lockerSlots[id]); g.rotation.set(...(RACK_TURN[id] || [0, 0]), 0); g.scale.setScalar(RACK_SCALE[id] || 1); }
         else if (hand >= 0) { g.position.set(0, 0, 0); g.rotation.set(0, 0, 0); g.scale.setScalar(id === 'tire' ? 0.8 : 1); }
         else {
           const t = BELT_SLOT[id];

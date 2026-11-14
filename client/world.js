@@ -551,9 +551,9 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
   // ---------- tool locker: an open rack beside the airlock. The tools themselves are added by stations.js ----------
   const locker = fixture(PLACES.locker);
   const lockerSlots = {
-    brush:  new THREE.Vector3(-0.55, 1.5, 0.14),
-    patch:  new THREE.Vector3(0, 1.5, 0.14),
-    welder: new THREE.Vector3(0.55, 1.5, 0.14),
+    brush:  new THREE.Vector3(-0.55, 1.36, 0.14),
+    patch:  new THREE.Vector3(0, 1.52, 0.2),
+    welder: new THREE.Vector3(0.45, 1.56, 0.14),
     tire:   new THREE.Vector3(-0.45, 0.62, 0.2),
     gen:    new THREE.Vector3(0.48, 0.76, 0.22),
   };
@@ -788,8 +788,8 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
         if (m.burst.visible) {
           const v = (u - 0.55) / 0.45;
           m.burst.position.set(tx, ty, tz);
-          m.burst.scale.setScalar((close ? 0.6 : 2) + v * (close ? 3 : 9));
-          m.burst.material.opacity = (1 - v) * 0.55;
+          m.burst.scale.setScalar((close ? 0.4 : 2) + v * (close ? 1.6 : 9));
+          m.burst.material.opacity = (1 - v) * 0.7;
         }
       });
     },

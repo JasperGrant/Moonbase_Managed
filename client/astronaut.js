@@ -57,12 +57,12 @@ addEventListener('resize', () => {
 
 // ---------- heads-up display (a strip locked to the bottom of your view) ----------
 const hudCanvas = document.createElement('canvas');
-hudCanvas.width = 1024; hudCanvas.height = 160;
+hudCanvas.width = 1024; hudCanvas.height = 224;
 const hud = hudCanvas.getContext('2d');
 const hudTex = new THREE.CanvasTexture(hudCanvas);
 hudTex.colorSpace = THREE.SRGBColorSpace;
-const hudMesh = new THREE.Mesh(new THREE.PlaneGeometry(1.15, 0.18), new THREE.MeshBasicMaterial({ map: hudTex, transparent: true, depthTest: false, toneMapped: false }));
-hudMesh.position.set(0, -0.4, -1.3);
+const hudMesh = new THREE.Mesh(new THREE.PlaneGeometry(1.3, 0.284), new THREE.MeshBasicMaterial({ map: hudTex, transparent: true, depthTest: false, toneMapped: false }));
+hudMesh.position.set(0, -0.42, -1.3);
 hudMesh.renderOrder = 10;
 camera.add(hudMesh);
 let hudKey = '';
@@ -76,8 +76,7 @@ function drawHud(now) {
   else if (s.phase === 'lobby') line = (iAmReady() ? 'You are GO. ' : (mode !== 'vr' ? 'Click' : usingHands() ? 'Point and pinch' : 'Point and pull the RIGHT TRIGGER') + ' on the READY board when you are set. ')
     + 'Radio check: ' + (mode !== 'vr' ? 'hold T' : usingHands() ? 'left hand to helmet' : 'hold LEFT TRIGGER') + ' and say hello.';
   else if (s.phase === 'results') line = (s.result.won ? 'MISSION COMPLETE' : 'MISSION FAILED') + `   Score ${s.score}.   ${s.result.reason}`;
-  else if (!line && now - runStart < 12) line = mode !== 'vr' ? 'T talk.  Click to take a tool or use it.  C crouch.  F patch suit.  G generator.'
-    : usingHands() ? 'Left hand to helmet = talk.  Pinch to grab.  Pinch the ground = teleport.' : 'LEFT TRIGGER talk.  GRIP to grab tools off the rack and your belt.';
+  else if (!line && now - runStart < 12) line = mode !== 'vr' ? 'T talk. Click to grab or use.' : usingHands() ? 'Pinch to grab. Hand to helmet to talk.' : 'GRIP to grab. LEFT TRIGGER to talk.';
   const dark = run && !s.powered;
   const radioTxt = dark ? 'NO SIGNAL' : talking ? 'TX' : rx ? 'RX' : '';
   const belt = run ? s.belt : [];
@@ -106,7 +105,7 @@ function drawHud(now) {
   }
   if (run) {
     // The belt: one box per weight unit, and what is hanging on it.
-    const used = beltWeight(belt), x0 = 20, y0 = 78, u = 56;
+    const used = beltWeight(belt), x0 = 20, y0 = 84, u = 116;
     for (let i = 0; i < CFG.beltCapacity; i++) {
       hud.strokeStyle = refused ? '#ff5c5c' : '#7d909c'; hud.lineWidth = 3; hud.strokeRect(x0 + i * (u + 6), y0, u, u);
       if (i < used) { hud.fillStyle = refused ? 'rgba(255,92,92,0.35)' : 'rgba(88,224,138,0.22)'; hud.fillRect(x0 + i * (u + 6) + 3, y0 + 3, u - 6, u - 6); }
@@ -119,10 +118,10 @@ function drawHud(now) {
     }
   }
   hud.fillStyle = '#ffe9a8'; hud.textAlign = 'center';
-  let size = 30; hud.font = `bold ${size}px monospace`;
-  const room = run ? W - 300 : W - 30, mid = run ? 280 + (W - 280) / 2 : W / 2;
-  while (hud.measureText(line).width > room && size > 14) hud.font = `bold ${--size}px monospace`;
-  hud.fillText(line, mid, 108);
+  let size = 34; hud.font = `bold ${size}px monospace`;
+  const room = run ? W - 540 : W - 30, mid = run ? 520 + (W - 520) / 2 : W / 2;
+  while (hud.measureText(line).width > room && size > 18) hud.font = `bold ${--size}px monospace`;
+  hud.fillText(line, mid, 150);
   hudTex.needsUpdate = true;
 }
 function say(text, seconds = 6) { prompt = text; promptUntil = performance.now() / 1000 + seconds; }
@@ -463,7 +462,7 @@ renderer.setAnimationLoop(() => {
   camera.getWorldPosition(headPos); camera.getWorldDirection(fwd);
   radio.listen(headPos, fwd);
   shake *= 0.86;
-  hudMesh.position.x = (Math.random() - 0.5) * shake; hudMesh.position.y = -0.4 + (Math.random() - 0.5) * shake;
+  hudMesh.position.x = (Math.random() - 0.5) * shake; hudMesh.position.y = -0.42 + (Math.random() - 0.5) * shake;
   if (mode === 'desk') camera.rotation.z = (Math.random() - 0.5) * shake * 0.6;
   drawBoard();
   drawHud(now);
