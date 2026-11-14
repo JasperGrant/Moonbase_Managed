@@ -71,9 +71,11 @@ function drawHud(now) {
   else if (s.phase === 'results') line = (s.result.won ? 'MISSION COMPLETE' : 'MISSION FAILED') + `   Score ${s.score}.   ${s.result.reason}`;
   else if (!line && now - runStart < 14) line = mode !== 'vr' ? 'Hold T to talk to Mission Ops.  Click to use a panel.  WASD to walk.'
     : usingHands() ? 'Left hand to helmet = talk.  Point + pinch = use a panel.  Pinch the ground = teleport.' : 'Hold LEFT TRIGGER to talk to Mission Ops.  Point + RIGHT TRIGGER to use a panel.';
+  else if (!line && mode === 'vr' && usingHands() && now - runStart < 26) line = 'Pinch both hands and pull them apart to zoom your visor.  Push them together to zoom out.';
   else if (!line && s.issues.length) line = `${s.issues.length} alarm${s.issues.length > 1 ? 's' : ''} active. Ask Mission Ops where to go.`;
   const radioTxt = talking ? 'TX' : rx ? 'RX' : '';
-  const key = [line, radioTxt, s && Math.ceil(s.timeLeft), s && Math.round(s.oxygen)].join('|');
+  const zoomTxt = scopeOn() ? `ZOOM ${zoom.toFixed(1)}x` : '';
+  const key = [line, radioTxt, zoomTxt, s && Math.ceil(s.timeLeft), s && Math.round(s.oxygen)].join('|');
   if (key === hudKey) return;
   hudKey = key;
   const W = hudCanvas.width, H = hudCanvas.height;
@@ -94,6 +96,10 @@ function drawHud(now) {
     hud.fillStyle = talking ? '#ff5c5c' : '#6fb6ff';
     hud.textAlign = 'center'; hud.font = 'bold 30px monospace';
     hud.fillText(talking ? 'TRANSMITTING' : 'MISSION OPS ON RADIO', W / 2 + 60, 40);
+  }
+  if (zoomTxt) {
+    hud.fillStyle = '#58e08a'; hud.textAlign = 'right'; hud.font = 'bold 26px monospace';
+    hud.fillText(zoomTxt, W - 108, 40);
   }
   hud.fillStyle = '#ffe9a8'; hud.textAlign = 'center';
   let size = 34; hud.font = `bold ${size}px monospace`;
@@ -163,12 +169,17 @@ function use(controller) {
 // Controllers: right trigger uses, left trigger talks, sticks walk and turn, A hops.
 // Hand tracking (put the controllers down): point the right hand and pinch to use a panel,
 // pinch at the ground to teleport there, pinch the left hand and drag it sideways to turn,
-// and hold the left hand up to your helmet to talk.
+// hold the left hand up to your helmet to talk, and pinch both hands and pull them apart to
+// zoom the visor (push them together to zoom back out).
 const TELEPORT_MAX = 8;   // metres per hop
 const TURN_STEP = 0.1;    // metres of left-hand drag per 30-degree snap turn
 const HELMET = 0.22;      // metres from the head that counts as "hand on helmet"
+const ZOOM_MAX = 6;       // visor magnification with the hands pulled wide apart
+const ZOOM_OFF = 1.15;    // let go below this and the visor scope closes
+const GAP_MIN = 0.1;      // metres: hands closer than this count as this far apart, so a pinch
+                          // that starts with the fingers touching does not jump to full zoom
 const ground = new THREE.Plane(UP, 0);
-const hitPoint = new THREE.Vector3(), tmpV = new THREE.Vector3();
+const hitPoint = new THREE.Vector3(), tmpV = new THREE.Vector3(), gapA = new THREE.Vector3(), gapB = new THREE.Vector3();
 const marker = new THREE.Mesh(new THREE.RingGeometry(0.22, 0.3, 32), new THREE.MeshBasicMaterial({ color: 0x58e08a, transparent: true, opacity: 0.8, side: THREE.DoubleSide, depthWrite: false, toneMapped: false }));
 marker.rotation.x = -Math.PI / 2; marker.visible = false;
 scene.add(marker);
@@ -196,7 +207,21 @@ const controllers = [], hands = [];
 const jointGeo = new THREE.SphereGeometry(0.009, 8, 6);
 const jointMat = new THREE.MeshStandardMaterial({ color: 0xe9e7e1, roughness: 0.6 });
 let leftDrag = null, helmetTalk = false; // leftDrag = { x } while the left hand is pinched
+let zoomGrab = null;                     // { gap, zoom } at the moment both hands pinched
 const usingHands = () => controllers.some(c => c.userData.isHand);
+
+// Where a hand is pinching: between thumb tip and index tip, or the hand itself if the joints are not tracked.
+function pinchPoint(i, out) {
+  const j = hands[i].joints, a = j?.['thumb-tip'], b = j?.['index-finger-tip'];
+  if (a && b && a.visible && b.visible) return out.addVectors(a.getWorldPosition(out), b.getWorldPosition(tmpV)).multiplyScalar(0.5);
+  return controllers[i].getWorldPosition(out);
+}
+const handGap = () => Math.max(GAP_MIN, pinchPoint(0, gapA).distanceTo(pinchPoint(1, gapB)));
+function endZoomGrab() {
+  if (!zoomGrab) return;
+  zoomGrab = null;
+  if (zoom < ZOOM_OFF) zoom = 1;
+}
 
 for (const i of [0, 1]) {
   const c = renderer.xr.getController(i);
@@ -209,14 +234,33 @@ for (const i of [0, 1]) {
       c.add(c.userData.ray);
     }
   });
-  c.addEventListener('disconnected', () => { c.userData.isHand = false; marker.visible = false; leftDrag = null; });
+  c.addEventListener('disconnected', () => {
+    c.userData.isHand = c.userData.pinched = c.userData.zoomed = false;
+    marker.visible = false; leftDrag = null; endZoomGrab();
+  });
   // Trigger on a controller, pinch on a bare hand: both arrive as "select".
   c.addEventListener('selectstart', () => {
+    const other = controllers[1 - i];
+    c.userData.pinched = true;
+    // Both bare hands pinched: this is a zoom, not a turn, a teleport or a panel press.
+    if (c.userData.isHand && other.userData.isHand && other.userData.pinched) {
+      c.userData.zoomed = other.userData.zoomed = true;
+      leftDrag = null;
+      zoomGrab = { gap: handGap(), zoom };
+      return;
+    }
     if (c.userData.hand === 'left') { if (c.userData.isHand) leftDrag = { x: lateral(c) }; return; }
-    if (use(c)) return;
-    if (c.userData.isHand && groundTarget(c, hitPoint)) teleport(hitPoint);
+    if (!c.userData.isHand) use(c); // a bare hand acts when the pinch lets go, see below
   });
-  c.addEventListener('selectend', () => { if (c.userData.hand === 'left') leftDrag = null; });
+  c.addEventListener('selectend', () => {
+    const wasZoom = c.userData.zoomed, act = c.userData.pinched && !wasZoom;
+    c.userData.pinched = c.userData.zoomed = false;
+    endZoomGrab();
+    if (c.userData.hand === 'left') { leftDrag = null; return; }
+    // A bare right hand uses the panel or teleports on release, not on pinch, so that the first
+    // hand of a two-handed zoom does not fire on its way in. The ring shows where you will land.
+    if (c.userData.isHand && act && !use(c) && groundTarget(c, hitPoint)) teleport(hitPoint);
+  });
   rig.add(c);
   controllers.push(c);
 
@@ -236,6 +280,7 @@ function drawHand(h) {
 
 // Everything hand tracking adds per frame. Sets ptt and the teleport marker.
 function handControls(ptt) {
+  if (zoomGrab) zoom = Math.max(1, Math.min(ZOOM_MAX, zoomGrab.zoom * handGap() / zoomGrab.gap));
   for (let i = 0; i < 2; i++) {
     const c = controllers[i];
     if (!c.userData.isHand) continue;
@@ -250,7 +295,7 @@ function handControls(ptt) {
         if (Math.abs(dx) > TURN_STEP) { turnRig(-Math.sign(dx) * Math.PI / 6); leftDrag.x = x; }
       }
     } else {
-      const p = !panelInReach(c) && groundTarget(c, hitPoint);
+      const p = !zoomGrab && !panelInReach(c) && groundTarget(c, hitPoint);
       marker.visible = !!p;
       if (p) marker.position.set(p.x, 0.02, p.z);
     }
@@ -263,6 +308,66 @@ function turnRig(angle) { // turn on the spot, around where the head is
   rig.position.sub(headPos).applyAxisAngle(UP, angle).add(headPos);
   rig.rotation.y += angle;
 }
+
+// ---------- visor zoom ----------
+// A round scope in the middle of the view showing the scene through a narrow lens. A headset
+// will not let a page change the field of view of the eyes themselves, so the magnified picture
+// is drawn into a texture from the head's position and shown on a disc fixed to the visor.
+// The disc's lens is sized so that things in it look exactly `zoom` times bigger.
+const SCOPE_R = 0.3, SCOPE_D = 1.3; // disc radius and distance from the eyes, metres
+let zoom = 1;
+const scopeOn = () => zoom > 1.01 || !!zoomGrab;
+const scopeRT = new THREE.WebGLRenderTarget(1024, 1024);
+// Marking the target as a display target makes three.js draw into it exactly as it draws to the
+// screen or headset (tone mapped, sRGB), so the disc below can copy its pixels through unchanged
+// and panel screens look the same in the scope as outside it. No multisampling: with this mark
+// three.js gives the multisample buffer a different format from the texture and the copy between
+// them fails, leaving the scope black. 1024 pixels across a 26-degree disc is already finer than
+// the headset's own pixels, which does the smoothing instead.
+scopeRT.isXRRenderTarget = true;
+scopeRT.texture.colorSpace = THREE.SRGBColorSpace;
+const scopeCam = new THREE.PerspectiveCamera(20, 1, 0.1, 2000);
+const scopeMesh = new THREE.Mesh(new THREE.PlaneGeometry(SCOPE_R * 2, SCOPE_R * 2), new THREE.ShaderMaterial({
+  uniforms: { map: { value: scopeRT.texture } },
+  vertexShader: 'varying vec2 vUv; void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+  fragmentShader: `uniform sampler2D map; varying vec2 vUv;
+    void main() {
+      float r = length(vUv - 0.5) * 2.0;
+      if (r > 1.0) discard;
+      vec3 c = texture2D(map, vUv).rgb;
+      c = mix(c, vec3(0.345, 0.878, 0.541), smoothstep(0.95, 0.96, r)); // green rim
+      gl_FragColor = vec4(c, 1.0);
+    }`,
+  transparent: true, depthTest: false, depthWrite: false,
+}));
+scopeMesh.position.set(0, 0.03, -SCOPE_D);
+scopeMesh.renderOrder = 9;
+scopeMesh.visible = false;
+camera.add(scopeMesh);
+
+function renderScope() {
+  scopeMesh.visible = scopeOn();
+  if (!scopeMesh.visible) return;
+  rig.updateMatrixWorld(true);                                    // wherever this frame's walking and turning left the rig
+  if (renderer.xr.isPresenting) renderer.xr.updateCamera(camera); // and this frame's head pose, not the last one's
+  camera.matrixWorld.decompose(scopeCam.position, scopeCam.quaternion, tmpV);
+  scopeCam.fov = THREE.MathUtils.radToDeg(2 * Math.atan(SCOPE_R / (SCOPE_D * zoom)));
+  scopeCam.updateProjectionMatrix();
+  // Draw the scene once more into the scope's texture. The headset path and the shadow pass are
+  // switched off for this one draw (the main draw redoes the shadows anyway) and put back after.
+  const target = renderer.getRenderTarget(), xr = renderer.xr.enabled, shadows = renderer.shadowMap.autoUpdate, hudWas = hudMesh.visible;
+  scopeMesh.visible = hudMesh.visible = false;
+  renderer.xr.enabled = false;
+  renderer.shadowMap.autoUpdate = false;
+  renderer.setRenderTarget(scopeRT);
+  renderer.clear();
+  renderer.render(scene, scopeCam);
+  renderer.setRenderTarget(target);
+  renderer.shadowMap.autoUpdate = shadows;
+  renderer.xr.enabled = xr;
+  scopeMesh.visible = true; hudMesh.visible = hudWas;
+}
+function setZoom(z) { zoom = Math.max(1, Math.min(ZOOM_MAX, +z || 1)); }
 
 let vy = 0, turnArmed = true, lastPose = 0;
 function control(dt, now) {
@@ -343,11 +448,12 @@ renderer.setAnimationLoop(() => {
   if (mode) control(dt, now);
   panels.update(dt);
   drawHud(now);
+  renderScope();
   renderer.render(scene, camera);
 });
 
 // For debugging from the browser console: moonbase.state(), moonbase.panels.targets() ...
-window.moonbase = { state: () => state, panels, world, radio, rig, camera, net, use: () => use(null), teleport, turnRig };
+window.moonbase = { state: () => state, panels, world, radio, rig, camera, net, use: () => use(null), teleport, turnRig, zoom: () => zoom, setZoom, controllers, handControls, renderer, scope: scopeMesh, scopeTarget: scopeRT };
 
 // ---------- start-up screen ----------
 const $ = id => document.getElementById(id);
@@ -360,4 +466,4 @@ $('radioBtn').onclick = async () => {
 $('vrSlot').appendChild(VRButton.createButton(renderer, { optionalFeatures: ['hand-tracking'] }));
 $('deskBtn').onclick = () => { mode = 'desk'; $('gate').hidden = true; $('cross').hidden = false; lockPointer(); };
 renderer.xr.addEventListener('sessionstart', () => { mode = 'vr'; $('gate').hidden = true; });
-renderer.xr.addEventListener('sessionend', () => { mode = null; $('gate').hidden = false; });
+renderer.xr.addEventListener('sessionend', () => { mode = null; zoom = 1; zoomGrab = null; $('gate').hidden = false; });
