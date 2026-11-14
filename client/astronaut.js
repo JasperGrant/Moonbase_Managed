@@ -5,8 +5,9 @@ import { connect } from '/net.js';
 import { Radio } from '/voice.js';
 import { buildWorld } from '/world.js';
 import { buildPanels } from '/stations.js';
-import { CFG } from '/shared/config.js';
+import { CFG, CREW, ROLES, covers } from '/shared/config.js';
 import { seatTaken } from '/seat.js';
+import { createLobby } from '/lobby.js';
 
 const REACH = 3.2;        // metres: how far away a panel can be used
 const WALK = 2.4;         // m/s
@@ -67,7 +68,8 @@ function drawHud(now) {
   const s = state;
   let line = now < promptUntil ? prompt : '';
   if (!s) line = 'Connecting to the base...';
-  else if (s.phase === 'lobby') line = 'Waiting for Mission Ops to start. Try the radio: ' + (mode !== 'vr' ? 'hold T' : usingHands() ? 'hold your left hand to your helmet' : 'hold LEFT TRIGGER') + ' and say hello.';
+  else if (s.phase === 'lobby') line = (iAmReady() ? 'You are GO. ' : (mode !== 'vr' ? 'Click' : usingHands() ? 'Point and pinch' : 'Point and pull the RIGHT TRIGGER') + ' on the READY board when you are set. ')
+    + 'Radio check: ' + (mode !== 'vr' ? 'hold T' : usingHands() ? 'left hand to helmet' : 'hold LEFT TRIGGER') + ' and say hello.';
   else if (s.phase === 'results') line = (s.result.won ? 'MISSION COMPLETE' : 'MISSION FAILED') + `   Score ${s.score}.   ${s.result.reason}`;
   else if (!line && now - runStart < 14) line = mode !== 'vr' ? 'Hold T to talk to Mission Ops.  Click to use a panel.  WASD to walk.'
     : usingHands() ? 'Left hand to helmet = talk.  Point + pinch = use a panel.  Pinch the ground = teleport.' : 'Hold LEFT TRIGGER to talk to Mission Ops.  Point + RIGHT TRIGGER to use a panel.';
@@ -103,8 +105,53 @@ function drawHud(now) {
 }
 function say(text, seconds = 6) { prompt = text; promptUntil = performance.now() / 1000 + seconds; }
 
+// ---------- the READY board: how the astronaut readies up, from inside the headset ----------
+// It stands just in front of the spawn point while the crew is in the lobby, so the mission can
+// never start while the headset is still in someone's hand.
+const boardCanvas = document.createElement('canvas');
+boardCanvas.width = 768; boardCanvas.height = 480;
+const board2d = boardCanvas.getContext('2d');
+const boardTex = new THREE.CanvasTexture(boardCanvas);
+boardTex.colorSpace = THREE.SRGBColorSpace;
+const board = new THREE.Mesh(new THREE.PlaneGeometry(1.0, 0.625), new THREE.MeshBasicMaterial({ map: boardTex, toneMapped: false }));
+board.position.set(CFG.spawn.x, 1.65, CFG.spawn.z - 1.7); // eye height, clear of the HUD strip
+scene.add(board);
+let boardKey = '';
+const iAmReady = () => !!state && (state.ready || []).includes('astronaut');
+function drawBoard() {
+  const s = state;
+  board.visible = !!s && s.phase === 'lobby';
+  if (!board.visible) return;
+  const missing = CREW.filter(r => !s.crew.some(h => covers(h, r)));
+  const waiting = CREW.filter(r => r !== 'astronaut' && !(s.ready || []).some(h => covers(h, r)));
+  const n = s.countdown == null ? null : Math.max(1, Math.ceil(s.countdown));
+  const key = [iAmReady(), missing, waiting, n].join('|');
+  if (key === boardKey) return;
+  boardKey = key;
+  const g = board2d, W = boardCanvas.width, H = boardCanvas.height, go = iAmReady();
+  g.fillStyle = '#05080a'; g.fillRect(0, 0, W, H);
+  g.strokeStyle = go ? '#58e08a' : '#ffb84a'; g.lineWidth = 14; g.strokeRect(7, 7, W - 14, H - 14);
+  g.textAlign = 'center'; g.textBaseline = 'middle';
+  g.fillStyle = go ? '#58e08a' : '#ffb84a';
+  g.font = 'bold 150px monospace'; g.fillText(n != null ? String(n) : go ? 'GO' : 'READY?', W / 2, 170);
+  g.fillStyle = '#d6e6e0'; g.font = 'bold 30px monospace';
+  g.fillText(n != null ? 'All four GO. Launching...' : go ? 'Trigger again to stand down' : 'Pull the trigger here when set', W / 2, 300);
+  g.fillStyle = '#7d909c'; g.font = '26px monospace';
+  const wait = missing.length ? 'Seats open: ' + missing.map(r => ROLES[r]).join(', ') : waiting.length ? 'Not ready yet: ' + waiting.map(r => ROLES[r]).join(', ') : 'Mission control is GO';
+  g.fillText(n != null ? '' : wait, W / 2, 380);
+  boardTex.needsUpdate = true;
+}
+function useBoard(controller) {
+  if (!board.visible) return false;
+  aim(controller);
+  if (!raycaster.intersectObject(board, false).length) return false;
+  net.send({ t: 'ready', on: !iAmReady() });
+  radio.sfx(iAmReady() ? 'mistake' : 'solve');
+  return true;
+}
+
 // ---------- network ----------
-net.onState = s => { state = s; };
+net.onState = s => { state = s; lobby.update(s); };
 net.onTaken = seatTaken;
 net.onBinary = buf => radio.receive(buf);
 net.onMsg = m => { if (m.t === 'ptt') { rx = m.on; radio.rxMarker(m.on); } };
@@ -128,7 +175,7 @@ addEventListener('mousemove', e => {
 renderer.domElement.addEventListener('click', () => {
   if (mode !== 'desk') return;
   if (document.pointerLockElement !== renderer.domElement) lockPointer();
-  else use(null);
+  else if (!useBoard(null)) use(null);
 });
 
 function lockPointer() { try { renderer.domElement.requestPointerLock()?.catch?.(() => {}); } catch {} }
@@ -213,7 +260,7 @@ for (const i of [0, 1]) {
   // Trigger on a controller, pinch on a bare hand: both arrive as "select".
   c.addEventListener('selectstart', () => {
     if (c.userData.hand === 'left') { if (c.userData.isHand) leftDrag = { x: lateral(c) }; return; }
-    if (use(c)) return;
+    if (useBoard(c) || use(c)) return;
     if (c.userData.isHand && groundTarget(c, hitPoint)) teleport(hitPoint);
   });
   c.addEventListener('selectend', () => { if (c.userData.hand === 'left') leftDrag = null; });
@@ -342,15 +389,17 @@ renderer.setAnimationLoop(() => {
   }
   if (mode) control(dt, now);
   panels.update(dt);
+  drawBoard();
   drawHud(now);
   renderer.render(scene, camera);
 });
 
 // For debugging from the browser console: moonbase.state(), moonbase.panels.targets() ...
-window.moonbase = { state: () => state, panels, world, radio, rig, camera, net, use: () => use(null), teleport, turnRig };
+window.moonbase = { state: () => state, panels, world, radio, rig, camera, net, board, use: () => use(null), useBoard: () => useBoard(null), teleport, turnRig };
 
-// ---------- start-up screen ----------
+// ---------- start-up screen: the lobby, with the radio and VR steps in the astronaut's panel ----------
 const $ = id => document.getElementById(id);
+const lobby = createLobby($('gate'), { mine: 'astronaut', actionsEl: () => $('gateActions') });
 $('radioBtn').onclick = async () => {
   const mic = await radio.init();
   $('radioBtn').textContent = mic ? 'Radio on' : 'Radio on, no microphone (needs HTTPS or localhost)';
@@ -358,6 +407,6 @@ $('radioBtn').onclick = async () => {
   $('step2').hidden = false;
 };
 $('vrSlot').appendChild(VRButton.createButton(renderer, { optionalFeatures: ['hand-tracking'] }));
-$('deskBtn').onclick = () => { mode = 'desk'; $('gate').hidden = true; $('cross').hidden = false; lockPointer(); };
-renderer.xr.addEventListener('sessionstart', () => { mode = 'vr'; $('gate').hidden = true; });
-renderer.xr.addEventListener('sessionend', () => { mode = null; $('gate').hidden = false; });
+$('deskBtn').onclick = () => { mode = 'desk'; lobby.show(false); $('cross').hidden = false; lockPointer(); };
+renderer.xr.addEventListener('sessionstart', () => { mode = 'vr'; lobby.show(false); });
+renderer.xr.addEventListener('sessionend', () => { mode = null; lobby.show(true); });

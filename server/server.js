@@ -14,12 +14,12 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const PORT = Number(process.env.PORT) || 3000;
 const MIME = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8',
-  '.json': 'application/json', '.png': 'image/png', '.jpg': 'image/jpeg', '.svg': 'image/svg+xml',
+  '.json': 'application/json', '.png': 'image/png', '.webp': 'image/webp', '.jpg': 'image/jpeg', '.svg': 'image/svg+xml',
   '.glb': 'model/gltf-binary', '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.ico': 'image/x-icon',
 };
 const WEB = path.join(ROOT, 'client'); // everything the pages need is in here, three.js included
 
-const hub = new Hub();
+const hub = new Hub(undefined, { requireFullCrew: process.env.SOLO ? false : undefined }); // SOLO=1 npm start: ready up alone
 
 function serve(req, res) {
   let url;

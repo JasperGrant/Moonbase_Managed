@@ -9,7 +9,7 @@ A co-op fix-it game. One astronaut is on the Moon in VR. Mission control is on l
 
 Two players? One person opens "Mission Control", which shows all three consoles.
 
-One person per seat: the landing page greys out seats that are taken, and the server turns away a second person who opens a taken seat's URL.
+The lobby is four scenes side by side: the astronaut on the Moon, the flight director at his console, the Scientist at a lamp-lit desk, and the Technician welding on the VIPER rover. A scene is grey while its seat is open and comes to life, in colour, with its own motion and its own background sound, when someone takes the seat. One person per seat: the server turns away a second person who opens a taken seat's URL.
 
 ## Run it
 
@@ -18,7 +18,9 @@ npm install
 npm start
 ```
 
-Open `http://localhost:3000` and pick a seat. Mission Ops presses **Start mission** (the standard kit is already loaded, which is the judging mode). A round is 2:30.
+Open `http://localhost:3000` and click a scene to take that seat. Everyone presses **Ready**; the astronaut readies up inside the headset, on the READY board in front of them. When all four roles are held and ready, a 3-second countdown starts the mission. Mission Ops can change the lander and gear from the briefing button in their panel (the standard kit is already loaded, which is the judging mode). A round is 2:30.
+
+Testing alone? `SOLO=1 npm start` lets any crew that is all ready start the mission, without the other seats.
 
 Each seat has its own URL, so you can hand them out directly:
 
