@@ -10,6 +10,8 @@
     "cert": "mkdir -p certs && openssl req -x509 -newkey rsa:2048 -nodes -keyout certs/key.pem -out certs/cert.pem -days 30 -subj \"/CN=moonbase\"",
     "smoke": "node test/smoke.mjs",
     "smoke:shots": "SMOKE_SHOTS=1 node test/smoke.mjs",
+    "vr": "node test/vr.mjs",
+    "vr:shots": "VR_SHOTS=1 node test/vr.mjs",
     "dev:cf": "wrangler dev",
     "deploy": "wrangler deploy",
     "vendor": "node scripts/vendor-three.mjs"

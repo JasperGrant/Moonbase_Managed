@@ -2,7 +2,8 @@
 // see the same place. Everything is procedural: terrain, rocks, textures, Earth, stars. Nothing
 // is downloaded, so the page works offline and on Cloudflare as is. Swap in real models here
 // later without touching the game logic.
-import { CFG, STATIONS } from '/shared/config.js';
+import { CFG, PLACES, CABLE_COLORS, SOCKET_SHAPES, DUST_COLS, DUST_ROWS, CRACK_POINTS } from '/shared/config.js';
+import { drawShape } from '/shared/icons.js';
 import { HORIZON, TERRAIN, SUN_AZ_DEG } from '/shared/horizon.js';
 
 // The base sits on the Connecting Ridge between Shackleton and de Gerlache craters at the lunar
@@ -205,6 +206,7 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
   const visor = new THREE.MeshStandardMaterial({ color: 0xf0b63a, metalness: 1, roughness: 0.06 });
   const orange = new THREE.MeshStandardMaterial({ color: 0xd9662b, roughness: 0.6 });
   const warmGlow = new THREE.MeshBasicMaterial({ color: 0xffc46b, toneMapped: false });
+  const windowGlow = new THREE.MeshBasicMaterial({ color: 0xffbf6a, toneMapped: false });
 
   const mesh = (geo, mat, x = 0, y = 0, z = 0, parent = scene) => {
     const m = new THREE.Mesh(geo, mat);
@@ -323,7 +325,8 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
 
   // ---------- rocks ----------
   // Two shapes (jagged, rounded), each displaced by noise, instanced many times.
-  const keepClear = (x, z, m) => Math.hypot(x, z) > 4.5 + m && Object.values(STATIONS).every(s => Math.hypot(x - s.x, z - s.z) > 2.8 + m) && Math.hypot(x - 4, z - 9) > 2.5 + m && Math.hypot(x - CFG.spawn.x, z - CFG.spawn.z) > 2 + m;
+  const SITES = [PLACES.locker, ...PLACES.panels, PLACES.rover, PLACES.depot, PLACES.dish, PLACES.drill, CFG.spawn];
+  const keepClear = (x, z, m) => Math.hypot(x, z) > 4.5 + m && SITES.every(s => Math.hypot(x - s.x, z - s.z) > 2.8 + m);
   function rockGeo(detail, amp, seed) {
     // Icosahedron geometry is unindexed (flat shaded); weld shared vertices first so normals smooth.
     const raw = new THREE.IcosahedronGeometry(1, detail), rp = raw.attributes.position;
@@ -466,7 +469,6 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
     flood.position.set(0, 2.4, 3.35); flood.target.position.set(0, 0, 6);
     hab.add(flood, flood.target);
     hab.userData.flood = flood;
-    hab.userData.windows = [];
     // Steps, radiators, mast with a dish, two lit windows, a conduit around the base
     mesh(new THREE.BoxGeometry(1.4, 0.18, 0.5), grey, 0, 0.09, 3.5, hab);
     mesh(new THREE.BoxGeometry(1.4, 0.18, 0.5), grey, 0, 0.27, 3.15, hab);
@@ -476,8 +478,7 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
     dish.lookAt(new THREE.Vector3(...EARTH_POS).add(hab.position)); dish.rotateX(-Math.PI / 2 + 0.6);
     for (const a of [1.1, -1.1]) { // two lit windows with frames
       const f = mesh(new THREE.BoxGeometry(0.8, 0.5, 0.06), dark, Math.sin(a) * 2.5, 2.0, Math.cos(a) * 2.5, hab); f.lookAt(new THREE.Vector3(Math.sin(a) * 6, 2.0, Math.cos(a) * 6));
-      const w = mesh(new THREE.BoxGeometry(0.64, 0.34, 0.05), new THREE.MeshBasicMaterial({ color: 0xffbf6a, toneMapped: false }), Math.sin(a) * 2.52, 2.0, Math.cos(a) * 2.52, hab); w.lookAt(new THREE.Vector3(Math.sin(a) * 6, 2.0, Math.cos(a) * 6));
-      hab.userData.windows.push(w.material);
+      const w = mesh(new THREE.BoxGeometry(0.64, 0.34, 0.05), windowGlow, Math.sin(a) * 2.52, 2.0, Math.cos(a) * 2.52, hab); w.lookAt(new THREE.Vector3(Math.sin(a) * 6, 2.0, Math.cos(a) * 6));
     }
     mesh(new THREE.TorusGeometry(2.72, 0.04, 8, 48), dark, 0, 0.55, 0, hab).rotation.x = Math.PI / 2;
     for (let i = 0; i < 4; i++) { // legs with footpads, the module sits on them
@@ -488,51 +489,70 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
   }
   scene.add(hab);
 
-  // ---------- solar farm, angled to the sun ----------
-  for (let i = 0; i < 6; i++) {
-    const x = 8 + (i % 3) * 3.2, z = 10 + Math.floor(i / 3) * 3.2;
-    const base = mesh(new THREE.CylinderGeometry(0.5, 0.6, 0.2, 10), dark, x, 0.1, z);
-    tube(steel, [x, 0.2, z], [x, 1.6, z], 0.06);
-    const panel = new THREE.Group(); panel.position.set(x, 1.7, z);
+  // ---------- solar array, angled to the sun. The three near panels are the ones that get dusty. ----------
+  const sunFlat = new THREE.Vector3(sunDir.x, 0.16, sunDir.z).normalize();
+  const dustMat = new THREE.MeshStandardMaterial({ map: regolith, color: 0xb3aca0, roughness: 1, transparent: true, opacity: 0.94 });
+  const dustCells = [];
+  for (const p of PLACES.panels) {
+    mesh(new THREE.CylinderGeometry(0.4, 0.5, 0.2, 10), dark, p.x, 0.1, p.z).receiveShadow = true;
+    tube(steel, [p.x, 0.2, p.z], [p.x, 1.3, p.z], 0.06);
+    const panel = new THREE.Group(); panel.position.set(p.x, 1.4, p.z);
+    mesh(new THREE.BoxGeometry(2.2, 1.3, 0.06), solar, 0, 0, 0, panel);
+    mesh(new THREE.BoxGeometry(2.3, 1.4, 0.03), steel, 0, 0, -0.03, panel);
+    panel.lookAt(panel.position.clone().add(sunFlat)); // local +z is the face you brush
+    scene.add(panel);
+    for (let r = 0; r < DUST_ROWS; r++) for (let c = 0; c < DUST_COLS; c++) {
+      const cell = new THREE.Mesh(new THREE.PlaneGeometry(2.16 / DUST_COLS, 1.26 / DUST_ROWS), dustMat);
+      cell.position.set((c - (DUST_COLS - 1) / 2) * 2.16 / DUST_COLS, ((DUST_ROWS - 1) / 2 - r) * 1.26 / DUST_ROWS, 0.036);
+      cell.visible = false;
+      panel.add(cell);
+      dustCells.push(cell);
+    }
+  }
+  for (const p of PLACES.panels) { // a second row behind, scenery only
+    const x = p.x + 3.6;
+    mesh(new THREE.CylinderGeometry(0.5, 0.6, 0.2, 10), dark, x, 0.1, p.z).receiveShadow = true;
+    tube(steel, [x, 0.2, p.z], [x, 1.9, p.z], 0.06);
+    const panel = new THREE.Group(); panel.position.set(x, 2.0, p.z);
     mesh(new THREE.BoxGeometry(2.6, 1.5, 0.06), solar, 0, 0, 0, panel);
     mesh(new THREE.BoxGeometry(2.7, 1.6, 0.03), steel, 0, 0, -0.03, panel);
-    panel.lookAt(panel.position.clone().add(sunDir));
+    panel.lookAt(panel.position.clone().add(sunFlat));
     scene.add(panel);
-    base.receiveShadow = true;
   }
 
-  // ---------- stations: one group per minigame. Local +z is the side the astronaut stands on. ----------
-  const stations = {}, alarms = {};
-  for (const [key, st] of Object.entries(STATIONS)) {
+  const puffs = Array.from({ length: 8 }, () => {
+    const p = new THREE.Mesh(new THREE.SphereGeometry(1, 8, 6), new THREE.MeshBasicMaterial({ color: 0xb8b1a4, transparent: true, opacity: 0, depthWrite: false }));
+    p.visible = false; p.userData = { dir: new THREE.Vector3(), born: 0 };
+    scene.add(p);
+    return p;
+  });
+  let puffNext = 0;
+
+  // ---------- scenery: fuel depot, comms dish, drill rig. Nothing to fix here. ----------
+  const site = p => {
     const g = new THREE.Group();
-    g.position.set(st.x, 0, st.z);
-    g.rotation.y = st.ry;
+    g.position.set(p.x, 0, p.z);
+    g.rotation.y = Math.atan2(-p.x, -p.z); // face the habitat
     scene.add(g);
-    stations[key] = g;
-    tube(steel, [0.85, 0, -0.1], [0.85, 2.4, -0.1], 0.03, g);
-    const lamp = new THREE.Mesh(new THREE.SphereGeometry(0.1, 12, 8), new THREE.MeshBasicMaterial({ color: 0x1c3a22, toneMapped: false }));
-    lamp.position.set(0.85, 2.45, -0.1);
-    g.add(lamp);
-    alarms[key] = lamp;
-    mesh(new THREE.CylinderGeometry(0.9, 1.0, 0.08, 16), dark, 0, 0.04, -1.2, g).receiveShadow = true; // concrete-ish pad
-  }
+    mesh(new THREE.CylinderGeometry(0.9, 1.0, 0.08, 16), dark, 0, 0.04, -1.2, g).receiveShadow = true;
+    return g;
+  };
+  const depot = site(PLACES.depot), dishSite = site(PLACES.dish), drill = site(PLACES.drill);
   // Fuel depot: two insulated tanks on cradles, plumbing, a valve wheel
   for (const y of [0.75, 2.05]) {
-    const st = stations.wires;
-    const t = mesh(new THREE.CylinderGeometry(0.6, 0.6, 2.6, 24), whitePlain, 0, y, -1.7, st); t.rotation.z = Math.PI / 2;
-    for (const dx of [-1.0, 1.0]) { const band = mesh(new THREE.CylinderGeometry(0.63, 0.63, 0.2, 24), orange, dx, y, -1.7, st); band.rotation.z = Math.PI / 2; }
-    for (const dx of [-1.3, 1.3]) { const cap = mesh(new THREE.SphereGeometry(0.6, 24, 12, 0, Math.PI * 2, 0, Math.PI / 2), whitePlain, dx, y, -1.7, st); cap.rotation.z = dx > 0 ? -Math.PI / 2 : Math.PI / 2; }
+    const t = mesh(new THREE.CylinderGeometry(0.6, 0.6, 2.6, 24), whitePlain, 0, y, -1.7, depot); t.rotation.z = Math.PI / 2;
+    for (const dx of [-1.0, 1.0]) { const band = mesh(new THREE.CylinderGeometry(0.63, 0.63, 0.2, 24), orange, dx, y, -1.7, depot); band.rotation.z = Math.PI / 2; }
+    for (const dx of [-1.3, 1.3]) { const cap = mesh(new THREE.SphereGeometry(0.6, 24, 12, 0, Math.PI * 2, 0, Math.PI / 2), whitePlain, dx, y, -1.7, depot); cap.rotation.z = dx > 0 ? -Math.PI / 2 : Math.PI / 2; }
   }
   for (const dx of [-1.0, 1.0]) { // frame
-    tube(steel, [dx, 0, -1.1], [dx, 2.1, -1.1], 0.04, stations.wires); tube(steel, [dx, 0, -2.3], [dx, 2.1, -2.3], 0.04, stations.wires);
-    tube(steel, [dx, 1.4, -1.1], [dx, 1.4, -2.3], 0.04, stations.wires); tube(steel, [dx, 2.1, -1.1], [dx, 2.1, -2.3], 0.04, stations.wires);
+    tube(steel, [dx, 0, -1.1], [dx, 2.1, -1.1], 0.04, depot); tube(steel, [dx, 0, -2.3], [dx, 2.1, -2.3], 0.04, depot);
+    tube(steel, [dx, 1.4, -1.1], [dx, 1.4, -2.3], 0.04, depot); tube(steel, [dx, 2.1, -1.1], [dx, 2.1, -2.3], 0.04, depot);
   }
-  tube(steel, [0.9, 1.4, -1.1], [0.6, 1.4, -0.3], 0.05, stations.wires); // feed line to the panel
-  tube(steel, [1.9, 0.75, -1.7], [1.9, 2.05, -1.7], 0.05, stations.wires);
-  mesh(new THREE.TorusGeometry(0.16, 0.025, 8, 20), orange, 1.0, 1.4, -0.7, stations.wires).rotation.z = Math.PI / 2;
+  tube(steel, [1.9, 0.75, -1.7], [1.9, 2.05, -1.7], 0.05, depot);
+  mesh(new THREE.TorusGeometry(0.16, 0.025, 8, 20), orange, 1.0, 1.4, -0.7, depot).rotation.z = Math.PI / 2;
   // Comms dish: a true parabola on a yoke, feed on a tripod, pointed at Earth
   {
-    const st = stations.freq;
+    const st = dishSite;
     mesh(new THREE.CylinderGeometry(0.5, 0.7, 0.3, 12), dark, 0, 0.15, -1.6, st);
     tube(steel, [0, 0.3, -1.6], [0, 2.6, -1.6], 0.09, st);
     const yoke = new THREE.Group(); yoke.position.set(0, 2.8, -1.6); st.add(yoke);
@@ -546,12 +566,13 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
     for (let i = 0; i < 3; i++) { const a = (i / 3) * Math.PI * 2; tube(steel, [Math.cos(a) * 1.1, 0.2, Math.sin(a) * 1.1], [0, 1.5, 0], 0.015, yoke); } // feed on its tripod, near the focus
     mesh(new THREE.CylinderGeometry(0.08, 0.12, 0.25, 10), dark, 0, 1.55, 0, yoke);
     mesh(new THREE.CylinderGeometry(0.12, 0.16, 0.3, 12), grey, 0, -0.1, 0, yoke);
+    st.updateMatrixWorld(true);
     const toEarth = st.worldToLocal(new THREE.Vector3(...EARTH_POS)).sub(yoke.position).normalize();
     yoke.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), toEarth);
   }
   // Drill rig: tripod with winch, drill string, cuttings pile
   {
-    const st = stations.drill;
+    const st = drill;
     for (let i = 0; i < 3; i++) {
       const a = (i / 3) * Math.PI * 2 + 0.5;
       tube(steel, [Math.sin(a) * 1.3, 0, -1.8 + Math.cos(a) * 1.3], [0, 4.2, -1.8], 0.05, st);
@@ -561,12 +582,142 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
     mesh(new THREE.CylinderGeometry(0.09, 0.09, 3.6, 10), steel, 0, 1.9, -1.8, st);
     mesh(new THREE.CylinderGeometry(0.2, 0.25, 0.5, 12), dark, 0, 0.25, -1.8, st);
     const pile = mesh(new THREE.ConeGeometry(0.9, 0.45, 14), rockMat, 0.9, 0.2, -2.4, st); pile.scale.z = 0.7;
-    mesh(new THREE.BoxGeometry(0.9, 0.6, 0.5), grey, -1.3, 0.3, -1.0, st); // generator box
+    mesh(new THREE.BoxGeometry(0.9, 0.6, 0.5), grey, -1.3, 0.3, -1.0, st);
     tube(dark, [-1.3, 0.6, -1.0], [0, 4.0, -1.8], 0.015, st);
   }
-  // Airlock terminal: pedestal with a conduit back to the habitat
-  mesh(new THREE.BoxGeometry(0.5, 0.5, 0.4), grey, 0, 0.25, -0.3, stations.patch);
-  tube(dark, [0, 0.1, -0.5], [-1.2, 0.1, -1.3], 0.02, stations.patch);
+
+  // A group at a place from the config. Local +z is the side the astronaut stands on.
+  const fixture = p => { const g = new THREE.Group(); g.position.set(p.x, 0, p.z); g.rotation.y = p.ry; scene.add(g); return g; };
+
+  // ---------- switchboard: four sockets marked with shapes, four coloured cables ----------
+  const CABLE_HEX = { red: 0xe0453a, blue: 0x3f7fe8, yellow: 0xf0cf3a, green: 0x45c463 };
+  // It hangs on a wall inside the habitat: the astronaut's page adds this group to the mount that
+  // interior.js provides. It is in no scene until then, so the rover camera never draws it.
+  const board = new THREE.Group();
+  const sockets = [], plugs = [], plugRest = [];
+  {
+    // Lambert, like everything else indoors: the hall is lit by its own three lights.
+    const box = new THREE.Mesh(new THREE.BoxGeometry(1.1, 0.8, 0.16), new THREE.MeshLambertMaterial({ color: 0x6a7078 }));
+    box.position.set(0, 1.4, 0); board.add(box);
+    const signTex = canvasTexture(THREE, 512, 128, (d, w, h, g) => {
+      g.fillStyle = '#12161b'; g.fillRect(0, 0, w, h);
+      SOCKET_SHAPES.forEach((s, i) => drawShape(g, s, 64 + i * 128, 64, 78, '#f4f4f0'));
+    });
+    const sign = new THREE.Mesh(new THREE.PlaneGeometry(1.0, 0.25), new THREE.MeshBasicMaterial({ map: signTex, toneMapped: false }));
+    sign.position.set(0, 1.62, 0.082); board.add(sign);
+    CABLE_COLORS.forEach((color, i) => {
+      const x = (i - 1.5) * 0.25;
+      const hole = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.03, 16), new THREE.MeshBasicMaterial({ color: 0x0b0d10 }));
+      hole.position.set(x, 1.38, 0.082); hole.rotation.x = Math.PI / 2; board.add(hole);
+      sockets.push(new THREE.Vector3(x, 1.38, 0.14));
+      plugRest.push(new THREE.Vector3(x, 1.1, 0.24)); // a loose plug hangs in front of the box, at waist height
+      const plug = new THREE.Group();
+      // Unlit, so the colours read the same on white light, on red backup light, and in the dark.
+      const body = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 0.14, 12), new THREE.MeshBasicMaterial({ color: CABLE_HEX[color], toneMapped: false }));
+      body.rotation.x = Math.PI / 2; plug.add(body);
+      plug.position.copy(sockets[i]);
+      plug.userData = { color, index: i, held: false };
+      board.add(plug);
+      const cord = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(x, 1.02, 0.06), new THREE.Vector3()]), new THREE.LineBasicMaterial({ color: CABLE_HEX[color] }));
+      cord.frustumCulled = false;
+      board.add(cord);
+      plug.userData.cord = cord;
+      plugs.push(plug);
+    });
+    const lamp = new THREE.Mesh(new THREE.SphereGeometry(0.06, 12, 8), new THREE.MeshBasicMaterial({ color: 0x2bd45a, toneMapped: false }));
+    lamp.position.set(0.45, 1.88, 0.06); board.add(lamp);
+    board.userData.lamp = lamp;
+  }
+
+  // ---------- tool locker: an open rack beside the airlock. The tools themselves are added by stations.js ----------
+  const locker = fixture(PLACES.locker);
+  // Everything hangs between waist and shoulder height, so nothing has to be picked up off the floor:
+  // the tire on the left, the hand tools in the middle, the generator on its shelf on the right.
+  const lockerSlots = {
+    tire:   new THREE.Vector3(-0.85, 1.12, 0.2),
+    brush:  new THREE.Vector3(-0.2, 1.3, 0.14),
+    patch:  new THREE.Vector3(0.14, 1.46, 0.2),
+    welder: new THREE.Vector3(0.52, 1.5, 0.14),
+    gen:    new THREE.Vector3(0.98, 1.08, 0.22),
+  };
+  {
+    mesh(new THREE.BoxGeometry(2.7, 1.9, 0.08), whitePlain, 0, 1.0, 0, locker);
+    mesh(new THREE.BoxGeometry(2.8, 0.08, 0.5), orange, 0, 1.98, 0.2, locker);
+    mesh(new THREE.BoxGeometry(2.7, 0.08, 0.5), grey, 0, 0.1, 0.22, locker);        // floor
+    mesh(new THREE.BoxGeometry(0.6, 0.05, 0.45), grey, 1.03, 0.88, 0.22, locker);   // the generator's shelf
+    tube(steel, [-0.85, 1.12, 0.04], [-0.85, 1.12, 0.3], 0.03, locker);             // the peg the tire hangs on
+    for (const x of [-1.35, 1.35]) mesh(new THREE.BoxGeometry(0.06, 1.95, 0.5), grey, x, 1.0, 0.22, locker);
+  }
+
+  // ---------- airlock canopy: the one roof on the base. Stand under it in a meteor shower. ----------
+  {
+    const c = PLACES.canopy, w = c.x1 - c.x0, z0 = 3.25, len = c.z1 - z0;
+    mesh(new THREE.BoxGeometry(w + 0.2, 0.1, len), whitePlain, 0, 2.62, z0 + len / 2);
+    mesh(new THREE.BoxGeometry(w + 0.2, 0.14, 0.08), orange, 0, 2.6, c.z1);
+    for (const x of [c.x0, c.x1]) tube(steel, [x, 0, c.z1 - 0.1], [x, 2.6, c.z1 - 0.1], 0.05);
+    const stripeTex = canvasTexture(THREE, 256, 256, (d, w2, h2, g) => {
+      g.fillStyle = '#e8c93a'; g.fillRect(0, 0, w2, h2);
+      g.strokeStyle = '#15171a'; g.lineWidth = 26;
+      for (let i = -256; i < 512; i += 72) { g.beginPath(); g.moveTo(i, 0); g.lineTo(i + 256, 256); g.stroke(); }
+      g.fillStyle = '#35393f'; g.fillRect(22, 22, w2 - 44, h2 - 44);
+    });
+    const pad = new THREE.Mesh(new THREE.PlaneGeometry(w, len - 0.6), new THREE.MeshStandardMaterial({ map: stripeTex, roughness: 0.9 }));
+    pad.rotation.x = -Math.PI / 2; pad.position.set(0, 0.015, z0 + 0.6 + (len - 0.6) / 2); pad.receiveShadow = true;
+    scene.add(pad);
+  }
+
+  // ---------- hull crack: one crack, moved to whichever of the six spots is breached ----------
+  const crack = new THREE.Group();
+  const crackPts = Array.from({ length: CRACK_POINTS }, () => new THREE.Vector3());
+  const beads = [], vapour = [];
+  {
+    const zig = [0.03, -0.04, 0.02, -0.03, 0.04, -0.02];
+    crack.userData.place = spot => {
+      const a0 = PLACES.cracks[spot].a;
+      for (let i = 0; i < CRACK_POINTS; i++) {
+        const a = a0 + (i - (CRACK_POINTS - 1) / 2) * 0.045;
+        crackPts[i].set(Math.cos(a) * 2.53, 1.55 + zig[i], Math.sin(a) * 2.53);
+        beads[i].position.copy(crackPts[i]);
+      }
+      const pos = line.geometry.attributes.position;
+      for (let i = 0; i < CRACK_POINTS; i++) pos.setXYZ(i, crackPts[i].x * 1.004, crackPts[i].y, crackPts[i].z * 1.004);
+      pos.needsUpdate = true;
+      crack.userData.normal.set(Math.cos(a0), 0, Math.sin(a0));
+      crack.userData.centre.set(Math.cos(a0) * 2.55, 1.55, Math.sin(a0) * 2.55);
+    };
+    crack.userData.normal = new THREE.Vector3(1, 0, 0);
+    crack.userData.centre = new THREE.Vector3();
+    const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints(crackPts), new THREE.LineBasicMaterial({ color: 0x050505 }));
+    line.frustumCulled = false;
+    crack.add(line);
+    for (let i = 0; i < CRACK_POINTS; i++) {
+      // Dark and open until welded, then a glowing bead.
+      const b = new THREE.Mesh(new THREE.SphereGeometry(0.045, 10, 8), new THREE.MeshBasicMaterial({ color: 0x0a0a0a, toneMapped: false }));
+      crack.add(b); beads.push(b);
+    }
+    const puff = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.22, depthWrite: false });
+    for (let i = 0; i < 10; i++) { const v = new THREE.Mesh(new THREE.SphereGeometry(0.05, 8, 6), puff); crack.add(v); vapour.push(v); }
+    crack.visible = false;
+    scene.add(crack);
+    crack.userData.place(0);
+  }
+
+  // ---------- meteor shower: streaks out of the sky and dust where they land ----------
+  const METEORS = 9;
+  const meteors = [];
+  {
+    const streakMat = new THREE.MeshBasicMaterial({ color: 0xfff1d0, toneMapped: false });
+    const fall = new THREE.Vector3(0.35, -0.85, 0.25).normalize();
+    for (let i = 0; i < METEORS; i++) {
+      const streak = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.07, 5), streakMat);
+      streak.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), fall);
+      const burst = new THREE.Mesh(new THREE.SphereGeometry(1, 12, 8, 0, Math.PI * 2, 0, Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0xb8b1a4, transparent: true, opacity: 0, depthWrite: false }));
+      streak.visible = burst.visible = false;
+      scene.add(streak, burst);
+      meteors.push({ streak, burst, fall });
+    }
+  }
+  const hash = (a, b) => { const s = Math.sin(a * 127.1 + b * 311.7) * 43758.5453; return s - Math.floor(s); };
 
   // ---------- rover (model faces +z). Its lights are what the astronaut follows in the dark. ----------
   const rover = new THREE.Group();
@@ -579,11 +730,19 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
     mesh(new THREE.BoxGeometry(0.3, 0.12, 0.02), new THREE.MeshBasicMaterial({ color: 0x58e08a, toneMapped: false }), 0, 1.08, 0.98, rover);
     tube(steel, [0, 0.9, 0.95], [0, 1.3, 1.1], 0.02, rover);                                        // hand controller stalk
     for (const [x, z] of [[-0.85, 0.85], [0.85, 0.85], [-0.85, -0.85], [0.85, -0.85]]) {
-      const w = mesh(new THREE.TorusGeometry(0.32, 0.09, 10, 24), dark, x, 0.4, z, rover); w.rotation.y = Math.PI / 2; // wire-mesh wheel
+      const wg = new THREE.Group(); wg.position.set(x, 0.4, z); rover.add(wg);
+      mesh(new THREE.TorusGeometry(0.32, 0.09, 10, 24), dark, 0, 0, 0, wg).rotation.y = Math.PI / 2; // wire-mesh wheel
+      for (let i = 0; i < 6; i++) { const sp = tube(steel, [0, 0, 0], [0, Math.cos(i) * 0.3, Math.sin(i) * 0.3], 0.012, wg); sp.castShadow = false; }
       const hub = mesh(new THREE.CylinderGeometry(0.1, 0.1, 0.22, 10), steel, x, 0.4, z, rover); hub.rotation.z = Math.PI / 2;
-      for (let i = 0; i < 6; i++) { const sp = tube(steel, [x, 0.4, z], [x, 0.4 + Math.cos(i) * 0.3, z + Math.sin(i) * 0.3], 0.012, rover); sp.castShadow = false; }
       const fender = mesh(new THREE.CylinderGeometry(0.45, 0.45, 0.26, 12, 1, true, 0, Math.PI), orange, x, 0.42, z, rover); fender.rotation.z = Math.PI / 2; fender.material = new THREE.MeshStandardMaterial({ color: 0xd9662b, roughness: 0.6, side: THREE.DoubleSide });
       tube(steel, [x * 0.6, 0.6, z], [x, 0.4, z], 0.03, rover);
+      if (x > 0 && z > 0) { // the front right wheel is the one that breaks and comes off
+        rover.userData.wheel = wg;
+        rover.userData.hub = new THREE.Object3D(); rover.userData.hub.position.set(x + 0.1, 0.4, z); rover.add(rover.userData.hub);
+        const warn = new THREE.Mesh(new THREE.SphereGeometry(0.05, 10, 8), new THREE.MeshBasicMaterial({ color: 0xff2a2a, toneMapped: false }));
+        warn.position.set(x, 0.95, z); warn.visible = false; rover.add(warn);
+        rover.userData.warn = warn;
+      }
     }
     tube(steel, [0.5, 1.1, -1.0], [0.5, 2.2, -1.0], 0.025, rover);
     const lrvDish = mesh(new THREE.LatheGeometry(Array.from({ length: 8 }, (_, i) => new THREE.Vector2(i * 0.05, (i * 0.05) ** 2 * 0.6)), 16), silverFoil, 0.5, 2.25, -1.0, rover);
@@ -599,7 +758,7 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
     const head = new THREE.SpotLight(0xfff6e8, 30, 18, 0.55, 0.6, 1.2);
     head.position.set(0, 0.9, 1.2); head.target.position.set(0, 0.2, 7);
     rover.add(head, head.target);
-    rover.position.set(4, 0, 9);
+    rover.position.set(PLACES.rover.x, 0, PLACES.rover.z);
   }
   scene.add(rover);
 
@@ -643,18 +802,99 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
   scene.add(avatar);
 
   return {
-    stations, rover, avatar, sun, height,
-    // Call every frame. `live` is the list of station keys with an active alarm.
-    update(time, live = []) {
-      const blink = Math.floor(time * 4) % 2 === 0;
-      for (const key in alarms) alarms[key].material.color.setHex(live.includes(key) ? (blink ? 0xff2a2a : 0x4a0b0b) : 0x1c3a22);
-      rover.userData.beacon.material.color.setHex(Math.floor(time * 2) % 2 ? 0xffb030 : 0x4a3008);
+    rover, avatar, sun, height,
+    // Handles for the astronaut's hands (stations.js). Vectors are local to their fixture group.
+    fixtures: { locker, lockerSlots, board, sockets, plugs, plugRest, dustCells, crack, crackPts, wheel: rover.userData.wheel, hub: rover.userData.hub },
+    // Call every frame.
+    update(time) {
       earth.userData.clouds.rotation.y = time * 0.004;
-      // A power outage shows from outside: the floodlight and the lit windows go dark, then dim red.
-      const outage = live.includes('power');
-      hab.userData.flood.intensity = outage ? 0 : 25;
-      warmGlow.color.setHex(outage ? 0x3a0c06 : 0xffc46b);
-      for (const m of hab.userData.windows) m.color.setHex(outage ? 0x5a1008 : 0xffbf6a);
+    },
+    // Show what the server says is physically out there (Game.scene()). The astronaut and the rover
+    // camera both call this, so they see the same broken things.
+    apply(s, time) {
+      const blink = Math.floor(time * 4) % 2 === 0;
+
+      // The habitat's own power shows from outside: with the switchboard tripped it is on red backup
+      // lights, and in a blackout there is nothing at all. The floodlight is off in both.
+      const backup = !!s.board && !s.dark;
+      hab.userData.flood.intensity = s.dark || s.board ? 0 : 25;
+      warmGlow.color.setHex(s.dark ? 0x120d05 : backup ? 0x3a0c06 : 0xffc46b);
+      windowGlow.color.setHex(s.dark ? 0x120d05 : backup ? 0x5a1008 : 0xffbf6a);
+
+      // Dust: a cell that was dusty a moment ago and is not now puffs away.
+      dustCells.forEach((c, i) => {
+        const on = !!s.dust && s.dust[i];
+        if (c.visible && !on) {
+          const p = puffs[puffNext++ % puffs.length];
+          c.getWorldPosition(p.position); c.getWorldDirection(p.userData.dir); p.userData.born = time; p.visible = true;
+        }
+        c.visible = on;
+      });
+      for (const p of puffs) {
+        if (!p.visible) continue;
+        const u = (time - p.userData.born) / 0.7;
+        if (u >= 1) { p.visible = false; continue; }
+        p.position.addScaledVector(p.userData.dir, 0.012); p.position.y -= 0.004 * u; // off the face of the panel, then sinking: there is no air to hold it up
+        p.scale.setScalar(0.05 + u * 0.1); p.material.opacity = 0.5 * (1 - u);
+      }
+
+      // Switchboard: seated plugs sit in their socket, loose ones hang underneath.
+      board.userData.lamp.material.color.setHex(s.board ? (blink ? 0xff2a2a : 0x4a0b0b) : s.dark ? 0x0c2a14 : 0x2bd45a);
+      plugs.forEach((p, i) => {
+        const c = s.board ? s.board[i] : { seated: true, socket: i };
+        p.userData.seated = c.seated;
+        if (!p.userData.held) { p.position.copy(c.seated ? sockets[c.socket] : plugRest[i]); p.rotation.set(c.seated ? 0 : Math.PI / 2, 0, 0); }
+        p.userData.cord.geometry.attributes.position.setXYZ(1, p.position.x, p.position.y, p.position.z);
+        p.userData.cord.geometry.attributes.position.needsUpdate = true;
+      });
+
+      // Rover wheel: 0 fine, 1 broken and hanging off, 2 pulled off and lying beside the rover.
+      const w = rover.userData.wheel, broken = s.wheel > 0;
+      if (!w.userData.held) {
+        if (s.wheel === 0) { w.position.set(0.85, 0.4, 0.85); w.rotation.set(0, 0, 0); }
+        if (s.wheel === 1) { w.position.set(0.97, 0.33, 0.85); w.rotation.set(0, 0.25, -0.5); }
+        if (s.wheel === 2) { w.position.set(1.75, 0.1, 0.6); w.rotation.set(0, 0, -Math.PI / 2); }
+      }
+      rover.userData.warn.visible = broken && blink;
+      // The hazard light flashes fast while the rover is stuck.
+      rover.userData.beacon.material.color.setHex((broken ? Math.floor(time * 6) % 2 : Math.floor(time * 2) % 2) ? 0xffb030 : 0x4a3008);
+
+      // Hull crack, weld beads and the vapour jet.
+      crack.visible = !!s.hull;
+      if (s.hull) {
+        if (crack.userData.spot !== s.hull.spot) { crack.userData.spot = s.hull.spot; crack.userData.place(s.hull.spot); }
+        // Welded: a bright bead. Not yet: dark, glowing redder the longer the torch has been on it.
+        const heat = crack.userData.heat || [];
+        beads.forEach((b, i) => { if (s.hull.welded[i]) b.material.color.setHex(0xffa23a); else b.material.color.setRGB(0.04 + 0.96 * (heat[i] || 0), 0.04 + 0.25 * (heat[i] || 0), 0.04); b.scale.setScalar(s.hull.welded[i] ? 1 : 1 + 0.5 * (heat[i] || 0)); });
+        const open = s.hull.welded.filter(x => !x).length / CRACK_POINTS;
+        vapour.forEach((v, i) => {
+          const u = (time * 1.3 + i / vapour.length) % 1;
+          v.visible = i / vapour.length < open;
+          // A thin jet, half a metre long: enough to see where the air is going, not a cloud in the welder's face.
+          v.position.copy(crack.userData.centre).addScaledVector(crack.userData.normal, 0.03 + u * 0.5);
+          v.position.y += Math.sin(i * 2.4) * 0.05 * u + 0.12 * u * u; v.position.x += Math.cos(i * 1.7) * 0.04 * u;
+          v.scale.setScalar(0.25 + u * 0.9);
+        });
+      }
+
+      // Meteors. Each one falls for the first part of its cycle, then its dust cloud spreads.
+      // The first few seconds land far out, then they walk in on the base.
+      meteors.forEach((m, i) => {
+        if (s.meteor === null || s.meteor < 0) { m.streak.visible = m.burst.visible = false; return; }
+        const len = 0.9 + i * 0.06, at = s.meteor + i * 0.31, k = Math.floor(at / len), u = at / len - k;
+        const close = s.meteor > CFG.meteorGraceSeconds;
+        const a = hash(i, k) * Math.PI * 2, r = close ? 5 + hash(k, i + 9) * 20 : 45 + hash(k, i + 9) * 50;
+        const tx = Math.cos(a) * r, tz = Math.sin(a) * r, ty = close ? 0 : height(tx, tz);
+        m.streak.visible = u < 0.55;
+        if (m.streak.visible) m.streak.position.set(tx, ty, tz).addScaledVector(m.fall, -(0.55 - u) * 130);
+        m.burst.visible = u >= 0.55;
+        if (m.burst.visible) {
+          const v = (u - 0.55) / 0.45;
+          m.burst.position.set(tx, ty, tz);
+          m.burst.scale.setScalar((close ? 0.4 : 2) + v * (close ? 1.6 : 9));
+          m.burst.material.opacity = (1 - v) * 0.7;
+        }
+      });
     },
     // Ease the rover toward the server's position.
     moveRover(r, k = 0.2) {

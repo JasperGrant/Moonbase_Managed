@@ -2,69 +2,116 @@
 // so nobody can disagree about the rules.
 
 export const CFG = {
-  roundSeconds: 150,      // judges get 3 minutes: 2:30 of play + briefing
-  delayMs: 1300,          // Earth-Moon one-way light time, about 1.3 s
-  tickMs: 100,            // server simulation step
-  o2DrainPerSec: 0.45,    // suit oxygen drain (about 100x faster than a real EVA)
-  mistakePenalty: 8,      // oxygen lost per wrong action
-  missPenalty: 15,        // oxygen lost when an alarm times out
-  issueSeconds: 50,       // time to fix each alarm
-  firstSpawnAt: 4,        // seconds into the round
-  spawnEvery: 24,         // seconds between alarms
-  maxActive: 2,           // alarms at once
-  firstIssue: 'wires',    // the first alarm is always this one, so the opening is predictable
-  roverSpeed: 2.7,        // m/s, about 6 mph (crewed lunar terrain vehicle class)
-  bounds: 22,             // metres from the habitat that players and rover may go
+  roundSeconds: 180,          // judges get a few minutes: 3:00 of play
+  delayMs: 1300,              // Earth-Moon one-way light time, about 1.3 s
+  tickMs: 100,                // server simulation step
+
+  o2Start: 100,
+  o2DrainPerSec: 0.28,        // suit oxygen drain (about 100x faster than a real EVA)
+  leakMultiplier: 3,          // a leak drains oxygen this many times faster; two leaks at once, five times
+  meteorHit: 20,              // oxygen lost when caught in the open
+  wrongPlug: 4,               // oxygen lost per cable pushed into the wrong socket
+  fixPoints: 100,             // score per fault fixed
+
+  batterySeconds: 60,         // 100% to 0% while a power fault is active
+  rechargeSeconds: 20,        // 0% to 100% with no power fault
+  blackoutEndsAt: 10,         // battery % at which a blackout lifts
+  generatorSeconds: 25,       // power from one pull of the backup generator
+
+  beltCapacity: 4,            // weight units the astronaut can carry
+  tireRestockSeconds: 30,     // a new space tire appears in the locker this long after one is fitted
+
+  meteorWarnSeconds: 15,      // radar warning before the first impact
+  meteorSeconds: 8,           // how long a shower lasts
+  meteorGraceSeconds: 3,      // the first impacts land far away
+  crouchHeight: 1.1,          // head below this (metres) counts as crouching
+  roverCoverRadius: 2.2,      // metres from the rover's centre (about 1.5 m from its side)
+
+  reach: 4.5,                 // metres: the server refuses work on a fixture further away than this
+  roverSpeed: 2.7,            // m/s, about 6 mph (crewed lunar terrain vehicle class)
+  bounds: 22,                 // metres from the habitat that players and rover may go
   habRadius: 2.9,
-  spawn: { x: 0, z: 7 },
-  defaultVehicle: 'heavy',
-  defaultGear: ['beacon', 'lamp', 'diag', 'o2'],
+  spawn: { x: -3.6, z: 7.0 }, // facing the tool locker
+
+  // Free play: after the scripted opening, random faults and showers.
+  freeFaultEvery: [25, 35],   // seconds between random faults
+  freeMaxFaults: 3,
+  freeMeteorEvery: [50, 70],  // seconds between showers
+  freeHullChance: 0.5,        // chance a shower cracks the hull
+
   // The lobby: every role is picked and ready, then a short countdown starts the mission.
   // requireFullCrew: false lets one developer ready up alone (or run the server with SOLO=1).
   lobby: { requireFullCrew: true, countdownSeconds: 3 },
   // Power outage inside the habitat: the roof lights die, the room is dark for darkMs, then the red
   // backup lights ramp up over rampMs. Once fixed, the roof lights re-strike one row every restrikeMs.
-  power: { darkMs: 1500, rampMs: 400, restrikeMs: 120, breakers: 6 },
+  power: { darkMs: 1500, rampMs: 400, restrikeMs: 120 },
 };
 
 // The four roles that must be filled before a mission starts. "all" (2-player mode) covers the last three.
 export const CREW = ['astronaut', 'ops', 'sci', 'tech'];
 export const covers = (held, role) => held === role || (held === 'all' && role !== 'astronaut');
 
-// Mission design step (Space Apps): pick a lander, then fit gear into its mass capacity.
-export const VEHICLES = {
-  heavy: { name: 'Heavy cargo lander', cap: 5, o2: 100, blurb: 'Carries 5 mass units of gear. Slow transit uses more suit oxygen.' },
-  fast:  { name: 'Fast courier',       cap: 3, o2: 120, blurb: 'Carries only 3 mass units. Quick transit leaves 20% more oxygen.' },
+// The tool belt. Welder + brush + patch kit fill it exactly, so the tire or the
+// generator always means leaving something behind.
+export const TOOLS = {
+  brush:  { name: 'Brush',            weight: 1 },
+  patch:  { name: 'Patch kit',        weight: 1 },
+  welder: { name: 'Welder',           weight: 2 },
+  tire:   { name: 'Space tire',       weight: 3 },
+  gen:    { name: 'Backup generator', weight: 3 },
 };
 
-export const GEAR = {
-  beacon: { name: 'Suit beacon',    mass: 1, blurb: 'Technician sees the astronaut on the map.' },
-  lamp:   { name: 'Helmet lamp',    mass: 1, blurb: 'Lights up the long south-pole shadows.' },
-  diag:   { name: 'Diagnostic kit', mass: 1, blurb: 'The first mistake costs no oxygen.' },
-  o2:     { name: 'Spare O2 tank',  mass: 2, blurb: '+25 suit oxygen.' },
-  boots:  { name: 'Hop boots',      mass: 1, blurb: 'Astronaut moves 40% faster and jumps higher.' },
+// What can break, the tool that fixes it, and the line for the results log.
+export const FAULTS = {
+  dust:  { name: 'Dusty solar panels',  tool: 'brush' },
+  board: { name: 'Tripped switchboard', tool: null },
+  wheel: { name: 'Broken rover wheel',  tool: 'tire' },
+  hull:  { name: 'Hull breach',         tool: 'welder' },
+  suit:  { name: 'Suit leak',           tool: 'patch' },
 };
 
-// One station per minigame. x/z in metres, north is -z. ry is the way the panel faces.
-const face = (x, z) => Math.atan2(-x, -z); // face the habitat at the origin
-export const STATIONS = {
-  wires: { name: 'Fuel depot',       x: -9, z: -5, ry: face(-9, -5) },
-  freq:  { name: 'Comms dish',       x: 10, z: -6, ry: face(10, -6) },
-  patch: { name: 'Airlock terminal', x: 4.2, z: 3.4, ry: 0 },
-  drill: { name: 'Drill rig',        x: -6, z: 9,  ry: face(-6, 9) },
+export const CABLE_COLORS = ['red', 'blue', 'yellow', 'green'];
+export const SOCKET_SHAPES = ['triangle', 'circle', 'square', 'diamond'];
+export const DUST_COLS = 3, DUST_ROWS = 2, PANELS = 3;
+export const DUST_CELLS = PANELS * DUST_COLS * DUST_ROWS;
+export const CRACK_POINTS = 6;
+
+// Where things are. x/z in metres, north is -z. ry is the way a fixture faces: the astronaut
+// stands on its local +z side.
+const CRACK_ANGLES = [45, 135, 195, 255, 285, 345]; // degrees round the dome, between the ribs
+export const PLACES = {
+  locker: { x: -3.6, z: 4.6, ry: 0 },
+  // The switchboard is inside the habitat, on the west wall of the hall (client/interior.js). Indoors,
+  // the server sees the astronaut at the airlock, which is also under the canopy: inside is cover.
+  board:  { x: 0, z: 3 },
+  airlock: { x: 0, z: 3 },
+  panels: [{ x: 9, z: 8 }, { x: 9, z: 11 }, { x: 9, z: 14 }],
+  canopy: { x0: -1.5, x1: 1.5, z0: 2.6, z1: 5.8 },
+  cracks: CRACK_ANGLES.map(deg => { const a = deg * Math.PI / 180; return { a, x: Math.cos(a) * 2.52, z: Math.sin(a) * 2.52 }; }),
+  rover:  { x: 4, z: 9 },
+  // Scenery only: nothing to fix here.
+  depot:  { x: -9, z: -5 },
+  dish:   { x: 10, z: -6 },
+  drill:  { x: -7, z: 10 },
 };
 
-export const ISSUES = {
-  wires: { title: 'Fuel-ox valve stuck' },
-  freq:  { title: 'Comms dish off frequency' },
-  patch: { title: 'Airlock software fault' },
-  drill: { title: 'Drill jammed' },
-  power: { title: 'Main power bus tripped' },
+// The director plays one of these. `at` is seconds into the round. A meteor entry is the moment
+// the radar warning starts; impacts begin CFG.meteorWarnSeconds later and `after` lists what the
+// shower breaks when it ends.
+export const SCRIPTS = {
+  // The same every time, for judges.
+  demo: [
+    { at: 5,   ev: 'dust' },
+    { at: 45,  ev: 'wheel' },
+    { at: 85,  ev: 'meteor', after: ['dust', 'hull', 'board'] },
+    { at: 150, ev: 'suit' },
+  ],
+  // One scripted opener, then random.
+  free: [
+    { at: 5, ev: 'dust' },
+  ],
 };
-
-// The one alarm that is fixed indoors. It has no outdoor station: the breaker panel is on the west
-// wall of the habitat interior (client/interior.js), reached through the airlock hatch.
-export const INDOOR = { power: { name: 'Breaker panel', where: 'inside the habitat, through the airlock' } };
+export const MODES = { demo: 'Demo mission', free: 'Free play' };
 
 export const ROLES = {
   astronaut: 'Astronaut',
@@ -73,9 +120,3 @@ export const ROLES = {
   sci: 'Scientist',
   all: 'Mission Control (all consoles)',
 };
-
-export function bearing(x, z) {
-  const names = ['north', 'north-east', 'east', 'south-east', 'south', 'south-west', 'west', 'north-west'];
-  const a = Math.atan2(x, -z); // 0 = north, clockwise
-  return names[((Math.round(a / (Math.PI / 4)) % 8) + 8) % 8];
-}

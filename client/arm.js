@@ -139,7 +139,7 @@ export function buildArm(THREE) {
     add(new THREE.CylinderGeometry(0.006, 0.006, 0.014, 12), aluminium, -0.163, -0.027, z(-0.16) - 0.005).rotation.z = Math.PI / 2 - 0.4;
   }
   // Radio light strip in the top edge of the bezel. Dark until the radio does something.
-  const SIGNAL = { tx: 0xff3b3b, rx: 0x4da3ff, nomic: 0xffa52e };
+  const SIGNAL = { tx: 0xff3b3b, rx: 0x4da3ff, nomic: 0xffa52e, dead: 0x7a1010 };
   const stripMat = new THREE.MeshBasicMaterial({ color: 0x1a1f24, toneMapped: false });
   add(new THREE.BoxGeometry(FACE_W * 0.5, 0.0035, 0.003), stripMat, 0, FACE_H / 2 + 0.004, 0);
   function signal(radio, now) {
@@ -220,7 +220,7 @@ export function buildArm(THREE) {
       g.beginPath(); g.arc(cx, top, r, -0.62, 0.62); g.stroke();
       g.beginPath(); g.arc(cx, top, r, Math.PI - 0.62, Math.PI + 0.62); g.stroke();
     }
-    if (barred) { g.strokeStyle = AMBER; g.lineWidth = 9; g.beginPath(); g.moveTo(cx - 46, cy + 56); g.lineTo(cx + 46, cy - 66); g.stroke(); }
+    if (barred) { g.strokeStyle = barred === true ? AMBER : barred; g.lineWidth = 9; g.beginPath(); g.moveTo(cx - 46, cy + 56); g.lineTo(cx + 46, cy - 66); g.stroke(); }
   }
   // Alarm: a warning triangle, lit while one is active.
   function warning(cx, cy, lit) {
@@ -249,13 +249,14 @@ export function buildArm(THREE) {
   // Redraws only when something shown changes.
   function draw(info) {
     const s = info.state;
-    const o2 = s ? Math.round(s.oxygen) : null, t = s ? Math.max(0, Math.ceil(s.timeLeft)) : null, alarms = s ? s.issues.length : 0;
+    const o2 = s ? Math.round(s.oxygen) : null, t = s ? Math.max(0, Math.ceil(s.timeLeft)) : null, alarms = info.alarms || 0;
+    const belt = info.belt || 0, cap = info.capacity || 0;
     const level = info.zoom > 1.01 ? Math.max(1, Math.min(5, Math.round(info.zoom - 1))) : 0;
-    const k = [o2, s && s.o2Max, t, alarms, info.radio, level, info.status].join('|');
+    const k = [o2, s && s.o2Max, t, alarms, info.radio, level, info.status, belt, cap].join('|');
     if (k === key) return;
     key = k;
 
-    const radio = { tx: ['TRANSMITTING', RED], rx: ['MISSION OPS', BLUE], nomic: ['NO MICROPHONE', AMBER] }[info.radio];
+    const radio = { tx: ['TRANSMITTING', RED], rx: ['MISSION OPS', BLUE], nomic: ['NO MICROPHONE', AMBER], dead: ['NO SIGNAL', RED] }[info.radio];
     g.fillStyle = '#0a0e11'; g.fillRect(0, 0, W, H);
     g.strokeStyle = radio ? radio[1] : '#2a343b'; g.lineWidth = radio ? 9 : 4; // the frame lights up with the radio
     g.beginPath(); g.roundRect(7, 7, W - 14, H - 14, 20); g.stroke();
@@ -274,12 +275,20 @@ export function buildArm(THREE) {
     else at(346, 190, 1.15, () => hourglass(0, 0, left, hurry ? AMBER : BLUE, running));
 
     // Radio, alarms, visor zoom.
-    antenna(506, 196, radio ? radio[1] : '#77868f', radio ? 3 : 0, info.radio === 'nomic');
+    antenna(506, 196, radio ? radio[1] : '#77868f', radio && info.radio !== 'dead' ? 3 : 0, info.radio === 'dead' ? RED : info.radio === 'nomic');
+
+    // The tool belt: one box per weight unit it can carry, filled for each unit in use.
+    for (let i = 0; i < cap; i++) {
+      const x = 50 + i * 44;
+      g.lineWidth = 5; g.strokeStyle = i < belt ? (belt >= cap ? AMBER : GREEN) : DIM;
+      g.beginPath(); g.roundRect(x, 304, 34, 34, 6); g.stroke();
+      if (i < belt) { g.fillStyle = belt >= cap ? AMBER : GREEN; g.beginPath(); g.roundRect(x + 8, 312, 18, 18, 3); g.fill(); }
+    }
     for (let i = 0; i < 2; i++) at(592, 96 + i * 72, 0.78, () => warning(0, 0, i < alarms));
     at(594, 258, 0.88, () => magnifier(0, 0, level));
 
     tex.needsUpdate = true;
-    shown = { radio: radio ? radio[0] : 'STANDBY', frame: radio ? radio[1] : null, oxygen: o2, seconds: t, alarms, zoomPips: level, status: info.status || '' };
+    shown = { radio: radio ? radio[0] : 'STANDBY', frame: radio ? radio[1] : null, oxygen: o2, seconds: t, alarms, zoomPips: level, status: info.status || '', belt };
   }
 
   // ---------- raising and lowering ----------

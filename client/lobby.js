@@ -15,8 +15,8 @@ export const ORDER = ['astronaut', 'ops', 'sci', 'tech'];
 const INFO = {
   astronaut: { name: 'Astronaut', line: 'Hands and eyes on the surface', url: '/astronaut' },
   ops: { name: 'Mission Ops', line: 'The only voice the astronaut hears', url: '/ops' },
-  sci: { name: 'Scientist', line: 'Telemetry and the manual. Knows how', url: '/sci' },
-  tech: { name: 'Technician', line: 'The map and the rover. Knows where', url: '/tech' },
+  sci: { name: 'Scientist', line: 'The gauges. Knows what is wrong', url: '/sci' },
+  tech: { name: 'Technician', line: 'The radar and the rover. Knows where', url: '/tech' },
 };
 const ARC = { x: 355, y: 1096 }; // where the welding torch touches VIPER, in the art's coordinates
 

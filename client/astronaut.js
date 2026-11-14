@@ -4,14 +4,17 @@ import { VRButton } from 'three/addons/webxr/VRButton.js';
 import { connect } from '/net.js';
 import { Radio } from '/voice.js';
 import { buildWorld } from '/world.js';
-import { buildPanels } from '/stations.js';
+import { buildFixtures } from '/stations.js';
 import { buildInterior, ROOM } from '/interior.js';
-import { CFG, CREW, ROLES, covers } from '/shared/config.js';
+import { CFG, CREW, ROLES, PLACES, covers } from '/shared/config.js';
+import { beltWeight, sheltered } from '/shared/rules.js';
 import { seatTaken } from '/seat.js';
 import { buildArm } from '/arm.js';
 import { createLobby } from '/lobby.js';
 
-const REACH = 3.2;        // metres: how far away a panel can be used
+const REACH = 3.2;        // metres: how far away the mouse can work something
+const REACH_VR = 1.6;     // metres: pointing in VR is a fallback for grabbing, so it only works close up
+const CROUCH = 0.9;       // metres: eye height while C is held on a laptop
 const WALK = 2.4;         // m/s
 const GRAVITY = 1.62;     // m/s^2, lunar
 
@@ -19,6 +22,7 @@ const net = connect('astronaut');
 const radio = new Radio(net);
 let state = null, lastEv = 0, rx = false, talking = false, mode = null; // mode: 'vr' | 'desk'
 let flash = '', flashUntil = 0, lastPhase = ''; // flash: 'ok' or 'bad', shown on the gauges for a few seconds
+let nextThump = 0, covered = false;
 
 // ---------- scene ----------
 const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -48,15 +52,21 @@ const outdoors = scene.children.filter(o => !sceneBefore.has(o)); // everything 
 // The inside of the habitat. Only one of the two places is drawn at a time.
 const interior = buildInterior(THREE, scene, { sfx: k => radio.sfx(k) });
 interior.group.visible = false;
-world.stations.power = interior.mount; // the breaker panel hangs on the interior wall
-let where = 'out';                     // 'out' on the surface, 'in' inside the habitat
+interior.mount.add(world.fixtures.board); // the switchboard hangs on the interior wall
+let where = 'out';                        // 'out' on the surface, 'in' inside the habitat
 
-const panels = buildPanels(THREE, world, (id, a) => net.send({ t: 'act', id, a }), k => radio.sfx(k));
+// Haptics: a short buzz on the controller in hand i (0 or 1). Bare hands have nothing to buzz.
+function pulse(i, strength = 0.5, ms = 40) {
+  const session = renderer.xr.getSession();
+  const src = session && [...session.inputSources].find(x => x.handedness === controllers[i]?.userData.hand);
+  src?.gamepad?.hapticActuators?.[0]?.pulse?.(strength, ms)?.catch?.(() => {});
+}
+const fx = buildFixtures(THREE, world, { rig, camera, send: a => net.send({ t: 'do', a }), sfx: k => radio.sfx(k), pulse });
 
 const lamp = new THREE.SpotLight(0xfff4e4, 14, 16, 0.65, 0.7, 1.4); // candela; 40 blew out panels at arm's length
 lamp.target.position.set(0, -0.15, -1);
 camera.add(lamp, lamp.target);
-lamp.intensity = 0; // switched by intensity, not visibility, so turning it on never recompiles shaders
+lamp.intensity = 14; // always on: the shadow side of the dome is black, and that is where cracks hide
 
 // Going through the airlock: a pad over the outside hatch to point at, a sign on it, and a black
 // card in front of the eyes that fades in, hides the move, and fades out.
@@ -101,9 +111,19 @@ function status(now) {
   if (s.phase === 'results') return s.result.won ? 'won' : 'lost';
   return now < flashUntil ? flash : '';
 }
-const radioState = () => talking ? 'tx' : rx ? 'rx' : keyed && !radio.micOk ? 'nomic' : '';
+const running = () => !!state && state.phase === 'run';
+const noSignal = () => running() && !state.powered; // the base is blacked out: the radio is dead
+const radioState = () => noSignal() ? 'dead' : talking ? 'tx' : rx ? 'rx' : keyed && !radio.micOk ? 'nomic' : '';
+// How many things are visibly broken right now. The cuff lights a warning triangle for each (up to two);
+// it does not say what they are.
+function alarms() {
+  if (!running()) return 0;
+  const sc = state.scene;
+  return (sc.dust ? 1 : 0) + (sc.board ? 1 : 0) + (sc.wheel ? 1 : 0) + (sc.hull ? 1 : 0) + (state.suit ? 1 : 0);
+}
 function drawGauges(now) {
-  arm.draw({ state, status: status(now), zoom: scopeOn() ? zoom : 1, total: CFG.roundSeconds, radio: radioState() });
+  arm.draw({ state, status: status(now), zoom: scopeOn() ? zoom : 1, total: CFG.roundSeconds, radio: radioState(),
+    alarms: alarms(), belt: running() ? beltWeight(state.belt) : 0, capacity: CFG.beltCapacity });
   arm.signal(radioState(), now);
 }
 function show(what, seconds) { flash = what; flashUntil = performance.now() / 1000 + seconds; }
@@ -154,7 +174,9 @@ function useBoard(controller) {
 }
 
 // ---------- network ----------
-net.onState = s => { state = s; lobby.update(s); };
+// Take the server's word as it arrives, not once per frame: what can be grabbed must never lag behind what exists.
+const NOTHING = { belt: [], locker: [], scene: null, suit: false };
+net.onState = s => { state = s; lobby.update(s); fx.sync(s.phase === 'run' ? s : NOTHING); };
 net.onTaken = seatTaken;
 net.onBinary = buf => radio.receive(buf);
 net.onMsg = m => { if (m.t === 'ptt') { rx = m.on; radio.rxMarker(m.on); } };
@@ -182,11 +204,14 @@ addEventListener('mousemove', e => {
   rig.rotation.y -= dx * 0.0022;
   camera.rotation.x = Math.max(-1.4, Math.min(1.4, camera.rotation.x - dy * 0.0022));
 });
-renderer.domElement.addEventListener('click', () => {
+// On a laptop the mouse button is the hand: one press clicks, and holding it keeps brushing or welding.
+let pressed = null, nextUse = 0; // pressed: null, 'desk', or the controller whose trigger is down
+renderer.domElement.addEventListener('mousedown', () => {
   if (mode !== 'desk') return;
-  if (document.pointerLockElement !== renderer.domElement) lockPointer();
-  else useAny(null);
+  if (document.pointerLockElement !== renderer.domElement) { lockPointer(); return; }
+  if (useAny(null)) { pressed = 'desk'; nextUse = performance.now() / 1000 + 0.1; }
 });
+addEventListener('mouseup', () => { if (pressed === 'desk') pressed = null; });
 
 function lockPointer() { try { renderer.domElement.requestPointerLock()?.catch?.(() => {}); } catch {} }
 
@@ -204,10 +229,11 @@ function aim(controller) {
   }
   raycaster.far = REACH;
 }
-function panelInReach(controller) {
-  if (!state || state.phase !== 'run') return null;
+function targetInReach(controller) {
+  if (!running()) return null;
   aim(controller);
-  return raycaster.intersectObjects(panels.targets(), false)[0] || null;
+  raycaster.far = controller ? REACH_VR : REACH;
+  return raycaster.intersectObjects(fx.targets(), false)[0] || null;
 }
 // Use the airlock hatch being pointed at: go in from the surface, or back out from the hall.
 function useHatch(controller) {
@@ -217,21 +243,24 @@ function useHatch(controller) {
   go(where === 'out' ? 'in' : 'out');
   return true;
 }
-// Use the panel being pointed at. Returns true if there was one.
-function use(controller) {
-  const hit = panelInReach(controller);
-  if (hit) panels.click(hit.object);
-  return !!hit;
+// Use whatever tool, plug or broken thing is being pointed at. Returns true if there was something.
+// With `holding`, only things that work while held down (brushing dust, welding) are used again.
+function use(controller, holding = false) {
+  const hit = targetInReach(controller);
+  if (!hit || (holding && !hit.object.userData.hold)) return !!hit && !holding;
+  fx.click(hit.object);
+  return true;
 }
-// Use whatever is being pointed at: the READY board, the airlock hatch, or a panel.
+// Use whatever is being pointed at: the READY board, the airlock hatch, or something to fix.
 const useAny = controller => useBoard(controller) || useHatch(controller) || use(controller);
 
 // ---------- hands and controllers ----------
-// Controllers: right trigger uses, left trigger talks, sticks walk and turn, A hops.
-// Hand tracking (put the controllers down): point the right hand and pinch to use a panel,
-// pinch at the ground to teleport there, pinch the left hand and drag it sideways to turn,
-// hold the left hand up to your helmet to talk, and pinch both hands and pull them apart to
-// zoom the visor (push them together to zoom back out).
+// Controllers: grip grabs (tools off the rack and the belt, plugs, the wheel, the generator cord),
+// right trigger points at things within arm's reach, left trigger talks, sticks walk and turn, A hops.
+// Hand tracking (put the controllers down): pinch on something to grab it, point the right hand and
+// pinch to use the hatch or the READY board, pinch at the ground to teleport there, pinch the left
+// hand in empty air and drag it sideways to turn, hold the left hand up to your helmet to talk, and
+// pinch both empty hands and pull them apart to zoom the visor (push them together to zoom back out).
 const TELEPORT_MAX = 8;   // metres per hop
 const TURN_STEP = 0.1;    // metres of left-hand drag per 30-degree snap turn
 const HELMET = 0.22;      // metres from the head that counts as "hand on helmet"
@@ -297,12 +326,16 @@ for (const i of [0, 1]) {
     }
   });
   c.addEventListener('disconnected', () => {
+    if (c.userData.grabbed) { c.userData.grabbed = false; fx.release(i, handPoint(i, new THREE.Vector3())); }
     c.userData.isHand = c.userData.pinched = c.userData.zoomed = false;
     marker.visible = false; leftDrag = null; endZoomGrab();
+    if (pressed === c) pressed = null;
   });
   // Trigger on a controller, pinch on a bare hand: both arrive as "select".
   c.addEventListener('selectstart', () => {
     const other = controllers[1 - i];
+    // A bare hand that pinches on something grabs it. That is not a zoom, a turn or a teleport.
+    if (c.userData.isHand && running() && fx.grab(i, handPoint(i, new THREE.Vector3()))) { c.userData.grabbed = true; return; }
     c.userData.pinched = true;
     // Both bare hands pinched: this is a zoom, not a turn, a teleport or a panel press.
     if (c.userData.isHand && other.userData.isHand && other.userData.pinched) {
@@ -312,9 +345,11 @@ for (const i of [0, 1]) {
       return;
     }
     if (c.userData.hand === 'left') { if (c.userData.isHand) leftDrag = { x: lateral(c) }; return; }
-    if (!c.userData.isHand) useAny(c); // a bare hand acts when the pinch lets go, see below
+    if (!c.userData.isHand && useAny(c)) { pressed = c; nextUse = performance.now() / 1000 + 0.1; } // a bare hand acts when the pinch lets go, see below
   });
   c.addEventListener('selectend', () => {
+    if (pressed === c) pressed = null;
+    if (c.userData.grabbed) { c.userData.grabbed = false; fx.release(i, handPoint(i, new THREE.Vector3())); return; }
     const wasZoom = c.userData.zoomed, act = c.userData.pinched && !wasZoom;
     c.userData.pinched = c.userData.zoomed = false;
     endZoomGrab();
@@ -323,6 +358,9 @@ for (const i of [0, 1]) {
     // hand of a two-handed zoom does not fire on its way in. The ring shows where you will land.
     if (c.userData.isHand && act && !useAny(c) && groundTarget(c, hitPoint)) teleport(hitPoint);
   });
+  // The grip button closes the hand on whatever is within reach of it.
+  c.addEventListener('squeezestart', () => { if (running() && fx.grab(i, handPoint(i, new THREE.Vector3()))) c.userData.grabbed = true; });
+  c.addEventListener('squeezeend', () => { if (c.userData.grabbed) { c.userData.grabbed = false; fx.release(i, handPoint(i, new THREE.Vector3())); } });
   rig.add(c);
   controllers.push(c);
 
@@ -330,6 +368,10 @@ for (const i of [0, 1]) {
   rig.add(h);
   hands.push(h);
 }
+
+// Where this hand's fingers are: the pinch point of a tracked hand, or the controller itself.
+function handPoint(i, out) { return controllers[i].userData.isHand ? pinchPoint(i, out) : controllers[i].getWorldPosition(out); }
+const handInfo = [0, 1].map(() => ({ obj: null, point: new THREE.Vector3(), side: '', tracked: false }));
 
 // Draw each tracked joint as a small white ball: a glove, without loading a model.
 function drawHand(h) {
@@ -357,7 +399,7 @@ function handControls(ptt) {
         if (Math.abs(dx) > TURN_STEP) { turnRig(-Math.sign(dx) * Math.PI / 6); leftDrag.x = x; }
       }
     } else {
-      const p = !zoomGrab && !panelInReach(c) && groundTarget(c, hitPoint);
+      const p = !zoomGrab && !c.userData.grabbed && !targetInReach(c) && groundTarget(c, hitPoint);
       marker.visible = !!p;
       if (p) marker.position.set(p.x, 0.02, p.z);
     }
@@ -460,7 +502,7 @@ function passageStep(dt) {
   if (passage.t >= FADE * 2) { passage = null; shade.visible = false; }
 }
 
-let vy = 0, turnArmed = true, lastPose = 0;
+let vy = 0, turnArmed = true, lastPose = 0, shake = 0;
 function control(dt, now) {
   let mx = 0, mz = 0, jump = false, ptt = mode === 'desk' && !!keys.tab;
   const session = renderer.xr.getSession();
@@ -487,14 +529,17 @@ function control(dt, now) {
     mx = (keys.d ? 1 : 0) - (keys.a ? 1 : 0);
     mz = (keys.s ? 1 : 0) - (keys.w ? 1 : 0);
     jump = !!keys[' '];
+    // In a headset you crouch by crouching. On a laptop, hold C.
+    camera.position.y += ((keys.c ? CROUCH : 1.65) - camera.position.y) * Math.min(1, dt * 10);
+    if (keys.f) fx.patchSuit();
+    if (keys.g) fx.pullCord();
   }
 
-  const boots = !!state && state.loadout.gear.includes('boots');
-  const speed = WALK * (boots ? 1.4 : 1) * dt;
+  const speed = WALK * dt;
   rig.position.x += (-mz * fwd.x + mx * -fwd.z) * speed;
   rig.position.z += (-mz * fwd.z + mx * fwd.x) * speed;
 
-  if (jump && rig.position.y === 0) vy = boots ? 2.8 : 2.0; // a slow, floaty lunar hop
+  if (jump && rig.position.y === 0) vy = 2.0; // a slow, floaty lunar hop
   vy -= GRAVITY * dt;
   rig.position.y = Math.max(0, rig.position.y + vy * dt);
   if (rig.position.y === 0) vy = 0;
@@ -511,9 +556,26 @@ function control(dt, now) {
   keyed = ptt;
   if (ptt !== talking && radio.micOk) { talking = ptt; radio.setTalking(ptt); }
 
-  if (now - lastPose > 0.1) { lastPose = now; // Indoors, the Technician's map shows the astronaut at the airlock.
-    net.send({ t: 'pose', x: where === 'in' ? 0 : headPos.x, z: where === 'in' ? 3 : headPos.z, ry: Math.atan2(fwd.x, fwd.z) }); }
+  if (now - lastPose > 0.1) { lastPose = now; sendPose(); }
 }
+// Tell the server where the astronaut's head is: it checks reach and cover against this. Indoors, the
+// server (and the Technician's map) sees the astronaut at the airlock.
+// How tall this player stands, measured as they play, so that "crouching" means the same thing for a
+// tall adult, a child and someone playing seated: the height sent is scaled to a 1.65 m standing head.
+let standing = 1.2;
+function headHeight() {
+  camera.getWorldPosition(headPos);
+  const h = headPos.y - rig.position.y;
+  if (!renderer.xr.isPresenting) return h;
+  standing = Math.min(2.1, Math.max(standing, h)); // the tallest they have stood this session
+  return h / standing * 1.65;
+}
+function myPose() {
+  const h = headHeight();
+  camera.getWorldDirection(fwd); fwd.y = 0; fwd.normalize();
+  return { x: where === 'in' ? PLACES.airlock.x : headPos.x, z: where === 'in' ? PLACES.airlock.z : headPos.z, ry: Math.atan2(fwd.x, fwd.z), h };
+}
+function sendPose() { net.send({ t: 'pose', ...myPose() }); }
 
 // ---------- main loop ----------
 // A picture of the view as just drawn, as a PNG data URL, for the smoke test's optional screenshots.
@@ -525,32 +587,64 @@ renderer.setAnimationLoop(() => {
   const now = performance.now() / 1000, dt = Math.min(0.05, now - lastFrame);
   lastFrame = now;
   const s = state;
+  const run = !!s && s.phase === 'run';
   if (s) {
     if (s.phase !== lastPhase) {
-      if (s.phase === 'run') { flashUntil = 0; passage = null; shade.visible = false; if (where === 'in') place('out'); rig.position.set(CFG.spawn.x, 0, CFG.spawn.z); }
+      if (run) { flashUntil = 0; passage = null; shade.visible = false; if (where === 'in') place('out'); rig.position.set(CFG.spawn.x, 0, CFG.spawn.z); rig.rotation.y = 0; }
       lastPhase = s.phase;
     }
     if (s.ev && s.ev.n !== lastEv) {
       lastEv = s.ev.n;
       const k = s.ev.kind;
-      radio.sfx(k);
-      // The astronaut is never told what or where: that is mission control's job.
+      // The astronaut is never told what broke or where: that is mission control's job.
+      if (['alarm', 'solve', 'mistake', 'hit', 'blackout', 'power', 'gen', 'end'].includes(k)) radio.sfx(k);
       if (k === 'solve') show('ok', 4);
-      if (k === 'mistake' || k === 'miss') show('bad', 5);
+      if (k === 'mistake' || k === 'hit') show('bad', 5);
+      if (k === 'hit' || k === 'mistake') { pulse(0, 1, 250); pulse(1, 1, 250); }
     }
-    panels.sync(s.phase === 'run' ? s.issues : [], now);
-    world.update(now, s.issues.map(i => i.type));
+    if (run) world.apply(s.scene, now);
     world.moveRover(s.rover);
-    // The helmet lamp comes on by itself when the hall goes dark, packed or not.
-    lamp.intensity = s.loadout.gear.includes('lamp') || (where === 'in' && interior.dark) ? 14 : 0;
+
+    // Sound: the leak hiss, and rocks landing during a shower. Indoors a hull breach is heard from
+    // the airlock end of the hall, and the shower is a rumble through the walls.
+    const inside = where === 'in';
+    const crackAt = inside ? interior.hatch.getWorldPosition(tmpV).setY(1.6) : world.fixtures.crack.userData.centre;
+    radio.leak(run && s.suit, run && s.scene.hull ? crackAt : null);
+    if (run && s.scene.meteor !== null && now > nextThump) {
+      const close = s.scene.meteor > CFG.meteorGraceSeconds;
+      nextThump = now + (close ? 0.25 + Math.random() * 0.3 : 0.6 + Math.random() * 0.6);
+      // Under cover the impacts are duller and quieter: that, and the cuff, is how you know you are safe.
+      const dull = inside || covered;
+      radio.burst(close ? 0.5 : 0.35, (close ? 0.4 : 0.12) * (dull ? 0.4 : 1), 'lowpass', close && !dull ? 240 : 110);
+      // A laptop screen can shake. A headset must not: that is how you make someone ill.
+      if (close && mode === 'desk') shake = 0.012;
+      if (close) { pulse(0, dull ? 0.15 : 0.45, 60); pulse(1, dull ? 0.15 : 0.45, 60); }
+    }
   }
-  const powerOut = debugOutage || (!!s && s.phase === 'run' && s.issues.some(i => i.type === 'power'));
+  world.update(now);
+  // The hall goes to its red backup lights when the switchboard trips, and when the battery runs flat.
+  const powerOut = debugOutage || (run && (!!s.scene.board || s.scene.dark));
   interior.setPower(powerOut);
   interior.update(dt, now);
   radio.room(where === 'in' ? (interior.dark ? 0.15 : 1) : 0);
-  passageStep(dt);
+  passageStep(Math.min(0.25, now - armFrame)); // real time, so the airlock is as quick on a slow machine
   if (mode) control(dt, now); else keyed = false;
-  panels.update(dt);
+  if (pressed && now > nextUse) { nextUse = now + 0.09; use(pressed === 'desk' ? null : pressed, true); }
+
+  // Hands for the fixtures: where a held tool is drawn, and where the fingers are.
+  const vr = mode === 'vr';
+  if (vr) for (const i of [0, 1]) {
+    const h = handInfo[i], c = controllers[i];
+    h.obj = c; h.side = c.userData.hand || ''; h.tracked = !!c.userData.isHand; handPoint(i, h.point);
+  }
+  fx.update(dt, now, vr ? handInfo : [], vr);
+  // Under cover while rocks are falling: the cuff says so, because there is no other way to know.
+  covered = run && s.scene.meteor !== null && sheltered(myPose(), s.rover);
+
+  camera.getWorldPosition(headPos); camera.getWorldDirection(tmpV);
+  radio.listen(headPos, tmpV);
+  shake *= 0.86;
+  if (mode === 'desk') camera.rotation.z = (Math.random() - 0.5) * shake;
   drawBoard();
   arm.update(Math.min(0.25, now - armFrame), keyed); // real time, so the arm is as quick on a slow machine
   armFrame = now;
@@ -560,8 +654,8 @@ renderer.setAnimationLoop(() => {
   if (snapWaiting) { snapWaiting(renderer.domElement.toDataURL('image/png')); snapWaiting = null; } // must follow the draw in the same frame
 });
 
-// For debugging from the browser console: moonbase.state(), moonbase.panels.targets() ...
-window.moonbase = { state: () => state, panels, world, interior, radio, rig, camera, net, board, use: () => use(null), useBoard: () => useBoard(null), useHatch: () => useHatch(null), teleport, turnRig,
+// For debugging from the browser console, and for the tests: moonbase.state(), moonbase.fx.targets() ...
+window.moonbase = { resetStanding: () => { standing = 1.2; }, state: () => state, fx, world, interior, radio, rig, camera, net, board, THREE, scene, use: () => use(null), useBoard: () => useBoard(null), useHatch: () => useHatch(null), sendPose, myPose, teleport, turnRig,
   where: () => where, place, renderer, outage: on => { debugOutage = on; },
   zoom: () => zoom, setZoom, controllers, handControls, scope: scopeMesh, arm, snap, radioState: () => ({ keyed, talking, rx, shown: radioState() }) };
 
