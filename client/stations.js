@@ -1,7 +1,7 @@
 // The four minigame panels the astronaut works at. Each one only draws what the server
 // says is physically there, and reports clicks back with act(issueId, action).
 // To add a minigame: add a builder here, its data in server/game.js, its rule in shared/rules.js.
-import { ISSUES } from '/shared/config.js';
+import { CFG, ISSUES } from '/shared/config.js';
 
 const WIRE_HEX = { red: 0xd63b3b, blue: 0x3b6fd6, yellow: 0xe8c93a, white: 0xf2f2f2 };
 const ROCK_HEX = { grey: 0x8d8d8d, red: 0xb5462f, yellow: 0xd9b84a, black: 0x1c1c1c, green: 0x3f9b52 };
@@ -44,12 +44,12 @@ export function buildPanels(THREE, world, act, sfx = () => {}) {
   }
 
   // Common backboard with a screen on top. The work area is below the screen.
-  function board(key) {
+  function board(key, legs = true) {
     const g = new THREE.Group();
     world.stations[key].add(g);
     const back = new THREE.Mesh(new THREE.BoxGeometry(1.4, 1.3, 0.08), boardMat);
     back.position.set(0, 1.3, 0); back.castShadow = true; g.add(back);
-    for (const x of [-0.6, 0.6]) { const leg = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.7, 0.06), boardMat); leg.position.set(x, 0.35, 0); g.add(leg); }
+    if (legs) for (const x of [-0.6, 0.6]) { const leg = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.7, 0.06), boardMat); leg.position.set(x, 0.35, 0); g.add(leg); }
     const screen = makeScreen(1.25, 0.42, 640, 216);
     screen.mesh.position.set(0, 1.7, 0.045); g.add(screen.mesh);
     const p = { g, screen, issue: null };
@@ -153,6 +153,55 @@ export function buildPanels(THREE, world, act, sfx = () => {}) {
       shownId = is.id;
       const left = is.rocks.filter(r => !r.gone).length - 1;
       p.screen.draw(`${is.id}|${left}|${secs(is)}`, (c, W) => lines(c, W, [[`${ISSUES.drill.title.toUpperCase()}   ${secs(is)} s`, 30, '#ffb84a'], ['CLEAR THE HOPPER', 52, '#fff'], [`${left} TO REMOVE. KEEP THE CORE SAMPLE`, 28, '#ff5c5c']]));
+    };
+  }
+
+  // ---- Power: breaker panel, on the wall inside the habitat (only where the interior is built) ----
+  if (world.stations.power) {
+    const p = board('power', false);
+    const N = CFG.power.breakers, COLS = 3;
+    const at = i => [((i % COLS) - (COLS - 1) / 2) * 0.4, 1.3 - Math.floor(i / COLS) * 0.34]; // x, y of breaker i
+    // One plate behind all the breakers carries the numbers and the ON / OFF marks.
+    const c = document.createElement('canvas'); c.width = 600; c.height = 360;
+    const g = c.getContext('2d');
+    g.fillStyle = '#c9ccce'; g.fillRect(0, 0, 600, 360); g.strokeStyle = '#30353a'; g.lineWidth = 6; g.strokeRect(3, 3, 594, 354);
+    g.textAlign = 'center'; g.textBaseline = 'middle';
+    for (let i = 0; i < N; i++) {
+      const cx = 100 + (i % COLS) * 200, cy = 96 + Math.floor(i / COLS) * 170;
+      g.fillStyle = '#30353a'; g.fillRect(cx - 44, cy - 62, 88, 124);
+      g.fillStyle = '#1b1e22'; g.font = 'bold 64px monospace'; g.fillText(String(i + 1), cx - 76, cy);
+      g.font = 'bold 18px monospace'; g.fillStyle = '#2f8f4e'; g.fillText('ON', cx + 68, cy - 40); g.fillStyle = '#b3342a'; g.fillText('OFF', cx + 68, cy + 40);
+    }
+    const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace;
+    const plate = new THREE.Mesh(new THREE.PlaneGeometry(1.2, 0.72), new THREE.MeshBasicMaterial({ map: tex }));
+    plate.position.set(0, 1.13, 0.045); p.g.add(plate);
+    // Handles and lamps are two instanced meshes; a breaker's state is its handle position and lamp colour.
+    const handles = new THREE.InstancedMesh(new THREE.BoxGeometry(0.07, 0.11, 0.09), new THREE.MeshBasicMaterial({ color: 0xe9e7e1, toneMapped: false }), N);
+    const lamps = new THREE.InstancedMesh(new THREE.SphereGeometry(0.028, 10, 8), new THREE.MeshBasicMaterial({ toneMapped: false }), N);
+    handles.frustumCulled = lamps.frustumCulled = false;
+    p.g.add(handles, lamps);
+    const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler(), v = new THREE.Vector3(), one = new THREE.Vector3(1, 1, 1), col = new THREE.Color();
+    for (let i = 0; i < N; i++) {
+      const [x, y] = at(i);
+      lamps.setMatrixAt(i, m4.makeTranslation(x, y + 0.155, 0.06));
+      const pad = clickable(new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.3, 0.12), ghost), () => !!p.issue && !p.issue.reset.includes(i), () => act(p.issue.id, { breaker: i }));
+      pad.position.set(x, y, 0.1); pad.visible = false; p.g.add(pad); // unseen, but the pointer still hits it
+    }
+    let shown = null;
+    p.sync = is => {
+      p.issue = is;
+      const key = is ? `${is.id}|${is.reset}` : 'idle';
+      if (key !== shown) {
+        shown = key;
+        for (let i = 0; i < N; i++) {
+          const off = !!is && is.tripped.includes(i) && !is.reset.includes(i), [x, y] = at(i);
+          handles.setMatrixAt(i, m4.compose(v.set(x, y + (off ? -0.045 : 0.045), 0.085), q.setFromEuler(e.set(off ? 0.5 : -0.5, 0, 0)), one));
+          lamps.setColorAt(i, col.setHex(off ? 0xff3b30 : 0x39d86a));
+        }
+        handles.instanceMatrix.needsUpdate = true; lamps.instanceColor.needsUpdate = true;
+      }
+      if (!is) return idle(p, 'BREAKER PANEL');
+      p.screen.draw(`${is.id}|${secs(is)}`, (c, W) => lines(c, W, [[`${ISSUES.power.title.toUpperCase()}   ${secs(is)} s`, 30, '#ffb84a'], ['ON BACKUP POWER', 56, '#fff'], ['RESET THE BREAKERS. ONE HAS A SHORT', 26, '#ff5c5c']]));
     };
   }
 
