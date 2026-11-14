@@ -188,12 +188,14 @@ net.onMsg = m => { if (m.t === 'ptt') { rx = m.on; radio.rxMarker(m.on); } };
 // ---------- controls ----------
 const keys = {};
 let debugOutage = false; // laptop only: L runs the power-outage lighting without a server alarm
+let debugDamage = false; // laptop only: K knocks loose everything in the hall that can come loose
 addEventListener('keydown', e => {
   keys[e.key.toLowerCase()] = true;
   // Space would scroll the page. Tab is the radio key once you are playing, so it must not move the
   // keyboard focus; on the start screen it is left alone, to step between the buttons as usual.
   if (e.key === ' ' || (e.key === 'Tab' && mode === 'desk')) e.preventDefault();
   if (e.key.toLowerCase() === 'l' && mode === 'desk' && !e.repeat) debugOutage = !debugOutage;
+  if (e.key.toLowerCase() === 'k' && mode === 'desk' && !e.repeat) debugDamage = !debugDamage;
 });
 addEventListener('keyup', e => { keys[e.key.toLowerCase()] = false; });
 addEventListener('blur', () => { for (const k in keys) keys[k] = false; });
@@ -706,6 +708,7 @@ renderer.setAnimationLoop(() => {
   // The hall goes to its red backup lights when the switchboard trips, and when the battery runs flat.
   const powerOut = debugOutage || (run && (!!s.scene.board || s.scene.dark));
   interior.setPower(powerOut);
+  interior.setDamage(debugDamage ? { board: [], hull: {}, meteor: 5 } : run ? s.scene : null, where === 'in');
   interior.update(dt, now);
   radio.room(where === 'in' ? (interior.dark ? 0.15 : 1) : 0);
   passageStep(Math.min(0.25, now - armFrame)); // real time, so the airlock is as quick on a slow machine
@@ -738,7 +741,7 @@ renderer.setAnimationLoop(() => {
 
 // For debugging from the browser console, and for the tests: moonbase.state(), moonbase.fx.targets() ...
 window.moonbase = { resetStanding: () => { standing = 1.2; }, state: () => state, fx, world, interior, radio, rig, camera, net, board, THREE, scene, use: () => use(null), useBoard: () => useBoard(null), useHatch: () => useHatch(null), sendPose, myPose, teleport, turnRig,
-  where: () => where, place, renderer, outage: on => { debugOutage = on; },
+  where: () => where, place, renderer, outage: on => { debugOutage = on; }, wreck: on => { debugDamage = on; },
   zoom: () => zoom, setZoom, controllers, handControls, scope: scopeMesh, arm, snap, radioState: () => ({ keyed, talking, rx, reading, shown: radioState() }) };
 
 // ---------- start-up screen: the lobby, with the radio and VR steps in the astronaut's panel ----------

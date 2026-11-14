@@ -45,7 +45,7 @@ Connect the repo once and every push to `main` deploys itself. Cloudflare gives 
 
 1. Cloudflare dashboard, **Workers & Pages**, **Create**, **Import a repository**, pick this repo.
 2. Leave the build command empty and the deploy command as `npx wrangler deploy`. Deploy.
-3. The dashboard shows the URL, like `https://moonbase-manager.<your-account>.workers.dev`. Hand out `<that URL>/astronaut`, `/ops`, `/tech` and `/sci`.
+3. The dashboard shows the URL, like `https://moonbase-manager.<your-account>.workers.dev`. Hand out `<that URL>/astronaut`, `/ops`, `/tech` and `/sci`. The live deployment is at **https://moonbasemanagedfrom.earth** (a custom domain on the same Worker): seats are `/astronaut`, `/ops`, `/tech`, `/sci`, `/control` for two players, and `/admin` for the referee.
 
 There is no build step because everything the pages need is committed under `client/`, three.js included. Everyone who opens the site is in the same mission, which is what you want for a demo. The free plan covers this; the room is declared as a SQLite-backed Durable Object because that is the kind the free plan allows. `npm run deploy` does the same from a laptop after `npx wrangler login`.
 
@@ -175,6 +175,10 @@ The airlock hatch on the dome is a door. Point at it and select, and after a sho
 
 Eight roof lights keep it lit. When the switchboard trips, or the battery runs flat, they flicker and die, the hall is dark for a second and a half, then a relay clunks and six red backup lights come up. From outside, the floodlight goes out and the windows turn dim red (black in a full blackout), which the Technician can see through the rover camera. Seat the cables and the roof lights re-strike row by row, starting at the board. Being inside counts as cover from a meteor shower, and a hull breach is heard from the airlock end of the hall. On a laptop, **L** runs the lighting sequence without waiting for the alarm.
 
+The hall is kept clean, and faults show up in it. When the switchboard trips, the ceiling panel over it swings down on its hinge and the conduit cable tears out of its clips and hangs sparking to the floor. A hull breach pops the wall panel beside the airlock: it slides down the wall, tips over onto its face and the pipe behind it vents. A meteor shower shakes a ceiling panel loose up the hall and drops a cable off the gantry. Everything falls at lunar gravity, so slowly. Fix the fault and the pieces go back where they were. On a laptop, **K** knocks everything loose at once. The breakables are `client/damage.js`.
+
+![A hull breach from inside: the panel by the airlock has come off and lies on the floor, the pipe behind it venting](docs/astronaut-interior-damage.png)
+
 ![The hall](docs/astronaut-interior.png)
 
 ![On backup lights](docs/astronaut-interior-backup.png)
@@ -198,6 +202,7 @@ worker/             the same thing on Cloudflare: a Worker for the pages, a Dura
 client/astronaut.*  VR client: movement, grabbing, pointing, crouch, visor zoom, the airlock
 client/arm.js       the astronaut's left arm and its wrist gauge cluster
 client/interior.js  the hall inside the habitat: geometry, the lighting states, where you can walk
+client/damage.js    what comes loose in the hall when a fault hits, and goes back when it is fixed
 client/stations.js  the tools, the belt and every repair, each with a grab-it version and a point-at-it version
 client/world.js     the Moon scene and everything that can be seen broken (shared with the rover camera)
 client/console.*    Mission Ops, Technician, Scientist and all-in-one
