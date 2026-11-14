@@ -66,7 +66,13 @@ const until = async (what, test, ms = 40000) => {
 const gaugeFace = p => p.evaluate(() => {
   const mb = window.moonbase;
   const overlays = mb.camera.children.filter(o => o.visible && o !== mb.arm.group && o !== mb.scope && !o.isLight && o.type !== 'Object3D').length;
-  return { ...mb.arm.shown, drawn: !!mb.arm.shown, overlays };
+  return { ...mb.arm.shown, drawn: !!mb.arm.shown, overlays, text: window.__gaugeText };
+});
+// The gauge face is icons only. Count any text drawn on its canvas from here on; there should be none.
+const watchGaugeText = p => p.evaluate(() => {
+  const face = window.moonbase.arm.canvas, P = CanvasRenderingContext2D.prototype;
+  window.__gaugeText = 0;
+  for (const f of ['fillText', 'strokeText']) { const draw = P[f]; P[f] = function (...a) { if (this.canvas === face) window.__gaugeText++; return draw.apply(this, a); }; }
 });
 // Screenshots are optional (SMOKE_SHOTS=1, or npm run smoke:shots). Reading pixels back from anything
 // the graphics side has drawn (the 3D view, a render target, even the gauge face's 2D canvas) is the
@@ -216,6 +222,7 @@ try {
   // The radio and the wrist gauges are one control. Nothing is drawn over the view until the radio is
   // keyed (Tab on a laptop); then the arm comes up with the gauge cluster on it. This browser has no
   // microphone, so the arm must still come up and the cluster must say so, in amber.
+  await watchGaugeText(astro);
   const rest = await armState(astro);
   if (rest.mic) problems.push('radio: this browser was not meant to have a microphone');
   if (rest.raise !== 0 || rest.visible || rest.keyed) problems.push('wrist gauges: the arm is in view with the radio idle: ' + JSON.stringify(rest));
@@ -231,7 +238,8 @@ try {
   if (!up.keyed || up.talking || up.shown !== 'nomic') problems.push('wrist gauges: with no microphone, Tab should raise the arm and show NO MICROPHONE: ' + JSON.stringify(up));
   await astro.waitForTimeout(1500);
   const face = await gaugeFace(astro);
-  if (!face.drawn || !Number.isFinite(face.oxygen) || !Number.isFinite(face.seconds) || !face.message) problems.push('wrist gauges: the gauge face is missing something: ' + JSON.stringify(face));
+  if (!face.drawn || !Number.isFinite(face.oxygen) || !Number.isFinite(face.seconds) || !Number.isFinite(face.alarms)) problems.push('wrist gauges: the gauge face is missing something: ' + JSON.stringify(face));
+  if (face.text !== 0) problems.push(`wrist gauges: the face is meant to be icons only, but text was drawn on it ${face.text} time(s)`);
   if (face.overlays) problems.push(`wrist gauges: ${face.overlays} other thing(s) are still fixed to the view`);
   if (face.radio !== 'NO MICROPHONE' || face.frame !== '#ffb347') problems.push('wrist gauges: the face does not show NO MICROPHONE in amber: ' + JSON.stringify(face));
   await view(astro, 'astronaut-wrist');

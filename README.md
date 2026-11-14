@@ -73,9 +73,22 @@ Visor zoom is for reading a panel or a serial number from where you stand: a rou
 
 ### No display on the visor
 
-![The wrist gauges, up while the radio is keyed](docs/astronaut-wrist.png)
+![The cuff display on the suit's forearm, up while the radio is keyed](docs/astronaut-wrist.png)
 
-The astronaut has no heads-up display. Suit oxygen, time left, the radio lamp, the alarm count, the visor zoom level and the message line are on a gauge cluster strapped to the left forearm, and the arm is out of sight until the radio is keyed. Keying the radio and raising the arm are one action: hold the radio control (left trigger, left hand to helmet, or Tab on a laptop) and the arm swings up across your face and covers most of the view; let go and it drops. So you can look at the Moon or at your gauges, not both, and you read your oxygen while you are talking. The arm being up is itself the sign that your radio is keyed, and the cluster says what the radio is doing: a light bar on top of it, the frame round the face and the RADIO lamp turn red and read TRANSMITTING while you are on the air, blue (MISSION OPS) while they are talking to you, and amber (NO MICROPHONE) if the page has none, in which case the arm still comes up but nothing is sent. The older screenshots in `docs/` were taken before this and still show a strip along the bottom of the view; that strip is gone.
+The astronaut has no heads-up display. Everything is on a small cuff display strapped to the left forearm of the suit, and the arm is out of sight until the radio is keyed. Keying the radio and raising the arm are one action: hold the radio control (left trigger, left hand to helmet, or Tab on a laptop) and the arm swings up in front of you; let go and it drops. So you read your oxygen while you are talking.
+
+The display has no words or numbers on it, only icons:
+
+| Icon | Means |
+| --- | --- |
+| Gas bottle in a dial | suit oxygen: the bottle and the dial empty together, and turn red when low |
+| Hourglass in a dial | time left: the sand and the dial run down, amber for the last 30 seconds |
+| Tick or cross in place of the hourglass | an alarm just fixed or a mistake just made, for a few seconds; at the end, mission complete or failed |
+| Radio mast | red waves while you are transmitting, blue while Mission Ops is talking, an amber bar through it if the page has no microphone |
+| Warning triangles | one lit for each active alarm |
+| Magnifying glass | lit while the visor zoom is on, with pips for how far in |
+
+The arm being up is itself the sign that your radio is keyed, and the display backs it up: a light strip in its top edge and the frame round the face take the radio's colour. The arm is modelled on an EVA suit's: a woven white outer garment with soft wrinkles, a ribbed elbow, a red identification stripe, the metal wrist disconnect, and a glove with a gauntlet, palm strap, knuckle pad and silicone fingertips. The older screenshots in `docs/` were taken before any of this and still show a strip of text along the bottom of the view; that strip is gone.
 
 Mission Ops holds **Space** to talk. The Technician drives the rover with the **arrow keys**.
 
@@ -120,7 +133,7 @@ Everything is procedural, nothing is downloaded: cratered regolith with a genera
 
 Tested in headless Chromium against the real three.js r180 build: lobby and loadout, a full round with every alarm type solved through the astronaut's panels, the delayed voice link in both directions, rover driving, results, "Fly again", seat locking, and the 3D scene itself: it loads with no errors, everything renders, and using a wire on the fuel depot panel reaches the server through the raycaster, on both the laptop server and the Cloudflare worker. `npm run smoke` repeats the scene check (it needs `npm i -D playwright && npx playwright install chromium` once). `npm run smoke:shots` does the same and leaves screenshots in `test/shots/`; they are off by default because reading a picture back out of a 3D canvas is the one thing software rendering cannot do cheaply, and each one costs the test browser tens of seconds and gigabytes of memory.
 
-The smoke test also drives the hand-tracking gestures without a headset, by firing the same events a pinch fires: both hands pinched and pulled apart zooms (in either pinch order, without teleporting or turning), pushed together zooms out, and the one-handed turn and teleport still work. It then checks that the visor scope's extra pass draws the scene without a WebGL error, that nothing is fixed to the view while the radio is idle, and that the radio key and the arm are one control. With no microphone, holding Tab still brings the arm up with a drawn gauge face that says NO MICROPHONE in amber, the old T key does nothing, and letting go lowers the arm. Then, in a second browser with a pretend microphone, holding Tab brings the arm up, puts the astronaut on the air with a red frame, and shows "ASTRONAUT IS TRANSMITTING" on the Mission Ops seat; letting go ends the transmission; and Mission Ops holding Space reaches the astronaut without raising the arm. It prints each step with a time as it goes.
+The smoke test also drives the hand-tracking gestures without a headset, by firing the same events a pinch fires: both hands pinched and pulled apart zooms (in either pinch order, without teleporting or turning), pushed together zooms out, and the one-handed turn and teleport still work. It then checks that the visor scope's extra pass draws the scene without a WebGL error, that nothing is fixed to the view while the radio is idle, and that the radio key and the arm are one control. With no microphone, holding Tab still brings the arm up with a drawn gauge face showing the no-microphone state in amber and no text at all, the old T key does nothing, and letting go lowers the arm. Then, in a second browser with a pretend microphone, holding Tab brings the arm up, puts the astronaut on the air with a red frame, and shows "ASTRONAUT IS TRANSMITTING" on the Mission Ops seat; letting go ends the transmission; and Mission Ops holding Space reaches the astronaut without raising the arm. It prints each step with a time as it goes.
 
 **Not yet seen on a headset:** the VR controls, hand tracking, the visor zoom drawn inside a live headset session, where the arm and its gauges sit in front of the face, and how the scene performs on the Quest's GPU. Start there, with the Quest plugged in over USB or on the deployed URL. If it stutters, the first things to turn down are in `client/world.js`: the terrain segment count (`SEG`), the boulder counts in the three `scatter` calls, and the shadow map size.
 

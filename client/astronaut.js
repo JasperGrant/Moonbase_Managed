@@ -16,7 +16,7 @@ const GRAVITY = 1.62;     // m/s^2, lunar
 const net = connect('astronaut');
 const radio = new Radio(net);
 let state = null, lastEv = 0, rx = false, talking = false, mode = null; // mode: 'vr' | 'desk'
-let prompt = '', promptUntil = 0, runStart = 0, lastPhase = '';
+let flash = '', flashUntil = 0, lastPhase = ''; // flash: 'ok' or 'bad', shown on the gauges for a few seconds
 
 // ---------- scene ----------
 const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -53,33 +53,29 @@ addEventListener('resize', () => {
 });
 
 // ---------- wrist gauges ----------
-// Nothing is drawn on the visor. Oxygen, the mission clock, the radio, the alarm count, the zoom
-// level and the message line all live on a gauge cluster on the left forearm, and the arm comes
-// up in front of the face only while the radio is keyed (see client/arm.js).
+// Nothing is drawn on the visor. Oxygen, the mission clock, the radio, the alarms and the zoom
+// level all live, as icons, on a gauge cluster on the left forearm, and the arm comes up in front
+// of the face only while the radio is keyed (see client/arm.js).
 const arm = buildArm(THREE);
 camera.add(arm.group);
 // Keying the radio and raising the arm are one action: Tab on a laptop, the left trigger on a
 // controller, the left hand to the helmet with bare hands.
 let keyed = false; // the talk control is held, whether or not there is a microphone
 
-function message(now) {
+// What the clock dial shows instead of its hourglass: a tick or a cross for the mission's outcome or
+// for the thing that just happened, and a dark hourglass while waiting in the lobby.
+function status(now) {
   const s = state;
-  let line = now < promptUntil ? prompt : '';
-  if (!s) line = 'Connecting to the base...';
-  else if (s.phase === 'lobby') line = 'Waiting for Mission Ops to start. Radio check: say hello.';
-  else if (s.phase === 'results') line = (s.result.won ? 'MISSION COMPLETE' : 'MISSION FAILED') + `   Score ${s.score}.   ${s.result.reason}`;
-  else if (!line && now - runStart < 14) line = mode !== 'vr' ? 'Click to use a panel.  WASD to walk.'
-    : usingHands() ? 'Point + pinch = use a panel.  Pinch the ground = teleport.  Pinch both hands + pull apart = zoom.' : 'Point + RIGHT TRIGGER to use a panel.';
-  else if (!line && s.issues.length) line = `${s.issues.length} alarm${s.issues.length > 1 ? 's' : ''} active. Ask Mission Ops where to go.`;
-  else if (!line) line = 'All systems nominal.';
-  return line;
+  if (!s || s.phase === 'lobby') return 'standby';
+  if (s.phase === 'results') return s.result.won ? 'won' : 'lost';
+  return now < flashUntil ? flash : '';
 }
 const radioState = () => talking ? 'tx' : rx ? 'rx' : keyed && !radio.micOk ? 'nomic' : '';
 function drawGauges(now) {
-  arm.draw({ state, line: message(now), zoom: scopeOn() ? zoom : 1, total: CFG.roundSeconds, radio: radioState() });
+  arm.draw({ state, status: status(now), zoom: scopeOn() ? zoom : 1, total: CFG.roundSeconds, radio: radioState() });
   arm.signal(radioState(), now);
 }
-function say(text, seconds = 6) { prompt = text; promptUntil = performance.now() / 1000 + seconds; }
+function show(what, seconds) { flash = what; flashUntil = performance.now() / 1000 + seconds; }
 
 // ---------- network ----------
 net.onState = s => { state = s; };
@@ -412,7 +408,7 @@ renderer.setAnimationLoop(() => {
   const s = state;
   if (s) {
     if (s.phase !== lastPhase) {
-      if (s.phase === 'run') { runStart = now; promptUntil = 0; rig.position.set(CFG.spawn.x, 0, CFG.spawn.z); }
+      if (s.phase === 'run') { flashUntil = 0; rig.position.set(CFG.spawn.x, 0, CFG.spawn.z); }
       lastPhase = s.phase;
     }
     if (s.ev && s.ev.n !== lastEv) {
@@ -420,10 +416,8 @@ renderer.setAnimationLoop(() => {
       const k = s.ev.kind;
       radio.sfx(k);
       // The astronaut is never told what or where: that is mission control's job.
-      if (k === 'spawn') say('ALARM! Something broke. Ask Mission Ops what and where.');
-      if (k === 'solve') say(`FIXED!  +${s.ev.pts} points`, 4);
-      if (k === 'mistake') say(s.ev.text + (s.ev.o2 ? `  (${s.ev.o2} oxygen)` : ''));
-      if (k === 'miss') say(`Too late: an alarm timed out.  (${s.ev.o2} oxygen)`);
+      if (k === 'solve') show('ok', 4);
+      if (k === 'mistake' || k === 'miss') show('bad', 5);
     }
     panels.sync(s.phase === 'run' ? s.issues : [], now);
     world.update(now, s.issues.map(i => i.type));
