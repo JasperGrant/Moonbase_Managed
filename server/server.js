@@ -19,7 +19,7 @@ const MIME = {
 };
 const WEB = path.join(ROOT, 'client'); // everything the pages need is in here, three.js included
 
-const hub = new Hub(undefined, { requireFullCrew: process.env.SOLO ? false : undefined }); // SOLO=1 npm start: ready up alone
+const hub = new Hub(undefined, { requireFullCrew: process.env.SOLO ? false : undefined, adminKey: process.env.ADMIN_KEY }); // SOLO=1: ready up alone. ADMIN_KEY=x: lock /admin
 
 function serve(req, res) {
   let url;
@@ -46,7 +46,10 @@ const server = secure
 
 const wss = new WebSocketServer({ server });
 wss.on('connection', ws => {
-  const client = { send: data => { if (ws.readyState === 1) ws.send(data, { binary: typeof data !== 'string' }); } };
+  const client = {
+    send: data => { if (ws.readyState === 1) ws.send(data, { binary: typeof data !== 'string' }); },
+    close: () => { try { ws.close(4000, 'kicked'); } catch {} setTimeout(() => { try { ws.terminate(); } catch {} }, 1000); },
+  };
   hub.add(client);
   ws.on('error', () => {});
   ws.on('close', () => hub.remove(client));

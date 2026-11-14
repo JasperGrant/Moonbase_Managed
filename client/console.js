@@ -7,7 +7,7 @@ import { Radio } from '/voice.js';
 import { CFG, TOOLS, PLACES, MODES, ROLES, SOCKET_SHAPES } from '/shared/config.js';
 import { beltWeight } from '/shared/rules.js';
 import { drawTool, drawShape } from '/shared/icons.js';
-import { seatTaken } from '/seat.js';
+import { seatTaken, kicked } from '/seat.js';
 import { createLobby } from '/lobby.js';
 
 // /console.html?role=ops or the clean URL /ops; /control is the all-in-one seat.
@@ -86,6 +86,7 @@ $('run').addEventListener('click', e => {
 // ---------- network ----------
 net.onState = s => { state = s; render(); };
 net.onTaken = seatTaken;
+net.onKicked = kicked;
 net.onBinary = buf => radio?.receive(buf);
 net.onMsg = m => { if (m.t === 'ptt' && radio) { rx = m.on; radio.rxMarker(m.on); paintPtt(); } };
 setInterval(() => { $('link').textContent = net.open ? '' : 'NO LINK TO SERVER'; }, 500);
