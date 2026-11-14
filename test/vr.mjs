@@ -897,7 +897,7 @@ try {
         status: a.shown?.status, face: a.shown?.debrief, pressing: +a.pressing.toFixed(2),
         result: mb.resultBoard.visible && +dir.dot(v.wp(mb.resultBoard).sub(head).setY(0).normalize()).toFixed(2),
         // the board's front must face the head, or it is culled and nothing is seen
-        resultFront: +v.V(0, 0, 1).applyQuaternion(mb.resultBoard.getWorldQuaternion(new T.Quaternion())).dot(head.clone().sub(v.wp(mb.resultBoard)).setY(0).normalize()).toFixed(2) };
+        resultFront: +v.V(0, 0, 1).applyQuaternion(mb.resultBoard.getWorldQuaternion(new v.T.Quaternion())).dot(head.clone().sub(v.wp(mb.resultBoard)).setY(0).normalize()).toFixed(2) };
     };
   }, CFG.spawn);
   const after = () => P(() => window.vr.after());
