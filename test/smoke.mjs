@@ -28,7 +28,7 @@ await new Promise(r => setTimeout(r, 800));
 
 const problems = [];
 const browser = await chromium.launch({ args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
-const ctx = await browser.newContext({ viewport: { width: 1280, height: 720 } });
+const ctx = await browser.newContext({ viewport: { width: 960, height: 540 } }); // software GL: keep the pixel count down
 async function open(name, url) {
   const p = await ctx.newPage();
   p.on('pageerror', e => problems.push(`${name}: ${e.message}`));
@@ -37,7 +37,7 @@ async function open(name, url) {
   await p.goto(BASE + url);
   return p;
 }
-const shot = (p, name) => p.screenshot({ path: path.join(OUT, name + '.png'), timeout: 120000 });
+const shot = (p, name) => p.screenshot({ path: path.join(OUT, name + '.png'), timeout: 600000 });
 
 try {
   const ctl = await open('console', '/control');

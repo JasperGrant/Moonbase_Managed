@@ -16,6 +16,15 @@ h2 { font-size:13px; color:var(--dim); text-transform:uppercase; margin-bottom:.
 .seats a b { display:block; color:var(--green); font-size:17px; }
 .seats a span { color:var(--dim); font-size:13px; }
 .seats .wide { grid-column:1 / -1; }
+.seats a { position:relative; }
+.seats a.taken { opacity:.38; pointer-events:none; }
+.seats a.taken b { color:var(--dim); }
+.seats a i { position:absolute; top:10px; right:12px; font-style:normal; font-size:11px; letter-spacing:.15em; text-transform:uppercase; color:var(--red); border:1px solid var(--red); border-radius:3px; padding:2px 6px; }
+.landing .hint { margin-top:1.2em; min-height:1.2em; }
+#taken { position:fixed; inset:0; z-index:20; display:flex; align-items:center; justify-content:center; background:rgba(4,6,8,.96); text-align:center; padding:2em; }
+#taken h1 { color:var(--red); letter-spacing:.3em; }
+#taken p { color:var(--dim); } #taken b { color:var(--ink); }
+#taken a { display:inline-block; margin-top:1em; padding:.7em 1.4em; background:var(--green); color:#000; border-radius:4px; text-decoration:none; font-weight:700; }
 
 header { display:flex; gap:22px; align-items:center; padding:10px 16px; border-bottom:1px solid var(--line); background:var(--panel); flex-wrap:wrap; }
 .brand { font-weight:700; letter-spacing:.2em; color:var(--green); }

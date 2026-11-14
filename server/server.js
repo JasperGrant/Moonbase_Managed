@@ -19,10 +19,13 @@ const MIME = {
 };
 const WEB = path.join(ROOT, 'client'); // everything the pages need is in here, three.js included
 
+const hub = new Hub();
+
 function serve(req, res) {
   let url;
   try { url = decodeURIComponent(new URL(req.url, 'http://x').pathname); } catch { res.writeHead(400).end(); return; }
   if (url === '/') url = '/index.html';
+  if (url === '/seats') { res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }).end(JSON.stringify(hub.seats())); return; }
   url = PAGES[url] || url;
   const file = path.join(WEB, url);
   if (!file.startsWith(WEB + path.sep)) { res.writeHead(403).end(); return; }
@@ -41,7 +44,6 @@ const server = secure
   ? https.createServer({ key: fs.readFileSync(keyFile), cert: fs.readFileSync(certFile) }, serve)
   : http.createServer(serve);
 
-const hub = new Hub();
 const wss = new WebSocketServer({ server });
 wss.on('connection', ws => {
   const client = { send: data => { if (ws.readyState === 1) ws.send(data, { binary: typeof data !== 'string' }); } };

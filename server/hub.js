@@ -20,6 +20,16 @@ export class Hub {
   live() { return [...this.clients].filter(c => c.open && c.role); }
   crew() { return [...new Set(this.live().map(c => c.role))]; }
 
+  // One person per seat. The all-in-one console counts as Ops, Tech and Sci at once.
+  taken(role) {
+    const crew = this.crew();
+    if (crew.includes(role)) return true;
+    if (role === 'all') return ['ops', 'tech', 'sci'].some(r => crew.includes(r));
+    return crew.includes('all') && ['ops', 'tech', 'sci'].includes(role);
+  }
+  // For the landing page: which seats are free right now.
+  seats() { return { crew: this.crew(), taken: Object.keys(ROLES).filter(r => this.taken(r)), phase: this.game.phase }; }
+
   add(client) { client.role = null; client.open = true; this.clients.add(client); }
   remove(client) { client.open = false; this.clients.delete(client); }
 
@@ -48,7 +58,12 @@ export class Hub {
     try { m = JSON.parse(data); } catch { return; }
     if (!m || typeof m !== 'object') return;
 
-    if (m.t === 'hello') { if (ROLES[m.role]) ws.role = m.role; return; }
+    if (m.t === 'hello') {
+      if (!ROLES[m.role]) return;
+      if (this.taken(m.role)) { ws.send(JSON.stringify({ t: 'taken', role: m.role })); return; }
+      ws.role = m.role;
+      return;
+    }
     if (!ws.role) return;
 
     if (ws.role === 'astronaut') {

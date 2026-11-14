@@ -9,6 +9,8 @@ A co-op fix-it game. One astronaut is on the Moon in VR. Mission control is on l
 
 Two players? One person opens "Mission Control", which shows all three consoles.
 
+One person per seat: the landing page greys out seats that are taken, and the server turns away a second person who opens a taken seat's URL.
+
 ## Run it
 
 ```
@@ -91,7 +93,7 @@ server/server.js    the laptop web server and WebSocket, drives hub.js
 worker/             the same thing on Cloudflare: a Worker for the pages, a Durable Object for the room
 client/astronaut.*  VR client: movement, pointing, HUD
 client/stations.js  the four panels the astronaut works at
-client/world.js     the Moon scene (shared with the rover camera)
+client/world.js     the Moon scene: terrain, sky, Earth, habitat, rover, lander (shared with the rover camera)
 client/console.*    Mission Ops, Technician, Scientist and all-in-one
 client/voice.js     push-to-talk radio with 1960s distortion and Quindar beeps
 ```
@@ -102,13 +104,13 @@ Suggested split: A takes `astronaut.js`, `world.js` and the art. B takes `server
 
 ## What has and has not been tested
 
-![The astronaut at the fuel depot](docs/astronaut-fuel-depot.png)
+![The habitat](docs/astronaut-habitat.png)
 
-Tested in headless Chromium against the real three.js r180 build: lobby and loadout, a full round with every alarm type solved through the astronaut's panels, the delayed voice link in both directions, rover driving, results, "Fly again", and the 3D scene itself: it loads with no errors, every station, the rover and the Technician's rover camera render, and clicking a wire on the fuel depot panel reaches the server through the raycaster. `npm run smoke` repeats the scene check (it needs `npm i -D playwright && npx playwright install chromium` once) and leaves screenshots in `test/shots/`. More screenshots in `docs/`.
+Everything is procedural, nothing is downloaded: cratered regolith with a generated grain texture and vertex-colour variation, boulder fields from noise-displaced rocks (none inside the play area, so you never walk through one), a Milky Way of 5,000 stars with their own sizes and colours, the sun as a disc and glow along the light direction, and an Earth with continents, drifting clouds, a sunlit atmosphere rim and a phase from the same sun that lights the ground. Filmic tone mapping and an environment map make the gold foil, visors and steel reflect something. The habitat has a ribbed dome, insulated skirt, hatch with porthole, floodlight, radiators and a dish aimed at Earth; the stations, rover and a lander with its flag on the horizon follow suit. The scene is about 250k triangles and 270 draw calls, which is within a Quest 2's budget. The look was tuned from desktop screenshots in `docs/`.
 
-Fixed on that first pass: the camera could end up staring at the sky the moment the pointer locked (Chrome's first mouse event after a lock carries a huge jump), the drill tripod legs splayed outward, the helmet lamp and rover headlight blew out to pure white at arm's length, and Earth was a flat unlit disc.
+Tested in headless Chromium against the real three.js r180 build: lobby and loadout, a full round with every alarm type solved through the astronaut's panels, the delayed voice link in both directions, rover driving, results, "Fly again", seat locking, and the 3D scene itself: it loads with no errors, everything renders, and using a wire on the fuel depot panel reaches the server through the raycaster, on both the laptop server and the Cloudflare worker. `npm run smoke` repeats the scene check (it needs `npm i -D playwright && npx playwright install chromium` once) and leaves screenshots in `test/shots/`.
 
-**Not yet seen on a headset:** the VR controls, hand pointing and HUD placement were written to the WebXR API but have only run on a desktop screen. Start there, with the Quest plugged in over USB.
+**Not yet seen on a headset:** the VR controls, hand tracking, HUD placement, and how the scene performs on the Quest's GPU. Start there, with the Quest plugged in over USB or on the deployed URL. If it stutters, the first things to turn down are in `client/world.js`: the terrain segment count (`SEG`), the boulder counts in the three `scatter` calls, and the shadow map size.
 
 ## Science notes for the pitch
 

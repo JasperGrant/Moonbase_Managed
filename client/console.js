@@ -5,6 +5,7 @@ import { connect } from '/net.js';
 import { Radio } from '/voice.js';
 import { CFG, VEHICLES, GEAR, STATIONS, ISSUES, ROLES, bearing } from '/shared/config.js';
 import { MANUAL } from '/shared/rules.js';
+import { seatTaken } from '/seat.js';
 
 // /console.html?role=ops or the clean URL /ops; /control is the all-in-one seat.
 const PATH_ROLE = { ops: 'ops', tech: 'tech', sci: 'sci', control: 'all', all: 'all' };
@@ -52,6 +53,7 @@ $('run').innerHTML = [
 
 // ---------- network ----------
 net.onState = s => { state = s; render(); };
+net.onTaken = seatTaken;
 net.onBinary = buf => radio?.receive(buf);
 net.onMsg = m => {
   if (m.t === 'ptt' && radio) { rx = m.on; radio.rxMarker(m.on); paintPtt(); }

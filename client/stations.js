@@ -11,7 +11,7 @@ export function buildPanels(THREE, world, act, sfx = () => {}) {
   const panels = {};
   const flying = [];     // rocks in flight
 
-  const boardMat = new THREE.MeshStandardMaterial({ color: 0x2b3138, roughness: 0.8 });
+  const boardMat = new THREE.MeshStandardMaterial({ color: 0x2b3138, roughness: 0.55, metalness: 0.4 });
   const ghost = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false });
 
   // A small screen you can draw text on. It only redraws when `key` changes.
@@ -21,7 +21,7 @@ export function buildPanels(THREE, world, act, sfx = () => {}) {
     const ctx = canvas.getContext('2d');
     const tex = new THREE.CanvasTexture(canvas);
     tex.colorSpace = THREE.SRGBColorSpace;
-    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshBasicMaterial({ map: tex }));
+    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshBasicMaterial({ map: tex, toneMapped: false }));
     let last = null;
     return { mesh, draw(key, fn) { if (key === last) return; last = key; ctx.fillStyle = '#041008'; ctx.fillRect(0, 0, pw, ph); fn(ctx, pw, ph); tex.needsUpdate = true; } };
   }
@@ -40,7 +40,7 @@ export function buildPanels(THREE, world, act, sfx = () => {}) {
     g.fillStyle = '#fff'; g.font = `bold ${Math.round(c.height * 0.55)}px monospace`; g.textAlign = 'center'; g.textBaseline = 'middle';
     g.fillText(label, c.width / 2, c.height / 2 + 2);
     const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace;
-    return new THREE.Mesh(new THREE.BoxGeometry(w, h, 0.04), new THREE.MeshBasicMaterial({ map: tex }));
+    return new THREE.Mesh(new THREE.BoxGeometry(w, h, 0.04), new THREE.MeshBasicMaterial({ map: tex, toneMapped: false }));
   }
 
   // Common backboard with a screen on top. The work area is below the screen.
@@ -64,7 +64,7 @@ export function buildPanels(THREE, world, act, sfx = () => {}) {
     const p = board('wires');
     const wires = [], pads = [];
     for (let i = 0; i < 5; i++) {
-      const w = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.022, 0.5, 8), new THREE.MeshBasicMaterial({ color: 0xffffff }));
+      const w = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.022, 0.5, 8), new THREE.MeshBasicMaterial({ color: 0xffffff, toneMapped: false }));
       w.position.z = 0.07; p.g.add(w); wires.push(w);
       const pad = clickable(new THREE.Mesh(new THREE.BoxGeometry(0.17, 0.56, 0.08), ghost), () => !!p.issue && i < p.issue.colors.length && !p.issue.cut.includes(i),
         () => act(p.issue.id, { cut: i }));

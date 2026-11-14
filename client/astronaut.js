@@ -6,6 +6,7 @@ import { Radio } from '/voice.js';
 import { buildWorld } from '/world.js';
 import { buildPanels } from '/stations.js';
 import { CFG } from '/shared/config.js';
+import { seatTaken } from '/seat.js';
 
 const REACH = 3.2;        // metres: how far away a panel can be used
 const WALK = 2.4;         // m/s
@@ -21,6 +22,9 @@ const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 renderer.setSize(innerWidth, innerHeight);
 renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping; // filmic roll-off: the sun is harsh, the shadows stay readable
+renderer.toneMappingExposure = 1.05;
 renderer.xr.enabled = true;
 renderer.xr.setFoveation(1);
 document.body.appendChild(renderer.domElement);
@@ -34,10 +38,10 @@ rig.position.set(CFG.spawn.x, 0, CFG.spawn.z);
 rig.add(camera);
 scene.add(rig);
 
-const world = buildWorld(THREE, scene);
+const world = buildWorld(THREE, scene, { renderer });
 const panels = buildPanels(THREE, world, (id, a) => net.send({ t: 'act', id, a }), k => radio.sfx(k));
 
-const lamp = new THREE.SpotLight(0xffffff, 14, 16, 0.65, 0.6); // candela; 40 blew out panels at arm's length
+const lamp = new THREE.SpotLight(0xfff4e4, 14, 16, 0.65, 0.7, 1.4); // candela; 40 blew out panels at arm's length
 lamp.target.position.set(0, -0.15, -1);
 camera.add(lamp, lamp.target);
 lamp.visible = false;
@@ -53,7 +57,7 @@ hudCanvas.width = 1024; hudCanvas.height = 160;
 const hud = hudCanvas.getContext('2d');
 const hudTex = new THREE.CanvasTexture(hudCanvas);
 hudTex.colorSpace = THREE.SRGBColorSpace;
-const hudMesh = new THREE.Mesh(new THREE.PlaneGeometry(1.15, 0.18), new THREE.MeshBasicMaterial({ map: hudTex, transparent: true, depthTest: false }));
+const hudMesh = new THREE.Mesh(new THREE.PlaneGeometry(1.15, 0.18), new THREE.MeshBasicMaterial({ map: hudTex, transparent: true, depthTest: false, toneMapped: false }));
 hudMesh.position.set(0, -0.4, -1.3);
 hudMesh.renderOrder = 10;
 camera.add(hudMesh);
@@ -101,6 +105,7 @@ function say(text, seconds = 6) { prompt = text; promptUntil = performance.now()
 
 // ---------- network ----------
 net.onState = s => { state = s; };
+net.onTaken = seatTaken;
 net.onBinary = buf => radio.receive(buf);
 net.onMsg = m => { if (m.t === 'ptt') { rx = m.on; radio.rxMarker(m.on); } };
 
@@ -164,7 +169,7 @@ const TURN_STEP = 0.1;    // metres of left-hand drag per 30-degree snap turn
 const HELMET = 0.22;      // metres from the head that counts as "hand on helmet"
 const ground = new THREE.Plane(UP, 0);
 const hitPoint = new THREE.Vector3(), tmpV = new THREE.Vector3();
-const marker = new THREE.Mesh(new THREE.RingGeometry(0.22, 0.3, 32), new THREE.MeshBasicMaterial({ color: 0x58e08a, transparent: true, opacity: 0.8, side: THREE.DoubleSide, depthWrite: false }));
+const marker = new THREE.Mesh(new THREE.RingGeometry(0.22, 0.3, 32), new THREE.MeshBasicMaterial({ color: 0x58e08a, transparent: true, opacity: 0.8, side: THREE.DoubleSide, depthWrite: false, toneMapped: false }));
 marker.rotation.x = -Math.PI / 2; marker.visible = false;
 scene.add(marker);
 

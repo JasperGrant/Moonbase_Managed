@@ -11,7 +11,10 @@ export class GameRoom {
   }
 
   fetch(request) {
-    if (request.headers.get('Upgrade')?.toLowerCase() !== 'websocket') return new Response('Expected a WebSocket', { status: 426 });
+    if (request.headers.get('Upgrade')?.toLowerCase() !== 'websocket') {
+      if (new URL(request.url).pathname === '/seats') return Response.json(this.hub.seats(), { headers: { 'Cache-Control': 'no-store' } });
+      return new Response('Expected a WebSocket', { status: 426 });
+    }
     const pair = new WebSocketPair();
     const [client, server] = [pair[0], pair[1]];
     server.accept();

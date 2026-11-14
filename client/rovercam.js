@@ -5,8 +5,10 @@ import { buildWorld } from '/world.js';
 export function startRoverCam(canvas, getState) {
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
   renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5));
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1.05;
   const scene = new THREE.Scene();
-  const world = buildWorld(THREE, scene, { shadows: false });
+  const world = buildWorld(THREE, scene, { shadows: false, renderer });
   const camera = new THREE.PerspectiveCamera(75, 16 / 9, 0.1, 1500);
   world.rover.add(camera);
   camera.position.set(0, 1.9, 0.9);
