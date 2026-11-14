@@ -16,6 +16,7 @@ import { WebSocketServer } from 'ws';
 import { Hub, PAGES } from '../server/hub.js';
 import { CFG, PLACES, DUST_CELLS, CRACK_POINTS } from '../client/shared/config.js';
 import { sheltered } from '../client/shared/rules.js';
+import { PAL } from '../client/shared/palette.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const WEB = path.join(ROOT, 'client'), OUT = path.join(ROOT, 'test', 'shots'), PORT = 3200;
@@ -186,7 +187,7 @@ try {
   step('1. grabbing tools off the rack and the belt');
   await stand(...LOCKER);
   let r = await grabTool('right', 'brush');
-  check(r.ring === '#58e08a', 'rack: no green ring on the brush before grabbing it: ' + r.ring);
+  check(r.ring === PAL.green, 'rack: no green ring on the brush before grabbing it: ' + r.ring);
   check(g.belt.includes('brush'), 'rack: gripping the brush on the rack did not put it on the belt');
   check(r.held === 'brush' && r.parent === 'hand:right', 'rack: the brush should be in the right hand straight off the rack: ' + JSON.stringify(r));
   let buzz = await P(() => window.vr.haptics());
@@ -224,7 +225,7 @@ try {
     v.grip('right', false); await v.frames(2);
     return out;
   });
-  check(r.ring === '#ff3b3b', 'weight: the ring on a tool too heavy for the belt should be red: ' + r.ring);
+  check(r.ring === PAL.red, 'weight: the ring on a tool too heavy for the belt should be red: ' + r.ring);
   check(!g.belt.includes('tire') && r.parent === 'rack' && !r.held, 'weight: the tire came off the rack with a full belt: ' + JSON.stringify(r));
   check(r.buzz.filter(b => b.strength === 1).length >= 1, 'weight: no warning buzz when the belt refused the tire');
   await reachOk('rack and belt');
@@ -351,7 +352,7 @@ try {
   // A full socket: the ring is red and nothing happens.
   let o2 = g.oxygen, mistakes = g.stats.mistakes;
   r = await plugInto(loose[0].i, fullSocket);
-  check(r.ring === '#58e08a' && r.held === 'plug', 'board: could not pick up a hanging plug: ' + JSON.stringify(r));
+  check(r.ring === PAL.green && r.held === 'plug', 'board: could not pick up a hanging plug: ' + JSON.stringify(r));
   check(g.stats.mistakes === mistakes && !cables[loose[0].i].seated, 'board: pushing a plug at a socket that is already full did something');
   // A wrong socket: a spark, 4 oxygen, and the plug drops out of the hand.
   const wrong = [0, 1, 2, 3].find(k => k !== fullSocket && k !== loose[0].socket);
@@ -448,7 +449,7 @@ try {
     const held = v.holding('left')?.kind;
     const up = at.clone().add(v.V(0, 0.25, 0));
     await v.move('left', up, 6);
-    const cord = mb.scene.children.some(o => o.isLine && o.visible && o.material.color.getHex() === 0xd23a2a);
+    const cord = mb.scene.children.some(o => o.isLine && o.visible && o.name === 'Cord_Pull');
     const early = mb.state().belt.includes('gen');
     await v.move('left', at.clone().add(v.V(0.1, 0.44, -0.05)), 6);
     await v.until(s => !s.belt.includes('gen'), 2);
@@ -664,7 +665,7 @@ try {
     };
     v.cuff = () => {
       const a = mb.arm, m = a.group.matrixWorld, at = v.V().setFromMatrixPosition(m), head = v.wp(mb.camera);
-      return { ...mb.radioState(), tracked: a.tracked, seen: a.group.visible, glove: a.group.children.some(o => o.isGroup && o.visible), icon: a.shown?.icon,
+      return { ...mb.radioState(), tracked: a.tracked, seen: a.group.visible, glove: !!a.group.getObjectByName('Hand')?.visible, icon: a.shown?.icon,
         faces: v.V().setFromMatrixColumn(m, 2).normalize().dot(head.clone().sub(at).normalize()), upright: v.V().setFromMatrixColumn(m, 1).normalize().y,
         fromHand: at.distanceTo(v.where('left')), fromEyes: at.distanceTo(head) };
     };
@@ -803,6 +804,41 @@ try {
       await v.frames(4);
     });
   }
+
+  // ---------- 13. the EXIT button on the cuff ends the session ----------
+  // Last, because it ends the headset session. Read the cuff with bare hands, then put the right index
+  // fingertip on the button: a brush does nothing, holding it for a moment takes you back to the lobby.
+  step('13. the EXIT button on the cuff');
+  await P(async () => { window.fakeXR.kind('left', 'hand'); window.fakeXR.kind('right', 'hand'); await window.vr.frames(8); });
+  await stand(0, 9, 0, 0, 1.7);
+  // Line the right index fingertip up 6 cm out from the button's cap (the joints hang off the hand), so
+  // that one push of the hand along the face of the cuff puts it on the cap. Frames stop when the session
+  // ends, so every wait here gives up after a moment.
+  r = await P(async () => {
+    const v = window.vr, mb = window.moonbase, a = mb.arm;
+    v.fr = n => mb.renderer.xr.isPresenting ? Promise.race([v.frames(n), v.sleep(3000)]) : v.sleep(50);
+    v.readCuff(); await v.fr(3);
+    const tipJoint = () => mb.renderer.xr.getHand(v.index('right')).joints['index-finger-tip'];
+    v.exitAt = () => { a.group.updateWorldMatrix(true, false); return a.EXIT_TOP.clone().applyMatrix4(a.group.matrixWorld); };
+    v.exitOut = () => v.V().setFromMatrixColumn(a.group.matrixWorld, 2).normalize();
+    let at = v.where('right');
+    for (let k = 0; k < 4; k++) { at = at.add(v.exitAt().addScaledVector(v.exitOut(), 0.06).sub(v.wp(tipJoint()))); v.hand('right', at); await v.fr(2); }
+    v.push = async (inOut) => { v.hand('right', v.where('right').addScaledVector(v.exitOut(), -0.06 * inOut)); await v.fr(1); };
+    v.tipGap = () => v.wp(tipJoint()).distanceTo(v.exitAt());
+    return { off: v.tipGap() - 0.06, presenting: mb.renderer.xr.isPresenting };
+  });
+  check(Math.abs(r.off) < 0.015 && r.presenting, 'exit: could not line the fingertip up with the EXIT button: ' + JSON.stringify(r));
+  const exitState = () => P(() => ({ presenting: window.moonbase.renderer.xr.isPresenting, pressing: +window.moonbase.arm.pressing.toFixed(2), gap: +window.vr.tipGap().toFixed(3) }));
+  // A brush: on the cap for one frame and straight off again.
+  r = await P(async () => { const v = window.vr; await v.push(1); const gap = v.tipGap(); await v.push(-1); await v.sleep(500); await v.fr(3); return { gap, presenting: window.moonbase.renderer.xr.isPresenting }; });
+  check(r.gap < 0.02 && r.presenting, 'exit: brushing the EXIT button for an instant ended the session (or the finger never reached it): ' + JSON.stringify(r));
+  r = await P(async () => { const v = window.vr; await v.push(1); await v.sleep(250); await v.fr(2); return null; });
+  r = await exitState();
+  check(r.presenting && r.pressing > 0, 'exit: a fingertip held on the EXIT button should start to press it (cap down, lamp warming): ' + JSON.stringify(r));
+  await P(async () => { const v = window.vr; for (let k = 0; k < 10 && window.moonbase.renderer.xr.isPresenting; k++) { await v.sleep(150); await v.fr(1); } });
+  r = await exitState();
+  check(!r.presenting, 'exit: holding the EXIT button did not end the headset session: ' + JSON.stringify(r));
+  check(await P(() => !document.getElementById('gate').hidden), 'exit: the lobby did not come back after leaving the headset');
 } catch (e) {
   problems.push('vr: ' + e.message);
 } finally {

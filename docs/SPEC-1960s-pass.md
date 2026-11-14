@@ -1,6 +1,6 @@
 # Spec: the 1960s visual pass
 
-Status: being carried out on this branch. Audited against `main` at `d42b548`, re-checked after merging `db05bea` (the cuff on your own arm, the admin console).
+Status: carried out on this branch: phases 1 to 4, and phase 5 steps 1 to 10 plus most of 11 (see ASSETS.md, "What is placed"). Audited against `main` at `d42b548`, re-checked after merging `db05bea` (the cuff on your own arm, the admin console).
 
 ## Goal
 
@@ -175,6 +175,7 @@ Add the palette import to each file. Lamps that switch state (board lamp, rover 
 | 160-200 | Cuff gauges on `#141a1f` / `#1b2329`, red zone `#5a1f1f`, `#5d6d76` ticks | Small cream dial faces with dark needles, like the Mission Control dials, because this is what the astronaut reads in the headset. Check legibility in `vr:shots` at arm's length: if cream is too bright inside the visor, use `console` faces with `dial` ticks. |
 | 231, 241 | Belt pips: lit `GREEN` on `#1b2329` | Jewel lamps, `lamp-green` on/off |
 | 260-278 | Cuff background `#0a0e11`, frame lights up in the radio colour at 9 px | `console-deep`, a `bezel` frame; the radio state is a lamp on the cuff, not a frame flood |
+| new | No way out of the headset session but taking the headset off | An **EXIT button** on a plate at the elbow end of the cuff: a Bakelite plunger with a red collar, a guard ring, a jewel lamp in its crown and an engraved `EXIT` label. Hold the right index fingertip (or the right controller glove's fingers) on it for 0.6 s: the cap sinks, the lamp warms, a click on touch and a relay clunk, then `session.end()` takes the astronaut back to the lobby. |
 
 ### `client/rovercam.js`
 
@@ -223,7 +224,7 @@ Each scene has a handful of saturated accents that bypass the grayscale-to-colou
 
 Everything is baked and committed under `client/assets/`, with the manifest and loader in `client/shared/assets.js` and the placement in [ASSETS.md](ASSETS.md). This phase places them. Each step below is one small PR; do them in this order, because each is worth more than the next.
 
-1. **Load and restyle helper.** In `client/shared/assets.js` or a new `client/shared/restyle.js`, a function that takes a loaded model and a material map (material name or colour to palette entry, roughness, metalness) and applies it once per model id. Turn on `castShadow` / `receiveShadow` per ASSETS.md.
+1. **Load and restyle helper** (done: `restyle` and `loadPeriod` in `client/shared/assets.js`). In `client/shared/assets.js` or a new `client/shared/restyle.js`, a function that takes a loaded model and a material map (material name or colour to palette entry, roughness, metalness) and applies it once per model id. Turn on `castShadow` / `receiveShadow` per ASSETS.md.
 2. **The astronaut glove replaces the hand models.** The cuff arm's hand in `client/arm.js` (the `glove` group built from spheres and capsules, the hand at the end of the arm that carries the wrist gauges) and the box gloves on each controller in `client/stations.js` become the `glove` model, life-size, wrist at the disconnect ring. The tracked-hand joints stay as they are: a static model cannot follow tracked fingers.
 3. **The welder becomes the pistol-grip tool** (`stations.js` 73-80): the spark on the bit's tip, belt and rack scale to 1, grab offsets checked in `npm run vr`.
 4. **The Apollo LM replaces the horizon lander** (`world.js` 765-778), flag kept.

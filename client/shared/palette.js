@@ -17,6 +17,7 @@ export const PAL = {
   phosphorOff: '#1c2a1c', phosphor: '#9cc27a',
   // materials
   aluminium: '#a7a59c', orange: '#b85a2c', hazard: '#c9a23a', incandescent: '#ffe2b0',
+  photoTint: '#e8dcc4', // multiplied into photo textures (the NASA models, the flight-deck panels) to warm them
 };
 
 // The four cable colours: muted, but still told apart at a glance (the socket shapes back them up).

@@ -9,6 +9,8 @@
 import { FAULTS } from '/shared/config.js';
 import { fits } from '/shared/rules.js';
 import { drawTool } from '/shared/icons.js';
+import { PAL } from '/shared/palette.js';
+import { loadGlove, loadPeriod } from '/shared/assets.js';
 
 // Everything here is a guess until it has been tried on a head: tune these first.
 const GRAB = 0.24;          // metres: how close a hand must be to grab a tool on the belt
@@ -23,10 +25,10 @@ const BELT_AT = 0.63;       // the belt rides at this fraction of your standing 
 const BELT_DROP = 0.45;     // ...and never closer under your eyes than this, so it sinks when you crouch right down
 const BELT_R = 0.3;         // metres from the body to a belt slot
 const BELT_SLOT = { gen: -1.3, brush: -0.65, patch: 0, welder: 0.65, tire: 1.3 }; // radians round the waist, left to right
-const BELT_SCALE = { brush: 0.8, patch: 1, welder: 0.8, tire: 0.36, gen: 0.42 };
+const BELT_SCALE = { brush: 0.8, patch: 1, welder: 1, tire: 0.36, gen: 0.42 };
 // How each tool hangs on the rack, so you see its side and not its end: [x, y] rotation in radians.
 const RACK_TURN = { brush: [Math.PI / 2, 0], welder: [0, Math.PI / 2], tire: [0, Math.PI / 2] };
-const RACK_SCALE = { brush: 1.3, patch: 1.3, welder: 1.3 };
+const RACK_SCALE = { brush: 1.3, patch: 1.3 }; // the welder is the life-size NASA tool
 const WELD_DWELL = 0.4;     // seconds the tip must stay on one point of the crack
 const WELD_RANGE = 0.12;    // metres from the tip to that point
 // Where a held tool sits in the hand. The tire is carried by its rim, so the wheel is out in front.
@@ -52,7 +54,7 @@ export function buildFixtures(THREE, world, { rig, camera, send, sfx = () => {},
 
   // ---------- the five tools. Each is modelled in the hand: local -z points away from you. ----------
   const tools = {};
-  const orange = 0xe8742a, steel = 0x9aa0a8, dark = 0x23272c;
+  const orange = PAL.hex.orange, steel = PAL.hex.aluminium, dark = 0x2b2a26;
   {
     const g = new THREE.Group();                                   // brush
     add(g, new THREE.CylinderGeometry(0.018, 0.018, 0.24, 8), mat(orange), 0, 0, -0.08).rotation.x = Math.PI / 2;
@@ -64,19 +66,27 @@ export function buildFixtures(THREE, world, { rig, camera, send, sfx = () => {},
   {
     const g = new THREE.Group();                                   // patch kit
     add(g, new THREE.BoxGeometry(0.15, 0.15, 0.02), mat(orange), 0, 0, -0.06);
-    add(g, new THREE.BoxGeometry(0.1, 0.03, 0.024), mat(0xffffff), 0, 0, -0.06);
-    add(g, new THREE.BoxGeometry(0.03, 0.1, 0.024), mat(0xffffff), 0, 0, -0.06);
+    add(g, new THREE.BoxGeometry(0.1, 0.03, 0.024), mat(PAL.hex.dial), 0, 0, -0.06);
+    add(g, new THREE.BoxGeometry(0.03, 0.1, 0.024), mat(PAL.hex.dial), 0, 0, -0.06);
     g.userData = { tip: new THREE.Vector3(0, 0, -0.07), hit: [0.2, 0.2, 0.12, -0.06] };
     tools.patch = g;
   }
   {
-    const g = new THREE.Group();                                   // welder
-    add(g, new THREE.BoxGeometry(0.045, 0.14, 0.05), mat(dark), 0, -0.06, 0);
-    add(g, new THREE.CylinderGeometry(0.03, 0.03, 0.26, 10), mat(orange), 0, 0.02, -0.1).rotation.x = Math.PI / 2;
-    add(g, new THREE.ConeGeometry(0.025, 0.08, 10), mat(steel, { metalness: 0.9 }), 0, 0.02, -0.27).rotation.x = -Math.PI / 2;
-    const spark = add(g, new THREE.SphereGeometry(0.035, 8, 6), new THREE.MeshBasicMaterial({ color: 0xfff2c0, toneMapped: false }), 0, 0.02, -0.32);
+    // Welder: NASA's pistol-grip power tool (docs/ASSETS.md), held by its grip with the bit forward. The
+    // model's bit runs along +z, so it is turned round; the grip sits on the hand, the bit tip 0.27 m ahead.
+    const g = new THREE.Group();
+    const body = new THREE.Group(); body.name = 'Body'; g.add(body);
+    add(body, new THREE.BoxGeometry(0.045, 0.14, 0.05), mat(dark), 0, -0.06, 0);     // stand-in until the model loads
+    add(body, new THREE.CylinderGeometry(0.03, 0.03, 0.26, 10), mat(orange), 0, 0.02, -0.1).rotation.x = Math.PI / 2;
+    loadPeriod(THREE, 'pistol-grip-tool', { rough: 0.7, metal: 0.25 }).then(m => {
+      m.rotation.y = Math.PI; m.position.set(0, 0.02, -0.075);
+      body.clear(); body.add(m);
+    }).catch(e => console.warn('welder model', e));
+    const TIP = new THREE.Vector3(0, 0.107, -0.27);
+    const spark = add(g, new THREE.SphereGeometry(0.03, 8, 6), new THREE.MeshBasicMaterial({ color: 0xffc98a, toneMapped: false }), TIP.x, TIP.y, TIP.z - 0.02);
+    spark.name = 'Spark';
     spark.visible = false; // no light of its own: every extra light costs the Quest on every pixel
-    g.userData = { tip: new THREE.Vector3(0, 0.02, -0.32), hit: [0.12, 0.24, 0.4, -0.12], spark };
+    g.userData = { tip: TIP, hit: [0.1, 0.3, 0.42, -0.07], spark };
     tools.welder = g;
   }
   {
@@ -92,16 +102,16 @@ export function buildFixtures(THREE, world, { rig, camera, send, sfx = () => {},
   }
   {
     const g = new THREE.Group();                                   // backup generator, with its pull cord
-    add(g, new THREE.BoxGeometry(0.42, 0.3, 0.3), mat(0xd8a62c, { metalness: 0.5 }));
+    add(g, new THREE.BoxGeometry(0.42, 0.3, 0.3), mat(PAL.hex.hazard, { metalness: 0.3 }));
     add(g, new THREE.BoxGeometry(0.46, 0.04, 0.34), mat(dark), 0, -0.17, 0);
     add(g, new THREE.CylinderGeometry(0.05, 0.05, 0.06, 10), mat(dark), -0.1, 0.18, 0);
-    add(g, new THREE.TorusGeometry(0.05, 0.014, 6, 14), mat(0xd23a2a), 0.12, 0.2, 0);
+    add(g, new THREE.TorusGeometry(0.05, 0.014, 6, 14), mat(0xa8402f), 0.12, 0.2, 0);
     g.userData = { tip: new THREE.Vector3(0, 0, 0), hit: [0.5, 0.45, 0.4, 0] };
     tools.gen = g;
   }
   const beltGroup = new THREE.Group();
   rig.add(beltGroup);
-  const ghostEdge = new THREE.LineBasicMaterial({ color: 0x58e08a });
+  const ghostEdge = new THREE.LineBasicMaterial({ color: PAL.hex.inkDim }); // a painted silhouette on the rack, like a shadow board
   for (const id in tools) {
     const g = tools[id], [w, h, d, z] = g.userData.hit;
     g.userData.id = id;
@@ -178,7 +188,7 @@ export function buildFixtures(THREE, world, { rig, camera, send, sfx = () => {},
   function patchSuit() { return !!st.suit && st.belt.includes('patch') && once('patch', () => { sfx('click'); send({ fix: 'suit' }); }); }
 
   // ---------- the suit leak: a pulsing spot on your forearm ----------
-  const spot = new THREE.Mesh(new THREE.SphereGeometry(0.04, 12, 8), new THREE.MeshBasicMaterial({ color: 0xff2a2a, toneMapped: false }));
+  const spot = new THREE.Mesh(new THREE.SphereGeometry(0.04, 12, 8), new THREE.MeshBasicMaterial({ color: PAL.hex.red, toneMapped: false }));
   spot.visible = false;
   const spotHit = add(spot, new THREE.SphereGeometry(0.1, 8, 6), ghost);
   target(spotHit, () => st.suit && spot.visible, () => patchSuit());
@@ -189,9 +199,9 @@ export function buildFixtures(THREE, world, { rig, camera, send, sfx = () => {},
     if (!f.tool || type === 'suit') continue;
     const cv = document.createElement('canvas'); cv.width = cv.height = 128;
     const g = cv.getContext('2d');
-    g.fillStyle = 'rgba(8,12,14,0.8)'; g.beginPath(); g.arc(64, 64, 62, 0, 7); g.fill();
-    g.strokeStyle = '#ffb84a'; g.lineWidth = 5; g.beginPath(); g.arc(64, 64, 59, 0, 7); g.stroke();
-    drawTool(g, f.tool, 64, 64, 84, '#ffb84a');
+    g.fillStyle = 'rgba(43,50,48,0.85)'; g.beginPath(); g.arc(64, 64, 62, 0, 7); g.fill();
+    g.strokeStyle = PAL.bezel; g.lineWidth = 5; g.beginPath(); g.arc(64, 64, 59, 0, 7); g.stroke();
+    drawTool(g, f.tool, 64, 64, 84, PAL.amber);
     const tex = new THREE.CanvasTexture(cv); tex.colorSpace = THREE.SRGBColorSpace;
     const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthTest: false, toneMapped: false }));
     s.scale.setScalar(0.42); s.visible = false; s.renderOrder = 9;
@@ -202,20 +212,34 @@ export function buildFixtures(THREE, world, { rig, camera, send, sfx = () => {},
   // ---------- things only a headset shows ----------
   // A ring round whatever each empty hand would grab if it closed now.
   const rings = [0, 1].map(() => {
-    const r = new THREE.Mesh(new THREE.TorusGeometry(1, 0.06, 6, 24), new THREE.MeshBasicMaterial({ color: 0x58e08a, toneMapped: false, depthTest: false, transparent: true, opacity: 0.9 }));
+    const r = new THREE.Mesh(new THREE.TorusGeometry(1, 0.06, 6, 24), new THREE.MeshBasicMaterial({ color: PAL.hex.green, toneMapped: false, depthTest: false, transparent: true, opacity: 0.9 }));
     r.visible = false; r.renderOrder = 8;
     world.rover.parent.add(r);
     return r;
   });
   const hover = [null, null]; // a short name for what each ring is on, to buzz once when it changes
-  // A suit glove on each controller, so there is a hand to see. Tracked hands are drawn by the page itself.
-  const gloveMat = mat(0xe9e7e1, { roughness: 0.8, metalness: 0 });
+  // The NASA EVA glove on each controller, so there is a hand to see. Tracked hands are drawn by the page itself.
+  // loadGlove gives the glove in the cuff arm's axes (client/arm.js): fingers +x, back of the hand +z, thumb
+  // -y for a left hand. Here the fingers run along the controller's pointing ray (-z) with the thumb on top
+  // and the back of the hand outward, the same frame client/arm.js fits its forearm to, so the cuff on the
+  // left controller sits on this glove's wrist. Each glove carries a left and a right hand and shows the one
+  // for the side it is on.
+  const GLOVE_FIT = {
+    left: [[0, 0, -1], [0, -1, 0], [-1, 0, 0]],
+    right: [[0, 0, -1], [0, 1, 0], [1, 0, 0]],
+  };
+  const CUFF_BEHIND = 0.148; // metres from the controller back to the glove's cuff, as arm.js's FIT.controller has it
   const gloves = [0, 1].map(() => {
     const g = new THREE.Group();
-    add(g, new THREE.BoxGeometry(0.075, 0.03, 0.09), gloveMat, 0, -0.005, 0.04);                 // palm and fingers, closed round the grip
-    add(g, new THREE.BoxGeometry(0.026, 0.026, 0.05), gloveMat, 0, 0.02, 0.015);                   // thumb on top
-    add(g, new THREE.CylinderGeometry(0.036, 0.042, 0.09, 10), gloveMat, 0, -0.005, 0.125).rotation.x = Math.PI / 2; // cuff
-    add(g, new THREE.CylinderGeometry(0.044, 0.044, 0.012, 10), mat(0xd9662b), 0, -0.005, 0.085).rotation.x = Math.PI / 2;
+    g.name = 'Glove';
+    for (const side of ['left', 'right']) {
+      const fit = new THREE.Group();
+      fit.name = side === 'left' ? 'Hand_L' : 'Hand_R';
+      fit.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(...GLOVE_FIT[side].map(a => new THREE.Vector3(...a))));
+      g.add(fit); g.userData[side] = fit;
+      loadGlove(THREE, { mirror: side === 'right', emissive: 0x0e0e0c }).then(m => { m.position.x = -CUFF_BEHIND; fit.add(m); })
+        .catch(e => console.warn('glove model', e));
+    }
     // A controller points where the fingers point, but the forearm behind it runs down and back to the
     // elbow. Tilted that way the glove stays below the line of sight, and does not hide what the hand is reaching for.
     g.rotation.x = 0.6;
@@ -223,11 +247,12 @@ export function buildFixtures(THREE, world, { rig, camera, send, sfx = () => {},
     return g;
   });
   // The generator's pull cord, drawn while a hand has hold of it.
-  const cord = new THREE.Line(new THREE.BufferGeometry().setFromPoints([V(), V()]), new THREE.LineBasicMaterial({ color: 0xd23a2a }));
+  const cord = new THREE.Line(new THREE.BufferGeometry().setFromPoints([V(), V()]), new THREE.LineBasicMaterial({ color: 0xa8402f }));
+  cord.name = 'Cord_Pull';
   cord.frustumCulled = false; cord.visible = false;
   world.rover.parent.add(cord);
   // A ring on the socket a held plug is about to go into.
-  const socketRing = add(F.board, new THREE.TorusGeometry(0.07, 0.008, 6, 20), new THREE.MeshBasicMaterial({ color: 0xffffff, toneMapped: false }));
+  const socketRing = add(F.board, new THREE.TorusGeometry(0.07, 0.008, 6, 20), new THREE.MeshBasicMaterial({ color: PAL.hex.white, toneMapped: false }));
   socketRing.visible = false;
 
   // ---------- helpers for the physical path ----------
@@ -365,7 +390,7 @@ export function buildFixtures(THREE, world, { rig, camera, send, sfx = () => {},
           F.sockets.forEach((sk, n) => { const d = sk.distanceTo(plug.position); if (d < best) { best = d; j = n; } });
           const full = j >= 0 && st.scene.board.some(x => x.seated && x.socket === j);
           socketRing.visible = j >= 0;
-          if (j >= 0) { socketRing.position.copy(F.sockets[j]).setZ(0.09); socketRing.material.color.setHex(full ? 0xff3b3b : 0xffffff); }
+          if (j >= 0) { socketRing.position.copy(F.sockets[j]).setZ(0.09); socketRing.material.color.setHex(full ? PAL.hex.red : PAL.hex.white); }
           // One try per push: after a spark the plug drops, and the hand has to come back for it.
           if (j >= 0 && !full && best < SOCKET_SNAP && clock() >= plugCooldown) {
             plugCooldown = clock() + 0.6;
@@ -418,6 +443,7 @@ export function buildFixtures(THREE, world, { rig, camera, send, sfx = () => {},
         const glove = gloves[i];
         if (glove.parent !== hand.obj) hand.obj.add(glove);
         glove.visible = !hand.tracked && !!hand.side;
+        glove.userData.left.visible = hand.side !== 'right'; glove.userData.right.visible = hand.side === 'right';
         const what = held[i] ? null : nearest(hand.point);
         const ring = rings[i], name = what ? what.kind + (what.id || what.i || '') : null;
         ring.visible = !!what;
@@ -428,7 +454,7 @@ export function buildFixtures(THREE, world, { rig, camera, send, sfx = () => {},
           ring.scale.setScalar((big ? 0.3 : what.kind === 'plug' ? 0.09 : 0.14) * (0.94 + Math.sin(now * 8) * 0.06));
           ring.quaternion.copy(camera.getWorldQuaternion(q4));
           // Red if the belt cannot take it.
-          ring.material.color.setHex(what.kind === 'rack' && !fits(st.belt, what.id) ? 0xff3b3b : 0x58e08a);
+          ring.material.color.setHex(what.kind === 'rack' && !fits(st.belt, what.id) ? PAL.hex.red : PAL.hex.green);
         }
         if (name !== hover[i]) { hover[i] = name; if (name) pulse(i, 0.25, 20); }
       });

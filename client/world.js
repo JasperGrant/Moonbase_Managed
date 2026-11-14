@@ -5,6 +5,8 @@
 import { CFG, PLACES, CABLE_COLORS, SOCKET_SHAPES, DUST_COLS, DUST_ROWS, CRACK_POINTS } from '/shared/config.js';
 import { drawShape } from '/shared/icons.js';
 import { HORIZON, TERRAIN, SUN_AZ_DEG } from '/shared/horizon.js';
+import { PAL, CABLE_HEX } from '/shared/palette.js';
+import { loadPeriod, textureUrl } from '/shared/assets.js';
 
 // The base sits on the Connecting Ridge between Shackleton and de Gerlache craters at the lunar
 // south pole (89.45 S, 222.69 E), an Artemis III candidate region. The ground beyond the pad and
@@ -70,11 +72,11 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
   const rnd = N.rnd;
   const sunDir = new THREE.Vector3(...SUN_DIR);
 
-  scene.background = new THREE.Color(0x000000);
+  scene.background = new THREE.Color(0x050505);
 
   // ---------- light ----------
   // Harsh sunlight, near-black shadows, a whisper of earthshine. There is no sky to scatter light.
-  const sun = new THREE.DirectionalLight(0xfff3e2, 3.4);
+  const sun = new THREE.DirectionalLight(0xfff0d8, 3.1);
   sun.position.copy(sunDir).multiplyScalar(90);
   if (shadows) {
     sun.castShadow = true;
@@ -85,7 +87,7 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
     sun.shadow.normalBias = 0.03;
   }
   scene.add(sun, sun.target);
-  scene.add(new THREE.HemisphereLight(0x8fa6d6, 0x1a1916, 0.22));
+  scene.add(new THREE.HemisphereLight(0x4a5560, 0x2a2620, 0.25));
 
   // Environment map from a stand-in scene (bright ground, black sky, a hot sun) so metal,
   // gold foil and visors reflect something plausible. No HDR file needed.
@@ -188,25 +190,26 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
   });
   const sunTex = canvasTexture(THREE, 256, 256, (d, w, h, g) => {
     const grd = g.createRadialGradient(128, 128, 0, 128, 128, 128);
-    grd.addColorStop(0, 'rgba(255,255,255,1)'); grd.addColorStop(0.12, 'rgba(255,250,235,1)'); grd.addColorStop(0.2, 'rgba(255,235,200,0.55)'); grd.addColorStop(0.5, 'rgba(255,220,170,0.12)'); grd.addColorStop(1, 'rgba(255,200,150,0)');
+    grd.addColorStop(0, 'rgba(255,244,220,1)'); grd.addColorStop(0.12, 'rgba(255,250,235,1)'); grd.addColorStop(0.2, 'rgba(255,235,200,0.55)'); grd.addColorStop(0.5, 'rgba(255,220,170,0.12)'); grd.addColorStop(1, 'rgba(255,200,150,0)');
     g.fillStyle = grd; g.fillRect(0, 0, w, h);
   });
 
   // ---------- materials ----------
   const regolithMat = new THREE.MeshStandardMaterial({ map: regolith, bumpMap: regolithBump, bumpScale: 0.35, roughness: 1, metalness: 0, vertexColors: true });
   const rockMat = new THREE.MeshStandardMaterial({ map: regolith, bumpMap: regolithBump, bumpScale: 0.5, roughness: 0.95, color: 0xb9b5ad });
-  const white = new THREE.MeshStandardMaterial({ map: panelTex, color: 0xf5f2ec, roughness: 0.5, metalness: 0.15 });
-  const whitePlain = new THREE.MeshStandardMaterial({ color: 0xeeebe4, roughness: 0.6, metalness: 0.1 });
-  const gold = new THREE.MeshStandardMaterial({ color: 0xe3b24d, metalness: 1, roughness: 0.32, bumpMap: foilBump, bumpScale: 0.6 });
-  const silverFoil = new THREE.MeshStandardMaterial({ color: 0xd8d8dc, metalness: 1, roughness: 0.35, bumpMap: foilBump, bumpScale: 0.6 });
-  const grey = new THREE.MeshStandardMaterial({ color: 0x5a5f66, roughness: 0.6, metalness: 0.7 });
-  const dark = new THREE.MeshStandardMaterial({ color: 0x1e2226, roughness: 0.8, metalness: 0.3 });
-  const steel = new THREE.MeshStandardMaterial({ color: 0x9aa0a8, roughness: 0.35, metalness: 0.9 });
+  const white = new THREE.MeshStandardMaterial({ map: panelTex, color: PAL.hex.enamel, roughness: 0.8, metalness: 0.1 });
+  const whitePlain = new THREE.MeshStandardMaterial({ color: PAL.hex.enamel, roughness: 0.82, metalness: 0.08, bumpMap: regolithBump, bumpScale: 0.05 });
+  const gold = new THREE.MeshStandardMaterial({ color: PAL.hex.foilGold, metalness: 1, roughness: 0.32, bumpMap: foilBump, bumpScale: 0.6 });
+  const silverFoil = new THREE.MeshStandardMaterial({ color: 0xb9b6ad, metalness: 1, roughness: 0.35, bumpMap: foilBump, bumpScale: 0.6 });
+  const grey = new THREE.MeshStandardMaterial({ color: PAL.hex.console, roughness: 0.75, metalness: 0.3 });
+  const dark = new THREE.MeshStandardMaterial({ color: PAL.hex.consoleDeep, roughness: 0.85, metalness: 0.2 });
+  const steel = new THREE.MeshStandardMaterial({ color: PAL.hex.aluminium, roughness: 0.42, metalness: 0.85 });
   const solar = new THREE.MeshStandardMaterial({ map: solarTex, roughness: 0.22, metalness: 0.55 });
-  const visor = new THREE.MeshStandardMaterial({ color: 0xf0b63a, metalness: 1, roughness: 0.06 });
-  const orange = new THREE.MeshStandardMaterial({ color: 0xd9662b, roughness: 0.6 });
-  const warmGlow = new THREE.MeshBasicMaterial({ color: 0xffc46b, toneMapped: false });
-  const windowGlow = new THREE.MeshBasicMaterial({ color: 0xffbf6a, toneMapped: false });
+  const visor = new THREE.MeshStandardMaterial({ color: 0xc89a3e, metalness: 1, roughness: 0.12 });
+  const orange = new THREE.MeshStandardMaterial({ color: PAL.hex.orange, roughness: 0.75 });
+  const warmGlow = new THREE.MeshBasicMaterial({ color: 0xe8b872, toneMapped: false });
+  const windowGlow = new THREE.MeshBasicMaterial({ color: 0xe8b872, toneMapped: false });
+  const shadowPaint = new THREE.MeshLambertMaterial({ color: PAL.hex.consoleDeep }); // tool outlines on the rack
 
   const mesh = (geo, mat, x = 0, y = 0, z = 0, parent = scene) => {
     const m = new THREE.Mesh(geo, mat);
@@ -447,7 +450,7 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
     skirt.material.map = null;
     mesh(new THREE.CylinderGeometry(2.5, 2.5, 1.0, 24), white, 0, 1.9, 0, hab);
     const dome = mesh(new THREE.SphereGeometry(2.5, 32, 16, 0, Math.PI * 2, 0, Math.PI / 2), white, 0, 2.4, 0, hab);
-    dome.material = new THREE.MeshStandardMaterial({ map: panelTex, color: 0xf5f2ec, roughness: 0.5, metalness: 0.15 });
+    dome.material = new THREE.MeshStandardMaterial({ map: panelTex, color: PAL.hex.enamel, roughness: 0.8, metalness: 0.1 });
     dome.material.map = panelTex.clone(); dome.material.map.repeat.set(6, 2); dome.material.map.needsUpdate = true;
     for (let i = 0; i < 12; i++) { // ribs
       const a = (i / 12) * Math.PI * 2;
@@ -465,7 +468,7 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
     tube(steel, [-0.7, 0.6, 3.3], [-0.7, 1.9, 3.3], 0.025, hab); tube(steel, [0.7, 0.6, 3.3], [0.7, 1.9, 3.3], 0.025, hab); // handrails
     mesh(new THREE.BoxGeometry(0.3, 0.12, 0.2), dark, 0, 2.4, 3.3, hab);
     mesh(new THREE.CircleGeometry(0.06, 12), warmGlow, 0, 2.34, 3.4, hab).rotation.x = -Math.PI / 2;
-    const flood = new THREE.SpotLight(0xffd9a8, 25, 12, 0.7, 0.6, 1.2);
+    const flood = new THREE.SpotLight(PAL.hex.incandescent, 25, 12, 0.7, 0.6, 1.2);
     flood.position.set(0, 2.4, 3.35); flood.target.position.set(0, 0, 6);
     hab.add(flood, flood.target);
     hab.userData.flood = flood;
@@ -476,6 +479,12 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
     tube(steel, [1.2, 2.0, 0], [1.2, 6.4, 0], 0.035, hab);
     const dish = mesh(new THREE.LatheGeometry(Array.from({ length: 12 }, (_, i) => new THREE.Vector2(i * 0.05, (i * 0.05) ** 2 * 0.5)), 24), whitePlain, 1.2, 6.5, 0, hab);
     dish.lookAt(new THREE.Vector3(...EARTH_POS).add(hab.position)); dish.rotateX(-Math.PI / 2 + 0.6);
+    // The tracking mount from the NASA set: a drum and a turntable at the top of the mast, the dish riding on it.
+    Promise.all([loadPeriod(THREE, 'dish-base', { by: { Default: { color: PAL.hex.console } } }), loadPeriod(THREE, 'dish-turntable', { by: { Default: { color: PAL.hex.aluminium, metal: 0.4, rough: 0.6 } } })]).then(([base, turn]) => {
+      base.position.set(1.2, 6.25, 0); turn.position.set(1.2, 6.64, 0);
+      turn.name = 'Turntable'; hab.add(base, turn);
+      dish.position.y = 7.3; hab.userData.turntable = turn;
+    }).catch(e => console.warn('dish mount', e));
     for (const a of [1.1, -1.1]) { // two lit windows with frames
       const f = mesh(new THREE.BoxGeometry(0.8, 0.5, 0.06), dark, Math.sin(a) * 2.5, 2.0, Math.cos(a) * 2.5, hab); f.lookAt(new THREE.Vector3(Math.sin(a) * 6, 2.0, Math.cos(a) * 6));
       const w = mesh(new THREE.BoxGeometry(0.64, 0.34, 0.05), windowGlow, Math.sin(a) * 2.52, 2.0, Math.cos(a) * 2.52, hab); w.lookAt(new THREE.Vector3(Math.sin(a) * 6, 2.0, Math.cos(a) * 6));
@@ -552,12 +561,12 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
   mesh(new THREE.TorusGeometry(0.16, 0.025, 8, 20), orange, 1.0, 1.4, -0.7, depot).rotation.z = Math.PI / 2;
   // Comms dish: a true parabola on a yoke, feed on a tripod, pointed at Earth
   {
-    const st = dishSite;
+    const st = dishSite, handBuilt = st.children.length; // the parts below give way to the NASA dish when it loads
     mesh(new THREE.CylinderGeometry(0.5, 0.7, 0.3, 12), dark, 0, 0.15, -1.6, st);
     tube(steel, [0, 0.3, -1.6], [0, 2.6, -1.6], 0.09, st);
     const yoke = new THREE.Group(); yoke.position.set(0, 2.8, -1.6); st.add(yoke);
     const dish = mesh(new THREE.LatheGeometry(Array.from({ length: 13 }, (_, i) => new THREE.Vector2(i * 0.1, (i * 0.1) ** 2 * 0.2)), 40), whitePlain, 0, 0, 0, yoke);
-    dish.material = new THREE.MeshStandardMaterial({ color: 0xdcdcd8, roughness: 0.45, metalness: 0.5, side: THREE.DoubleSide });
+    dish.material = new THREE.MeshStandardMaterial({ color: PAL.hex.enamel, roughness: 0.7, metalness: 0.2, side: THREE.DoubleSide });
     for (let i = 0; i < 8; i++) { // ribs on the back, so it reads as a dish from behind
       const a = (i / 8) * Math.PI * 2;
       tube(steel, [0, -0.08, 0], [Math.cos(a) * 1.18, 1.18 * 1.18 * 0.2 - 0.04, Math.sin(a) * 1.18], 0.02, yoke);
@@ -569,6 +578,13 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
     st.updateMatrixWorld(true);
     const toEarth = st.worldToLocal(new THREE.Vector3(...EARTH_POS)).sub(yoke.position).normalize();
     yoke.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), toEarth);
+    // The NASA tall dish (docs/ASSETS.md): reflector painted enamel, not white; turned to face Earth.
+    loadPeriod(THREE, 'comms-dish', { cast: shadows, receive: shadows, by: { ant_tall: { color: PAL.hex.enamel, rough: 0.75 }, mass: { color: PAL.hex.console } } }).then(m => {
+      st.remove(...st.children.slice(handBuilt));
+      m.position.set(0, 0, -1.6);
+      m.rotation.y = Math.atan2(toEarth.x, toEarth.z);
+      st.add(m);
+    }).catch(e => console.warn('comms-dish', e));
   }
   // Drill rig: tripod with winch, drill string, cuttings pile
   {
@@ -590,24 +606,28 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
   const fixture = p => { const g = new THREE.Group(); g.position.set(p.x, 0, p.z); g.rotation.y = p.ry; scene.add(g); return g; };
 
   // ---------- switchboard: four sockets marked with shapes, four coloured cables ----------
-  const CABLE_HEX = { red: 0xe0453a, blue: 0x3f7fe8, yellow: 0xf0cf3a, green: 0x45c463 };
+  // CABLE_HEX: the four muted cable colours from client/shared/palette.js
   // It hangs on a wall inside the habitat: the astronaut's page adds this group to the mount that
   // interior.js provides. It is in no scene until then, so the rover camera never draws it.
   const board = new THREE.Group();
   const sockets = [], plugs = [], plugRest = [];
   {
     // Lambert, like everything else indoors: the hall is lit by its own three lights.
-    const box = new THREE.Mesh(new THREE.BoxGeometry(1.1, 0.8, 0.16), new THREE.MeshLambertMaterial({ color: 0x6a7078 }));
+    // Its face is the NASA breaker-panel photo, darkened so the sockets, cables and lamp stand out from it.
+    const painted = new THREE.MeshLambertMaterial({ color: PAL.hex.console });
+    const faceTex = new THREE.TextureLoader().load(textureUrl('flight-deck-panel-a')); faceTex.colorSpace = THREE.SRGBColorSpace;
+    const face = new THREE.MeshLambertMaterial({ map: faceTex, color: new THREE.Color(PAL.hex.photoTint).multiplyScalar(0.7) });
+    const box = new THREE.Mesh(new THREE.BoxGeometry(1.1, 0.8, 0.16), [painted, painted, painted, painted, face, painted]);
     box.position.set(0, 1.4, 0); board.add(box);
     const signTex = canvasTexture(THREE, 512, 128, (d, w, h, g) => {
-      g.fillStyle = '#12161b'; g.fillRect(0, 0, w, h);
-      SOCKET_SHAPES.forEach((s, i) => drawShape(g, s, 64 + i * 128, 64, 78, '#f4f4f0'));
+      g.fillStyle = PAL.consoleDeep; g.fillRect(0, 0, w, h);
+      SOCKET_SHAPES.forEach((s, i) => drawShape(g, s, 64 + i * 128, 64, 78, PAL.dial));
     });
     const sign = new THREE.Mesh(new THREE.PlaneGeometry(1.0, 0.25), new THREE.MeshBasicMaterial({ map: signTex, toneMapped: false }));
     sign.position.set(0, 1.62, 0.082); board.add(sign);
     CABLE_COLORS.forEach((color, i) => {
       const x = (i - 1.5) * 0.25;
-      const hole = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.03, 16), new THREE.MeshBasicMaterial({ color: 0x0b0d10 }));
+      const hole = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.03, 16), new THREE.MeshBasicMaterial({ color: PAL.hex.bakelite }));
       hole.position.set(x, 1.38, 0.082); hole.rotation.x = Math.PI / 2; board.add(hole);
       sockets.push(new THREE.Vector3(x, 1.38, 0.14));
       plugRest.push(new THREE.Vector3(x, 1.1, 0.24)); // a loose plug hangs in front of the box, at waist height
@@ -624,7 +644,7 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
       plug.userData.cord = cord;
       plugs.push(plug);
     });
-    const lamp = new THREE.Mesh(new THREE.SphereGeometry(0.06, 12, 8), new THREE.MeshBasicMaterial({ color: 0x2bd45a, toneMapped: false }));
+    const lamp = new THREE.Mesh(new THREE.SphereGeometry(0.06, 12, 8), new THREE.MeshBasicMaterial({ color: PAL.hex.green, toneMapped: false }));
     lamp.position.set(0.45, 1.88, 0.06); board.add(lamp);
     board.userData.lamp = lamp;
   }
@@ -648,6 +668,22 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
     tube(steel, [-0.85, 1.12, 0.04], [-0.85, 1.12, 0.3], 0.03, locker);             // the peg the tire hangs on
     for (const x of [-1.35, 1.35]) mesh(new THREE.BoxGeometry(0.06, 1.95, 0.5), grey, x, 1.0, 0.22, locker);
   }
+  // Shadow board along the top of the rack: four NASA hand tools (docs/ASSETS.md), each on a peg over its
+  // painted outline. Scenery: they are not game tools, nothing picks them up.
+  for (const [id, x, rot] of [['wrench', -0.95, [Math.PI / 2, 0, Math.PI / 2, 'ZXY']], ['ratchet', -0.5, [Math.PI / 2, 0, Math.PI / 2, 'ZXY']],
+    ['hammer', 0.0, [Math.PI / 2, 0, Math.PI / 2, 'ZXY']], ['grease-gun', 0.62, [0, Math.PI / 2, 0, 'XYZ']]]) {
+    loadPeriod(THREE, id, { rough: 0.55, metal: 0.6 }).then(m => {
+      m.rotation.set(...rot); m.updateMatrix();
+      const depth = new THREE.Box3().setFromObject(m).getSize(new THREE.Vector3()).z;
+      m.position.set(x, 1.82, 0.046 + depth / 2);
+      const sil = m.clone(); sil.position.set(0, 0, 0); // the painted silhouette: the tool's own shape, flat, a little larger
+      sil.traverse(o => { if (o.isMesh) { o.material = shadowPaint; o.castShadow = false; } });
+      const outline = new THREE.Group(); outline.add(sil);
+      outline.position.set(x, 1.82, 0.041); outline.scale.set(1.1, 1.1, 0.02);
+      tube(steel, [x, 1.82, 0.04], [x, 1.82, 0.05 + depth], 0.006, locker);
+      locker.add(outline, m);
+    }).catch(e => console.warn(id, e));
+  }
 
   // ---------- airlock canopy: the one roof on the base. Stand under it in a meteor shower. ----------
   {
@@ -656,8 +692,8 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
     mesh(new THREE.BoxGeometry(w + 0.2, 0.14, 0.08), orange, 0, 2.6, c.z1);
     for (const x of [c.x0, c.x1]) tube(steel, [x, 0, c.z1 - 0.1], [x, 2.6, c.z1 - 0.1], 0.05);
     const stripeTex = canvasTexture(THREE, 256, 256, (d, w2, h2, g) => {
-      g.fillStyle = '#e8c93a'; g.fillRect(0, 0, w2, h2);
-      g.strokeStyle = '#15171a'; g.lineWidth = 26;
+      g.fillStyle = PAL.hazard; g.fillRect(0, 0, w2, h2);
+      g.strokeStyle = '#2b2a26'; g.lineWidth = 26;
       for (let i = -256; i < 512; i += 72) { g.beginPath(); g.moveTo(i, 0); g.lineTo(i + 256, 256); g.stroke(); }
       g.fillStyle = '#35393f'; g.fillRect(22, 22, w2 - 44, h2 - 44);
     });
@@ -695,7 +731,7 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
       const b = new THREE.Mesh(new THREE.SphereGeometry(0.045, 10, 8), new THREE.MeshBasicMaterial({ color: 0x0a0a0a, toneMapped: false }));
       crack.add(b); beads.push(b);
     }
-    const puff = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.22, depthWrite: false });
+    const puff = new THREE.MeshBasicMaterial({ color: 0xcfc8b8, transparent: true, opacity: 0.22, depthWrite: false });
     for (let i = 0; i < 10; i++) { const v = new THREE.Mesh(new THREE.SphereGeometry(0.05, 8, 6), puff); crack.add(v); vapour.push(v); }
     crack.visible = false;
     scene.add(crack);
@@ -727,7 +763,7 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
     mesh(new THREE.BoxGeometry(1.1, 0.5, 0.7), gold, 0, 0.93, -0.35, rover);
     for (const x of [-0.45, 0.45]) { mesh(new THREE.BoxGeometry(0.5, 0.08, 0.5), dark, x, 0.72, 0.5, rover); mesh(new THREE.BoxGeometry(0.5, 0.5, 0.08), dark, x, 1.0, 0.25, rover); } // seats
     mesh(new THREE.BoxGeometry(0.5, 0.3, 0.05), dark, 0, 1.05, 0.95, rover);                       // console
-    mesh(new THREE.BoxGeometry(0.3, 0.12, 0.02), new THREE.MeshBasicMaterial({ color: 0x58e08a, toneMapped: false }), 0, 1.08, 0.98, rover);
+    mesh(new THREE.BoxGeometry(0.3, 0.12, 0.02), new THREE.MeshBasicMaterial({ color: PAL.hex.phosphor, toneMapped: false }), 0, 1.08, 0.98, rover);
     tube(steel, [0, 0.9, 0.95], [0, 1.3, 1.1], 0.02, rover);                                        // hand controller stalk
     for (const [x, z] of [[-0.85, 0.85], [0.85, 0.85], [-0.85, -0.85], [0.85, -0.85]]) {
       const wg = new THREE.Group(); wg.position.set(x, 0.4, z); rover.add(wg);
@@ -739,7 +775,7 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
       if (x > 0 && z > 0) { // the front right wheel is the one that breaks and comes off
         rover.userData.wheel = wg;
         rover.userData.hub = new THREE.Object3D(); rover.userData.hub.position.set(x + 0.1, 0.4, z); rover.add(rover.userData.hub);
-        const warn = new THREE.Mesh(new THREE.SphereGeometry(0.05, 10, 8), new THREE.MeshBasicMaterial({ color: 0xff2a2a, toneMapped: false }));
+        const warn = new THREE.Mesh(new THREE.SphereGeometry(0.05, 10, 8), new THREE.MeshBasicMaterial({ color: PAL.hex.red, toneMapped: false }));
         warn.position.set(x, 0.95, z); warn.visible = false; rover.add(warn);
         rover.userData.warn = warn;
       }
@@ -747,15 +783,15 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
     tube(steel, [0.5, 1.1, -1.0], [0.5, 2.2, -1.0], 0.025, rover);
     const lrvDish = mesh(new THREE.LatheGeometry(Array.from({ length: 8 }, (_, i) => new THREE.Vector2(i * 0.05, (i * 0.05) ** 2 * 0.6)), 16), silverFoil, 0.5, 2.25, -1.0, rover);
     lrvDish.rotation.x = -0.9;
-    const beacon = new THREE.Mesh(new THREE.SphereGeometry(0.08, 10, 8), new THREE.MeshBasicMaterial({ color: 0xffb030, toneMapped: false }));
+    const beacon = new THREE.Mesh(new THREE.SphereGeometry(0.08, 10, 8), new THREE.MeshBasicMaterial({ color: PAL.hex.amber, toneMapped: false }));
     beacon.position.set(-0.5, 1.7, -1.0); rover.add(beacon);
     tube(steel, [-0.5, 1.1, -1.0], [-0.5, 1.65, -1.0], 0.02, rover);
     rover.userData.beacon = beacon;
     for (const x of [-0.5, 0.5]) {
-      const h = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.09, 0.08, 12), new THREE.MeshBasicMaterial({ color: 0xffffee, toneMapped: false }));
+      const h = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.09, 0.08, 12), new THREE.MeshBasicMaterial({ color: PAL.hex.white, toneMapped: false }));
       h.position.set(x, 0.8, 1.22); h.rotation.x = Math.PI / 2; rover.add(h);
     }
-    const head = new THREE.SpotLight(0xfff6e8, 30, 18, 0.55, 0.6, 1.2);
+    const head = new THREE.SpotLight(PAL.hex.incandescent, 30, 18, 0.55, 0.6, 1.2);
     head.position.set(0, 0.9, 1.2); head.target.position.set(0, 0.2, 7);
     rover.add(head, head.target);
     rover.position.set(PLACES.rover.x, 0, PLACES.rover.z);
@@ -778,10 +814,15 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
     }
     for (let i = 0; i < 8; i++) tube(steel, [0.9, 0.3 + i * 0.4, 2.1 + i * 0.12], [1.5, 0.3 + i * 0.4, 2.1 + i * 0.12], 0.015, L); // ladder
     scene.add(L);
+    // The Apollo LM model replaces the hand-built one when it loads: its foil warmed toward foil gold.
+    loadPeriod(THREE, 'apollo-lm', { cast: shadows, receive: shadows, rough: 0.5, metal: 0.6, sat: 0.7,
+      by: { 'blinn1SG.002': { color: PAL.hex.foilGold, rough: 0.35, metal: 0.9 }, 'blinn9SG.001': { color: PAL.hex.foilGold, rough: 0.4, metal: 0.85 } } }).then(m => {
+      L.clear(); L.add(m);
+    }).catch(e => console.warn('apollo-lm', e));
     const F = new THREE.Group(); F.position.set(-24, height(-24, -28), -28);
     tube(steel, [0, 0, 0], [0, 2.4, 0], 0.02, F);
     tube(steel, [0, 2.38, 0], [1.1, 2.38, 0], 0.012, F);
-    const flagTex = canvasTexture(THREE, 128, 80, (d, w, h, g) => { g.fillStyle = '#e8ecf4'; g.fillRect(0, 0, w, h); g.fillStyle = '#1f3f8f'; g.fillRect(0, 0, w, 24); g.fillRect(0, 56, w, 24); g.fillStyle = '#d9662b'; g.beginPath(); g.arc(64, 40, 12, 0, 7); g.fill(); });
+    const flagTex = canvasTexture(THREE, 128, 80, (d, w, h, g) => { g.fillStyle = '#ddd6c4'; g.fillRect(0, 0, w, h); g.fillStyle = '#2f4a7a'; g.fillRect(0, 0, w, 24); g.fillRect(0, 56, w, 24); g.fillStyle = '#d9662b'; g.beginPath(); g.arc(64, 40, 12, 0, 7); g.fill(); });
     const flag = mesh(new THREE.PlaneGeometry(1.0, 0.65), new THREE.MeshStandardMaterial({ map: flagTex, side: THREE.DoubleSide, roughness: 0.9 }), 0.55, 2.05, 0, F);
     flag.rotation.y = -Math.PI / 2; flag.rotation.y = 0;
     scene.add(F);
@@ -795,11 +836,24 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
     mesh(new THREE.SphereGeometry(0.25, 16, 12), whitePlain, 0, 1.72, 0, avatar);
     mesh(new THREE.SphereGeometry(0.19, 16, 12, 0, Math.PI * 2, 0, Math.PI * 0.6), visor, 0, 1.72, 0.1, avatar).rotation.x = Math.PI / 2 - 0.3;
     mesh(new THREE.BoxGeometry(0.5, 0.65, 0.3), whitePlain, 0, 1.2, -0.32, avatar);
-    mesh(new THREE.BoxGeometry(0.3, 0.14, 0.06), new THREE.MeshBasicMaterial({ color: 0x58e08a, toneMapped: false }), 0, 1.25, 0.29, avatar);
+    mesh(new THREE.BoxGeometry(0.3, 0.14, 0.06), new THREE.MeshBasicMaterial({ color: PAL.hex.phosphor, toneMapped: false }), 0, 1.25, 0.29, avatar);
     mesh(new THREE.BoxGeometry(0.1, 0.1, 0.1), orange, 0, 1.55, -0.5, avatar);
   }
   avatar.visible = false;
   scene.add(avatar);
+  // The NASA astronaut replaces the capsules (unrigged, in a T-pose: fine at rover-camera distance).
+  loadPeriod(THREE, 'astronaut', { cast: shadows, rough: 0.85, by: { '/astnt1/': {} } }).then(m => { avatar.clear(); avatar.add(m); })
+    .catch(e => console.warn('astronaut', e));
+
+  // ---------- scenery from the NASA set: an old Viking lander, cargo at the fuel depot ----------
+  const props = new THREE.Group(); props.name = 'Scenery';
+  scene.add(props); // added now, so the astronaut page counts it as outdoors and hides it inside the habitat
+  const prop = (id, parent, x, z, ry, opts = {}) => loadPeriod(THREE, id, { cast: shadows, receive: shadows, ...opts }).then(m => {
+    m.position.set(x, parent === props ? height(x, z) - 0.05 : 0, z); m.rotation.y = ry; parent.add(m); return m;
+  }).catch(e => console.warn(id, e));
+  prop('viking-lander', props, 16, -15, 2.3, { by: { blinn4SG: { color: PAL.hex.enamel }, blinn11SG: { color: PAL.hex.enamel } } });
+  prop('spectrograph-crate', depot, 2.5, -0.5, 0.25);
+  prop('support-cradle', depot, -2.6, -1.0, -0.2, { by: { spstob_fss_1: { rough: 0.7 } } });
 
   return {
     rover, avatar, sun, height,
@@ -808,6 +862,7 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
     // Call every frame.
     update(time) {
       earth.userData.clouds.rotation.y = time * 0.004;
+      if (hab.userData.turntable) hab.userData.turntable.rotation.y = Math.sin(time * 0.05) * 0.4; // a tracking antenna, slowly hunting
     },
     // Show what the server says is physically out there (Game.scene()). The astronaut and the rover
     // camera both call this, so they see the same broken things.
@@ -818,8 +873,8 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
       // lights, and in a blackout there is nothing at all. The floodlight is off in both.
       const backup = !!s.board && !s.dark;
       hab.userData.flood.intensity = s.dark || s.board ? 0 : 25;
-      warmGlow.color.setHex(s.dark ? 0x120d05 : backup ? 0x3a0c06 : 0xffc46b);
-      windowGlow.color.setHex(s.dark ? 0x120d05 : backup ? 0x5a1008 : 0xffbf6a);
+      warmGlow.color.setHex(s.dark ? 0x120d05 : backup ? 0x3d1a14 : 0xe8b872);
+      windowGlow.color.setHex(s.dark ? 0x120d05 : backup ? 0x5a2418 : 0xe8b872);
 
       // Dust: a cell that was dusty a moment ago and is not now puffs away.
       dustCells.forEach((c, i) => {
@@ -839,7 +894,7 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
       }
 
       // Switchboard: seated plugs sit in their socket, loose ones hang underneath.
-      board.userData.lamp.material.color.setHex(s.board ? (blink ? 0xff2a2a : 0x4a0b0b) : s.dark ? 0x0c2a14 : 0x2bd45a);
+      board.userData.lamp.material.color.setHex(s.board ? (blink ? PAL.hex.red : PAL.hex.redOff) : s.dark ? PAL.hex.greenOff : PAL.hex.green);
       plugs.forEach((p, i) => {
         const c = s.board ? s.board[i] : { seated: true, socket: i };
         p.userData.seated = c.seated;
@@ -857,7 +912,7 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
       }
       rover.userData.warn.visible = broken && blink;
       // The hazard light flashes fast while the rover is stuck.
-      rover.userData.beacon.material.color.setHex((broken ? Math.floor(time * 6) % 2 : Math.floor(time * 2) % 2) ? 0xffb030 : 0x4a3008);
+      rover.userData.beacon.material.color.setHex((broken ? Math.floor(time * 6) % 2 : Math.floor(time * 2) % 2) ? PAL.hex.amber : PAL.hex.amberOff);
 
       // Hull crack, weld beads and the vapour jet.
       crack.visible = !!s.hull;
@@ -865,7 +920,7 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
         if (crack.userData.spot !== s.hull.spot) { crack.userData.spot = s.hull.spot; crack.userData.place(s.hull.spot); }
         // Welded: a bright bead. Not yet: dark, glowing redder the longer the torch has been on it.
         const heat = crack.userData.heat || [];
-        beads.forEach((b, i) => { if (s.hull.welded[i]) b.material.color.setHex(0xffa23a); else b.material.color.setRGB(0.04 + 0.96 * (heat[i] || 0), 0.04 + 0.25 * (heat[i] || 0), 0.04); b.scale.setScalar(s.hull.welded[i] ? 1 : 1 + 0.5 * (heat[i] || 0)); });
+        beads.forEach((b, i) => { if (s.hull.welded[i]) b.material.color.setHex(0x7a6a58); else b.material.color.setRGB(0.04 + 0.96 * (heat[i] || 0), 0.04 + 0.25 * (heat[i] || 0), 0.04); b.scale.setScalar(s.hull.welded[i] ? 1 : 1 + 0.5 * (heat[i] || 0)); });
         const open = s.hull.welded.filter(x => !x).length / CRACK_POINTS;
         vapour.forEach((v, i) => {
           const u = (time * 1.3 + i / vapour.length) % 1;

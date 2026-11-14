@@ -8,7 +8,8 @@ Read this before you build or replace a prop. **Use a model from this list befor
 | --- | --- |
 | `client/assets/models/*.glb` | 28 models, baked for the Quest (see "How they were baked"). [assets-sheet.jpg](assets-sheet.jpg) shows all of them. |
 | `client/assets/textures/*.webp` | 3 flight-deck panel photos and 1 lunar orbital photo |
-| `client/shared/assets.js` | The manifest (`MODELS`, `TEXTURES`, with size and triangle count) and `loadModel(THREE, id)` |
+| `client/shared/assets.js` | The manifest (`MODELS`, `TEXTURES`, with size and triangle count), `loadModel(THREE, id)`, `restyle` / `loadPeriod` (a model restyled to the palette) and `loadGlove` |
+| `scripts/render-mc-room.mjs` | Renders the Mission Control room model to `client/assets/textures/mission-control-room.webp` |
 | `scripts/bake-assets.mjs` | Rebuilds every model from the original uploads (`npm run bake -- <folder>`) |
 | `test/assets.mjs` | `npm run assets`: loads every model in Chromium and checks size, ground and naming. `npm run assets:shots` also writes a picture of each one to `test/shots/assets/`. |
 | `client/vendor/three/examples/jsm/loaders/GLTFLoader.js`, `libs/meshopt_decoder.module.js`, `utils/BufferGeometryUtils.js` | The loader, vendored like the rest of three.js (`scripts/vendor-three.mjs`) |
@@ -20,10 +21,16 @@ The originals (including two 27 MB TIFs and the Draco GLBs) are not committed. T
 - **Units and axes:** 1 unit = 1 metre, Y up, **front faces +Z** (the glTF convention; `Object3D.lookAt` points an object's +Z at the target). Standing props have their base at y = 0 and are centred on x and z, so `position.set(x, height(x, z), z)` puts them on the ground. Hand tools and small parts are centred on their middle so they turn about it in the hand.
 - **One `Root` node** per file. Its children keep the source's part names, and every material keeps its source name (for example `console_nameplat`, `Keyboards`), so you can restyle by name.
 - **Load through `loadModel`**, which caches one copy per page and hands back a clone. The clones share materials: clone a material before recolouring one instance. For many copies of one small prop, build an `InstancedMesh` from the clone's geometry.
-- **Restyle on load, to the palette.** The source materials are NASA's, not ours. After loading, set each `MeshStandardMaterial` to the DESIGN.md material table: roughness and metalness for what it is, colour from the palette. Kill anything that reads as modern (bright logos on modern craft, pure-white plastics, saturated blues). Keep textures that carry real detail (LM foil, the habitat's panels, the crew lock bag) and multiply their colour toward the palette instead of replacing them.
+- **Restyle on load, to the palette:** `loadPeriod(THREE, id, { rough, metal, sat, by, cast, receive })` loads and restyles in one call (`by` overrides single materials by name). The source materials are NASA's, not ours. After loading, set each `MeshStandardMaterial` to the DESIGN.md material table: roughness and metalness for what it is, colour from the palette. Kill anything that reads as modern (bright logos on modern craft, pure-white plastics, saturated blues). Keep textures that carry real detail (LM foil, the habitat's panels, the crew lock bag) and multiply their colour toward the palette instead of replacing them.
 - **Shadows:** `castShadow` on anything larger than about 0.5 m outdoors, `receiveShadow` on big ones. Small interior clutter casts no shadow. Put a blob shadow under anything small that stands on a floor.
 - **Budget:** the whole set is about 138k triangles and 4.4 MB. The Quest has room for a few of the big ones at once, not all at full detail. Hide or swap the outdoor scenery models when the astronaut is inside the habitat, as the terrain already is.
 - **Check it:** `npm run assets` after any bake, `npm run vr:shots` after placing a model, and look at the pictures.
+
+## What is placed (this branch)
+
+Placed: the glove (cuff arm, both controllers, a spare on the bench), the pistol-grip tool as the welder, the Apollo LM, the comms dish, the dish base and turntable on the habitat mast, the rover-camera astronaut, the Viking lander, the spectrograph crate and support cradle at the depot, the helmet, the crew lock bag and the ACES suit in the habitat, the wrench, ratchet, hammer and grease gun on a shadow board along the top of the tool rack, the breaker-panel photo on the switchboard face and the R14 photo round it, the toggle-panel photo on the east wall, and the Mission Control room still behind the consoles.
+
+Not yet: `hab-module` (needs the team, see below), `ladee-probe`, `grace-satellite`, `tether`, the printed ISS tools, `sample-canister`, `cable-clip`, and the lunar photo prints.
 
 ## Where each model goes
 
@@ -57,7 +64,7 @@ Sizes are the baked box, width (x) × height (y) × depth (z), in metres. "Repla
 
 | Model | Size | Tris | Goes | Replaces | Notes |
 | --- | --- | --- | --- | --- | --- |
-| `glove` | 0.3 × 0.16 × 0.17 | 0.8k | **The astronaut's hand**: on the end of the arm that carries the wrist gauges, and on each controller | `arm.js` 112-137 (the `glove` group of spheres and capsules) and the box gloves in `stations.js` 211-220 | Scaled to a suited hand (0.24 m wrist to fingertip), its cuff just past the wrist disconnect ring. Right hand is the left mirrored (`scale.x = -1`). The tracked-hand joints (`astronaut.js` 379) stay: the model cannot bend its fingers. Also one spare glove on the habitat bench. |
+| `glove` | 0.3 × 0.16 × 0.17 | 0.8k | **The astronaut's hand**: on the end of the arm that carries the wrist gauges, and on each controller | `arm.js` 112-137 (the `glove` group of spheres and capsules) and the box gloves in `stations.js` 211-220 | Scaled to a suited hand (0.24 m wrist to fingertip), its cuff just past the wrist disconnect ring. Load it with `loadGlove(THREE, { mirror })` from `client/shared/assets.js`, which restyles it, turns it into the arm's axes (fingers +x, back of the hand +z) and centres the cuff opening on the origin; `mirror: true` makes the right hand from the left. The tracked-hand joints (`astronaut.js` 379) stay: the model cannot bend its fingers. Also one spare glove on the habitat bench. |
 
 ### Tools (`client/stations.js` and the bench)
 
