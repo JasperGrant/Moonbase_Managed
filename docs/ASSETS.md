@@ -28,9 +28,11 @@ The originals (including two 27 MB TIFs and the Draco GLBs) are not committed. T
 
 ## What is placed (this branch)
 
-Placed: the glove (cuff arm, both controllers, a spare on the bench), the pistol-grip tool as the welder, the Apollo LM, the comms dish, the dish base and turntable on the habitat mast, the rover-camera astronaut, the Viking lander, the spectrograph crate and support cradle at the depot, the helmet, the crew lock bag and the ACES suit in the habitat, the wrench, ratchet, hammer and grease gun on a shadow board along the top of the tool rack, the breaker-panel photo on the switchboard face and the R14 photo round it, the toggle-panel photo on the east wall, and the Mission Control room still behind the consoles.
+Placed: the `hab-module` (the Habitat Demonstration Unit) as the habitat itself, with our own open airlock vestibule on its door and a porthole that shows the live hall, the glove (cuff arm, both controllers, a spare on the bench), the pistol-grip tool as the welder, the Apollo LM, the comms dish, the dish base and turntable on the habitat mast, the rover-camera astronaut, the Viking lander, the spectrograph crate and support cradle at the depot, the helmet, the crew lock bag and the ACES suit in the habitat, the wrench, ratchet, hammer and grease gun on a shadow board along the top of the tool rack, and the Mission Control room still behind the consoles.
 
-Not yet: `hab-module` (needs the team, see below), `ladee-probe`, `grace-satellite`, `tether`, the printed ISS tools, `sample-canister`, `cable-clip`, and the lunar photo prints.
+Taken out again at Sevan's request: the flight-deck panel photos on the habitat walls and the switchboard (they looked bad). Do not put them back on interior panels.
+
+Not yet: `ladee-probe`, `grace-satellite`, `tether`, the printed ISS tools, `sample-canister`, `cable-clip`, and the lunar photo prints.
 
 ## Where each model goes
 

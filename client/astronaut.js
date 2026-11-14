@@ -72,7 +72,7 @@ lamp.intensity = 14; // always on: the shadow side of the dome is black, and tha
 // Going through the airlock: a pad over the outside hatch to point at, a sign on it, and a black
 // card in front of the eyes that fades in, hides the move, and fades out.
 const hatchOut = new THREE.Mesh(new THREE.BoxGeometry(1.3, 2.0, 0.4), new THREE.MeshBasicMaterial());
-hatchOut.position.set(0, 1.05, 3.35); hatchOut.visible = false; // unseen, but the pointer still hits it
+hatchOut.position.set(0, 1.05, 3.5); hatchOut.visible = false; // unseen, but the pointer still hits it
 scene.add(hatchOut);
 {
   const c = document.createElement('canvas'); c.width = 384; c.height = 96;
@@ -82,7 +82,7 @@ scene.add(hatchOut);
   g.fillStyle = PAL.ink; g.font = 'bold 20px monospace'; g.fillText('POINT AND SELECT TO ENTER', 192, 78);
   const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace;
   const sign = new THREE.Mesh(new THREE.PlaneGeometry(0.72, 0.18), new THREE.MeshBasicMaterial({ map: tex, toneMapped: false }));
-  sign.position.set(0, 0.52, 3.31);
+  sign.position.set(0, 2.42, 3.53); // over the open airlock door
   scene.add(sign); outdoors.push(sign);
 }
 const shade = new THREE.Mesh(new THREE.PlaneGeometry(4, 4), new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0, depthTest: false, depthWrite: false }));
@@ -281,13 +281,25 @@ marker.rotation.x = -Math.PI / 2; marker.visible = false;
 scene.add(marker);
 
 // Where the hand's ray meets the ground, if that spot can be stood on.
+// The habitat model's two side modules (client/world.js): long one to +x, short one to -x. Returns the
+// push that takes a point at (x, z) back out of whichever it is in, or null.
+const MODULES = [{ x0: 2.2, x1: 7.6, z: 1.45 }, { x0: -4.6, x1: -2.2, z: 1.35 }], PAD = 0.3;
+function inModule(x, z) {
+  for (const m of MODULES) {
+    if (x < m.x0 - PAD || x > m.x1 + PAD || Math.abs(z) > m.z + PAD) continue;
+    const out = [[m.x0 - PAD - x, 0], [m.x1 + PAD - x, 0], [0, Math.sign(z || 1) * (m.z + PAD) - z]]; // the shortest way out
+    const [dx, dz] = out.sort((a, b) => Math.hypot(...a) - Math.hypot(...b))[0];
+    return { x: dx, z: dz };
+  }
+  return null;
+}
 function groundTarget(controller, out) {
   aim(controller);
   const p = raycaster.ray.intersectPlane(ground, out);
   if (!p || p.distanceTo(raycaster.ray.origin) > TELEPORT_MAX) return null;
   if (where === 'in') { const l = interior.toLocal(p.x, p.z); return interior.walkable(l.x, l.z) ? p : null; }
   const d = Math.hypot(p.x, p.z);
-  return d > CFG.bounds - 1 || d < CFG.habRadius + 0.3 ? null : p;
+  return d > CFG.bounds - 1 || d < CFG.habRadius + 0.3 || inModule(p.x, p.z) ? null : p;
 }
 function teleport(p) {
   camera.getWorldPosition(headPos);
@@ -532,6 +544,40 @@ scopeMesh.renderOrder = 9;
 scopeMesh.visible = false;
 camera.add(scopeMesh);
 
+// ---------- the porthole into the hall ----------
+// The inner hatch of the airlock has a porthole, and through it you see the hall itself: a second camera
+// stands just inside the hall's airlock door and draws the interior (its real lights, red when the power
+// is out, panels hanging loose after a fault) into a small texture on the porthole. It follows the eye a
+// little, for parallax. Only outdoors, only near the airlock, and only every third frame: the Quest pays
+// for every extra draw.
+const portalRT = new THREE.WebGLRenderTarget(256, 256);
+portalRT.texture.colorSpace = THREE.SRGBColorSpace;
+const portalCam = new THREE.PerspectiveCamera(55, 1, 0.05, 30);
+const portal = world.hab?.userData.portal;
+if (portal) { portal.material = new THREE.MeshBasicMaterial({ map: portalRT.texture, toneMapped: false }); }
+let portalTick = 0;
+const portalAt = new THREE.Vector3();
+function renderPortal() {
+  if (!portal || where !== 'out' || passage) return;
+  portal.getWorldPosition(portalAt);
+  camera.getWorldPosition(headPos);
+  if (headPos.distanceTo(portalAt) > 14 || portalTick++ % 3) return;
+  const dx = THREE.MathUtils.clamp(headPos.x - portalAt.x, -2, 2), dy = THREE.MathUtils.clamp(headPos.y - portalAt.y, -1, 1);
+  const eye = interior.toWorld(-dx * 0.25, -0.35);
+  portalCam.position.set(eye.x, 1.55 - dy * 0.15, eye.z);
+  const look = interior.toWorld(dx * 0.6, -8);
+  portalCam.lookAt(look.x, 1.35, look.z);
+  const target = renderer.getRenderTarget(), xr = renderer.xr.enabled, shadows = renderer.shadowMap.autoUpdate;
+  const shown = outdoors.map(o => o.visible);
+  for (const o of outdoors) o.visible = false;
+  interior.group.visible = true;
+  renderer.xr.enabled = false; renderer.shadowMap.autoUpdate = false;
+  renderer.setRenderTarget(portalRT); renderer.clear(); renderer.render(scene, portalCam);
+  renderer.setRenderTarget(target); renderer.shadowMap.autoUpdate = shadows; renderer.xr.enabled = xr;
+  interior.group.visible = false;
+  outdoors.forEach((o, i) => { o.visible = shown[i]; });
+}
+
 function renderScope() {
   scopeMesh.visible = scopeOn();
   if (!scopeMesh.visible) return;
@@ -635,6 +681,7 @@ function control(dt, now) {
     rig.position.x += c.x - l.x; rig.position.z += c.z - l.z;
   } else if (d > CFG.bounds - 1) { const k = (CFG.bounds - 1) / d; rig.position.x += headPos.x * (k - 1); rig.position.z += headPos.z * (k - 1); }
   if (where === 'out' && d < CFG.habRadius && d > 0.01) { const k = CFG.habRadius / d; rig.position.x += headPos.x * (k - 1); rig.position.z += headPos.z * (k - 1); }
+  if (where === 'out') { const m = inModule(headPos.x, headPos.z); if (m) { rig.position.x += m.x; rig.position.z += m.z; } }
 
   keyed = ptt;
   if (ptt !== talking && radio.micOk) { talking = ptt; radio.setTalking(ptt); }
@@ -735,6 +782,7 @@ renderer.setAnimationLoop(() => {
   armFrame = now;
   if (arm.group.visible) drawGauges(now);
   renderScope();
+  renderPortal();
   renderer.render(scene, camera);
   if (snapWaiting) { snapWaiting(renderer.domElement.toDataURL('image/png')); snapWaiting = null; } // must follow the draw in the same frame
 });
