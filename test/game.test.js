@@ -1,8 +1,8 @@
 // Plain-Node checks of the game rules: npm test
 import assert from 'node:assert/strict';
 import { Game } from '../server/game.js';
-import { CFG } from '../shared/config.js';
-import { solveWires } from '../shared/rules.js';
+import { CFG } from '../client/shared/config.js';
+import { solveWires } from '../client/shared/rules.js';
 
 let seed = 42;
 const rng = () => (seed = (seed * 1664525 + 1013904223) % 4294967296) / 4294967296;

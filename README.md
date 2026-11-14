@@ -32,16 +32,15 @@ Each seat has its own URL, so you can hand them out directly:
 
 ## Put it on the internet (Cloudflare)
 
-One command deploys it to Cloudflare Workers, which gives you HTTPS for free, so VR and the microphone work on the Quest with no certificate warnings, and nothing to keep warm: the game room wakes in milliseconds when the first player connects.
+Connect the repo once and every push to `main` deploys itself. Cloudflare gives you HTTPS for free, so VR and the microphone work on the Quest with no certificate warnings, and there is nothing to keep warm: the game room wakes in milliseconds when the first player connects.
 
-```
-npx wrangler login
-npm run deploy
-```
+1. Cloudflare dashboard, **Workers & Pages**, **Create**, **Import a repository**, pick this repo.
+2. Leave the build command empty and the deploy command as `npx wrangler deploy`. Deploy.
+3. The dashboard shows the URL, like `https://moonbase-manager.<your-account>.workers.dev`. Hand out `<that URL>/astronaut`, `/ops`, `/tech` and `/sci`.
 
-The first deploy prints the URL, something like `https://moonbase.<your-account>.workers.dev`. Hand out `<that URL>/astronaut`, `/ops`, `/tech` and `/sci`. Everyone who opens the site is in the same mission, which is what you want for a demo.
+There is no build step because everything the pages need is committed under `client/`, three.js included. Everyone who opens the site is in the same mission, which is what you want for a demo. The free plan covers this; the room is declared as a SQLite-backed Durable Object because that is the kind the free plan allows. `npm run deploy` does the same from a laptop after `npx wrangler login`.
 
-How it is put together: `worker/index.js` serves the pages, `worker/room.js` is a Durable Object that holds the one game, and both it and the laptop server drive the same `server/hub.js`, so the rules and the 1.3 s delay cannot drift apart. `npm run build:cf` assembles the static files into `dist/` (the client, `shared/`, and the three files of three.js the client imports). `npm run dev:cf` runs the whole thing locally on `http://localhost:8787`, and `SMOKE_URL=http://localhost:8787 npm run smoke` tests it. The free plan covers this; the room is declared as a SQLite-backed object because that is the kind the free plan allows.
+How it is put together: `worker/index.js` serves `client/` as static files and rewrites the seat URLs onto the two HTML pages, `worker/room.js` is a Durable Object that holds the one game, and both it and the laptop server drive the same `server/hub.js`, so the rules and the 1.3 s delay cannot drift apart. `npm run dev:cf` runs the whole thing locally on `http://localhost:8787`, and `SMOKE_URL=http://localhost:8787 npm run smoke` tests it.
 
 The Quest-over-USB path still needs the laptop server (`npm start`), because that one answers on `localhost`.
 
@@ -81,8 +80,9 @@ A wrong action costs 8 oxygen. An alarm that times out costs 15. Oxygen at zero 
 ## Where things are
 
 ```
-shared/config.js    every number: round length, delay, penalties, station positions, gear
-shared/rules.js     puzzle rules and the Scientist's manual text
+client/shared/config.js  every number: round length, delay, penalties, station positions, gear
+client/shared/rules.js   puzzle rules and the Scientist's manual text
+client/vendor/three/     the three files of three.js the pages import (refresh with npm run vendor)
 server/game.js      all game logic and what each role may see (no networking, unit-tested)
 server/hub.js       who is connected, what each role may send, the 1.3 s delay, radio relay
 server/server.js    the laptop web server and WebSocket, drives hub.js
@@ -96,7 +96,7 @@ client/voice.js     push-to-talk radio with 1960s distortion and Quindar beeps
 
 Suggested split: A takes `astronaut.js`, `world.js` and the art. B takes `server/`, `worker/` and new minigames. C takes `console.*`. D takes `rules.js`, the manual, audio, pitch and video.
 
-**Adding a minigame** takes three edits: data and checks in `server/game.js` (`makeData`, `act`, `view`), a panel in `client/stations.js`, and a rule in `shared/rules.js`. Not built yet from the list: solar array circuits, docking ring maze.
+**Adding a minigame** takes three edits: data and checks in `server/game.js` (`makeData`, `act`, `view`), a panel in `client/stations.js`, and a rule in `client/shared/rules.js`. Not built yet from the list: solar array circuits, docking ring maze.
 
 ## What has and has not been tested
 

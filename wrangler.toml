@@ -1,10 +1,11 @@
-# Cloudflare deployment. `npm run deploy` builds dist/ and ships it.
-name = "moonbase"
+# Cloudflare. Connect the repo in the dashboard (Workers & Pages > Create > Import a repository)
+# and every push to main deploys: no build step, the default `npx wrangler deploy` is enough.
+name = "moonbase-manager"
 main = "worker/index.js"
 compatibility_date = "2025-09-01"
 
 [assets]
-directory = "./dist"
+directory = "./client"
 binding = "ASSETS"
 # No redirecting /console.html to /console: the worker rewrites /ops etc. onto the HTML files
 # and the console reads its seat from the path it was opened at.

@@ -2,7 +2,7 @@
 // here (the worker always asks for the object named "main"), so there is exactly one mission,
 // the same as one laptop running server.js. The rules and the delay are in server/hub.js.
 import { Hub } from '../server/hub.js';
-import { CFG } from '../shared/config.js';
+import { CFG } from '../client/shared/config.js';
 
 export class GameRoom {
   constructor() {

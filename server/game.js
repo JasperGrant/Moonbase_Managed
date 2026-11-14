@@ -1,6 +1,6 @@
 // All game rules. No sockets in here, so it can be tested with plain Node (npm test).
-import { CFG, VEHICLES, GEAR, ISSUES } from '../shared/config.js';
-import { solveWires, WIRE_COLORS, ROCK_COLORS, CODE_CHARS } from '../shared/rules.js';
+import { CFG, VEHICLES, GEAR, ISSUES } from '../client/shared/config.js';
+import { solveWires, WIRE_COLORS, ROCK_COLORS, CODE_CHARS } from '../client/shared/rules.js';
 
 const TYPES = Object.keys(ISSUES);
 

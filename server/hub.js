@@ -6,7 +6,7 @@
 // A client is any object the transport hands to add(); the hub sets `role` and `open` on it and
 // calls client.send(stringOrBinary). send() must never throw.
 import { Game } from './game.js';
-import { CFG, ROLES } from '../shared/config.js';
+import { CFG, ROLES } from '../client/shared/config.js';
 
 const isControl = role => role === 'ops' || role === 'all';
 

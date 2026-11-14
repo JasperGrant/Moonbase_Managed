@@ -8,7 +8,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
 import { Hub, PAGES } from './hub.js';
-import { CFG } from '../shared/config.js';
+import { CFG } from '../client/shared/config.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const PORT = Number(process.env.PORT) || 3000;
@@ -17,20 +17,15 @@ const MIME = {
   '.json': 'application/json', '.png': 'image/png', '.jpg': 'image/jpeg', '.svg': 'image/svg+xml',
   '.glb': 'model/gltf-binary', '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.ico': 'image/x-icon',
 };
-const MOUNTS = [
-  ['/shared/', path.join(ROOT, 'shared')],
-  ['/vendor/three/', path.join(ROOT, 'node_modules', 'three')],
-  ['/', path.join(ROOT, 'client')],
-];
+const WEB = path.join(ROOT, 'client'); // everything the pages need is in here, three.js included
 
 function serve(req, res) {
   let url;
   try { url = decodeURIComponent(new URL(req.url, 'http://x').pathname); } catch { res.writeHead(400).end(); return; }
   if (url === '/') url = '/index.html';
   url = PAGES[url] || url;
-  const [prefix, dir] = MOUNTS.find(([p]) => url.startsWith(p));
-  const file = path.join(dir, url.slice(prefix.length));
-  if (file !== dir && !file.startsWith(dir + path.sep)) { res.writeHead(403).end(); return; }
+  const file = path.join(WEB, url);
+  if (!file.startsWith(WEB + path.sep)) { res.writeHead(403).end(); return; }
   fs.readFile(file, (err, data) => {
     if (err) { res.writeHead(404, { 'Content-Type': 'text/plain' }).end('Not found: ' + url); return; }
     res.writeHead(200, { 'Content-Type': MIME[path.extname(file)] || 'application/octet-stream', 'Cache-Control': 'no-store' });

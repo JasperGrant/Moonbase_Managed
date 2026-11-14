@@ -9,15 +9,15 @@
     "test": "node test/game.test.js",
     "cert": "mkdir -p certs && openssl req -x509 -newkey rsa:2048 -nodes -keyout certs/key.pem -out certs/cert.pem -days 30 -subj \"/CN=moonbase\"",
     "smoke": "node test/smoke.mjs",
-    "build:cf": "node scripts/build-cf.mjs",
-    "dev:cf": "npm run build:cf && wrangler dev",
-    "deploy": "npm run build:cf && wrangler deploy"
+    "dev:cf": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "vendor": "node scripts/vendor-three.mjs"
   },
   "dependencies": {
-    "three": "^0.180.0",
     "ws": "^8.18.0"
   },
   "devDependencies": {
-    "wrangler": "^4.162.0"
+    "wrangler": "^4.162.0",
+    "three": "^0.180.0"
   }
 }
