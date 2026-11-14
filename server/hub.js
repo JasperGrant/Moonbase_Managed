@@ -18,6 +18,7 @@ export class Hub {
     this.requireFullCrew = opts.requireFullCrew ?? CFG.lobby.requireFullCrew;
     this.ready = new Set();   // seats that pressed Ready, by role as held ('all' in 2-player mode)
     this.countdown = null;    // seconds until the mission starts, while everyone is ready
+    this.adminKey = opts.adminKey || null; // when set, /admin needs this key (ADMIN_KEY in the environment)
   }
 
   live() { return [...this.clients].filter(c => c.open && c.role); }
@@ -47,12 +48,42 @@ export class Hub {
     if (this.countdown <= 0) { this.countdown = null; this.ready.clear(); this.game.start(); }
   }
 
-  add(client) { client.role = null; client.open = true; this.clients.add(client); }
+  add(client) { client.role = null; client.admin = false; client.open = true; client.since = Date.now(); this.clients.add(client); }
   remove(client) {
     client.open = false;
     this.clients.delete(client);
     if (client.role && !this.crew().includes(client.role)) this.ready.delete(client.role); // their panel goes grey
     if (!this.allReady()) this.countdown = null;
+  }
+
+  // ---- the admin console (/admin): not a seat, sees everything undelayed, can start, reset and kick ----
+  admins() { return [...this.clients].filter(c => c.open && c.admin); }
+  // Drop every connection holding a seat. The seat is free the instant this returns, whether or not
+  // the far end ever answers the close: that is the fix for "taken, but nobody is there".
+  kick(role) {
+    let n = 0;
+    for (const c of [...this.clients]) if (c.role === role) {
+      this.remove(c);
+      try { c.send(JSON.stringify({ t: 'kicked' })); } catch {}
+      try { c.close?.(); } catch {}
+      n++;
+    }
+    return n;
+  }
+  command(m) {
+    const game = this.game;
+    if (m.cmd === 'start') { // start now, whoever is or is not ready; from results or mid-run it is a restart
+      if (game.phase !== 'lobby') game.reset();
+      this.ready.clear(); this.countdown = null;
+      game.start();
+    } else if (m.cmd === 'reset') { game.reset(); this.ready.clear(); this.countdown = null; }
+    else if (m.cmd === 'kick' && typeof m.role === 'string') this.kick(m.role);
+    else if (m.cmd === 'kickall') for (const r of Object.keys(ROLES)) this.kick(r);
+    else if (m.cmd === 'mode') game.setMode(m.mode);
+  }
+  adminView(who) {
+    const connections = [...this.clients].filter(c => c.open).map(c => ({ role: c.admin ? 'admin' : c.role, since: c.since }));
+    return { ...this.game.view('all', who), ready: [...this.ready], countdown: this.countdown, admin: { seats: this.seats(), connections, keyed: !!this.adminKey } };
   }
 
   // True while the base is blacked out: no radio, no commands.
@@ -85,11 +116,17 @@ export class Hub {
     if (!m || typeof m !== 'object') return;
 
     if (m.t === 'hello') {
+      if (m.role === 'admin') {
+        if (this.adminKey && m.key !== this.adminKey) { ws.send(JSON.stringify({ t: 'denied' })); return; }
+        ws.admin = true;
+        return;
+      }
       if (!ROLES[m.role]) return;
       if (this.taken(m.role)) { ws.send(JSON.stringify({ t: 'taken', role: m.role })); return; }
       ws.role = m.role;
       return;
     }
+    if (ws.admin) { if (m.t === 'admin') this.command(m); return; }
     if (!ws.role) return;
 
     if (m.t === 'ready') {
@@ -134,6 +171,8 @@ export class Hub {
       const msg = JSON.stringify({ ...this.game.view(c.role, who), ready, countdown });
       this.later(c.role === 'astronaut' ? 0 : this.lag(), () => { if (c.open) c.send(msg); });
     }
+    const admins = this.admins();
+    if (admins.length) { const msg = JSON.stringify(this.adminView(who)); for (const c of admins) c.send(msg); } // no delay: this is the referee
   }
 }
 
@@ -144,4 +183,5 @@ export const PAGES = {
   '/tech': '/console.html',
   '/sci': '/console.html',
   '/control': '/console.html',
+  '/admin': '/admin.html',
 };

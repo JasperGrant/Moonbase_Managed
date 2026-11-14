@@ -5,8 +5,8 @@ import { Hub } from '../server/hub.js';
 import { CFG } from '../client/shared/config.js';
 
 export class GameRoom {
-  constructor() {
-    this.hub = new Hub();
+  constructor(state, env) {
+    this.hub = new Hub(undefined, { adminKey: env?.ADMIN_KEY }); // set ADMIN_KEY as a Worker variable or secret to lock /admin
     this.timer = null;
   }
 
@@ -19,7 +19,7 @@ export class GameRoom {
     const [client, server] = [pair[0], pair[1]];
     server.accept();
 
-    const c = { send: data => { try { server.send(data); } catch {} } };
+    const c = { send: data => { try { server.send(data); } catch {} }, close: () => { try { server.close(4000, 'kicked'); } catch {} } };
     this.hub.add(c);
     server.addEventListener('message', e => this.hub.message(c, e.data, typeof e.data !== 'string'));
     const bye = () => {

@@ -8,7 +8,7 @@ import { buildFixtures } from '/stations.js';
 import { buildInterior, ROOM } from '/interior.js';
 import { CFG, CREW, ROLES, PLACES, covers } from '/shared/config.js';
 import { beltWeight, sheltered } from '/shared/rules.js';
-import { seatTaken } from '/seat.js';
+import { seatTaken, kicked } from '/seat.js';
 import { buildArm } from '/arm.js';
 import { createLobby } from '/lobby.js';
 
@@ -178,6 +178,7 @@ function useBoard(controller) {
 const NOTHING = { belt: [], locker: [], scene: null, suit: false };
 net.onState = s => { state = s; lobby.update(s); fx.sync(s.phase === 'run' ? s : NOTHING); };
 net.onTaken = seatTaken;
+net.onKicked = kicked;
 net.onBinary = buf => radio.receive(buf);
 net.onMsg = m => { if (m.t === 'ptt') { rx = m.on; radio.rxMarker(m.on); } };
 

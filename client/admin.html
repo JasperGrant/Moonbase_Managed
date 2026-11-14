@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:,">
+<title>Moonbase: admin</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<header>
+  <div class="brand">MOONBASE<span>Admin</span></div>
+  <div class="stat"><label>PHASE</label><b id="phase">-</b></div>
+  <div class="stat"><label>MISSION CLOCK</label><b id="clock">-:--</b></div>
+  <div class="stat"><label>SCORE</label><b id="score">0</b></div>
+  <div class="stat"><label>POWER</label><b id="power">-</b></div>
+  <span id="link"></span>
+</header>
+<main class="admin">
+  <section class="grid">
+    <div class="panel">
+      <h3>Mission</h3>
+      <p class="brief">The referee's console. It is not a seat: nothing here counts toward the crew, and nothing is delayed. <b>Start now</b> skips the ready-up and starts (or restarts) the mission with whoever is in. <b>Reset</b> returns everyone to the lobby.</p>
+      <div class="row">
+        <label>Mode <select id="mode"></select></label>
+        <button id="start">Start now</button>
+        <button id="reset" class="ghost">Reset to lobby</button>
+      </div>
+      <p class="hint" id="countdown"></p>
+    </div>
+    <div class="panel">
+      <h3>Seats</h3>
+      <p class="brief">Kick clears a seat by dropping every connection that holds it, so a seat that reads taken with nobody at it can be taken again at once. The person kicked sees a notice and can rejoin.</p>
+      <table id="seats"></table>
+      <div class="row"><button id="kickall" class="ghost danger">Kick everyone</button></div>
+    </div>
+    <div class="panel">
+      <h3>Connections</h3>
+      <ul id="conns" class="log"></ul>
+    </div>
+    <div class="panel" id="resultPanel" hidden>
+      <h3>Last result</h3>
+      <div id="result"></div>
+    </div>
+  </section>
+</main>
+<div id="adminGate" hidden>
+  <form id="keyForm"><h1>ADMIN KEY</h1><p>This server locks the admin console. Enter the key it was started with.</p><input id="key" type="password" autocomplete="current-password" placeholder="key"><button>Open</button></form>
+</div>
+<script type="module" src="/admin.js"></script>
+</body>
+</html>
