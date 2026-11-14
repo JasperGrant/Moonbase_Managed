@@ -208,6 +208,10 @@ export class Radio {
     if (kind === 'snap') { this.burst(0.06, 0.25, 'highpass', 2500); this.tone(90, 0.12, 0.1, 'square', 0.02); }
     if (kind === 'spark') { this.burst(0.05 + Math.random() * 0.12, 0.12, 'highpass', 2200 + Math.random() * 1500); }
     if (kind === 'hatch') { this.sweep(150, 60, 0.35, 0.12, 'square'); this.tone(55, 0.25, 0.18, 'sine', 0.3); }
-    if (kind === 'end') { this.tone(523, 0.2, 0.1); this.tone(659, 0.2, 0.1, 'sine', 0.2); this.tone(784, 0.4, 0.1, 'sine', 0.4); }
+    if (kind === 'end' || kind === 'won') { this.tone(523, 0.2, 0.1); this.tone(659, 0.2, 0.1, 'sine', 0.2); this.tone(784, 0.4, 0.1, 'sine', 0.4); }
+    // A loss: the same three notes falling, minor, slower and lower.
+    if (kind === 'lost') { this.tone(392, 0.35, 0.08); this.tone(311, 0.35, 0.08, 'sine', 0.35); this.tone(262, 0.8, 0.08, 'sine', 0.7); }
+    // The cuff asking to be read: a soft two-tone wrist-watch beep.
+    if (kind === 'watch') { this.tone(2100, 0.05, 0.03, 'square'); this.tone(2100, 0.05, 0.03, 'square', 0.12); }
   }
 }

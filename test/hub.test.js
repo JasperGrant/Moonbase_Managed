@@ -65,6 +65,23 @@ function setup(opts) {
   assert.equal(hub.game.phase, 'lobby');
   assert.equal(hub.crew().length, 4);
   assert.deepEqual(hub.seats().ready, []);
+
+  // Back to the lobby from the debrief: any seat, the astronaut included, and only from the results.
+  const seat = { astronaut: a, ops: o, tech: t, sci: s };
+  for (const r of ['tech', 'sci', 'astronaut', 'ops']) {
+    hub.game.start();
+    say(seat[r], { t: 'lobby' });
+    assert.equal(hub.game.phase, 'run', `${r}: "lobby" is ignored while the mission runs`);
+    hub.game.end(false, 'test');
+    say(seat[r], { t: 'ready', on: true });
+    assert.deepEqual(hub.seats().ready, [], `${r}: ready is still ignored in the results`);
+    say(seat[r], { t: 'lobby' });
+    assert.equal(hub.game.phase, 'lobby', `${r} can take the crew back to the lobby`);
+    assert.deepEqual(hub.seats().ready, []);
+    assert.equal(hub.game.last.won, false);
+    say(seat[r], { t: 'lobby' });
+    assert.equal(hub.game.phase, 'lobby', 'a second press in the lobby does nothing');
+  }
 }
 
 // Leaving clears that seat's ready flag and cancels the countdown.

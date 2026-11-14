@@ -218,7 +218,7 @@ export function createLobby(root, opts = {}) {
     const missing = ORDER.filter(r => !held(r)).map(r => INFO[r].name);
     const ready = ORDER.filter(r => held(r) && isReady(r)).length;
     let text;
-    if (locked) text = st.phase === 'run' ? 'Mission in progress. An open seat can still be taken to rejoin.' : 'Mission over. Mission Ops can fly again.';
+    if (locked) text = st.phase === 'run' ? 'Mission in progress. An open seat can still be taken to rejoin.' : 'Mission over. Any seat can return to the lobby.';
     else if (n != null) text = `All four GO. Launching in ${n}...`;
     else if (missing.length) text = `Waiting for ${list(missing)}. ${ready} of 4 ready.`;
     else text = `Crew complete. ${ready} of 4 ready.${ready < 4 ? ' Everyone presses Ready.' : ''}`;

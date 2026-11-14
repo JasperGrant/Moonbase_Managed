@@ -42,6 +42,8 @@ export const CFG = {
   // The lobby: every role is picked and ready, then a short countdown starts the mission.
   // requireFullCrew: false lets one developer ready up alone (or run the server with SOLO=1).
   lobby: { requireFullCrew: true, countdownSeconds: 3 },
+  // The debrief: the results stay up until a seat goes back to the lobby, or this long at most.
+  debriefSeconds: 90,
   // Power outage inside the habitat: the roof lights die, the room is dark for darkMs, then the red
   // backup lights ramp up over rampMs. Once fixed, the roof lights re-strike one row every restrikeMs.
   power: { darkMs: 1500, rampMs: 400, restrikeMs: 120 },

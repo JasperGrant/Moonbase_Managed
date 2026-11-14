@@ -300,6 +300,33 @@ try {
   if (result.fixed !== 6) problems.push(`expected all 6 faults fixed, got ${result.fixed}`);
   if (result.hits || result.blackouts || result.mistakes) problems.push(`a clean run should have no hits, blackouts or wrong plugs: ${JSON.stringify(result)}`);
   await shot(ctl, 'mission-control-results');
+
+  // The debrief and the way back. Every seat has BACK TO LOBBY. The astronaut (on a laptop: hold X)
+  // leaves first: the crew goes to the lobby, the astronaut is back at the READY board, and the
+  // console keeps its results up with the CREW IN LOBBY lamp lit until it leaves too.
+  step('the debrief and the way back to the lobby');
+  const ctlOut = await ctl.evaluate(() => ({ button: !!document.querySelector('#results [data-lobby]'), lamp: document.getElementById('crewLamp')?.classList.contains('on'), left: document.getElementById('debriefLeft')?.textContent }));
+  if (!ctlOut.button || ctlOut.lamp || !(Number(ctlOut.left) > 0)) problems.push('console: the results should have BACK TO LOBBY, the lamp off and the seconds left: ' + JSON.stringify(ctlOut));
+  const cuff = await astro.evaluate(async () => { for (let i = 0; i < 40 && !window.moonbase.arm.shown?.debrief; i++) await new Promise(r => setTimeout(r, 100)); return { debrief: window.moonbase.debrief(), shown: window.moonbase.arm.shown }; });
+  if (!cuff.debrief || !cuff.shown?.debrief || cuff.shown.status !== (result.won ? 'won' : 'lost')) problems.push('astronaut: the cuff did not show the debrief: ' + JSON.stringify(cuff));
+  await astro.keyboard.down('x');
+  const back = await astro.evaluate(async () => {
+    const mb = window.moonbase;
+    for (let i = 0; i < 100 && (mb.debrief() || mb.state().phase !== 'lobby' || !mb.board.visible); i++) await new Promise(r => setTimeout(r, 100));
+    await new Promise(r => setTimeout(r, 600)); // the fade
+    mb.camera.updateMatrixWorld(true);
+    const head = mb.camera.getWorldPosition(new mb.THREE.Vector3()), dir = mb.camera.getWorldDirection(new mb.THREE.Vector3());
+    const toBoard = mb.board.getWorldPosition(new mb.THREE.Vector3()).sub(head).normalize();
+    return { debrief: mb.debrief(), phase: mb.state().phase, where: mb.where(), board: mb.board.visible, facing: +dir.dot(toBoard).toFixed(2) };
+  });
+  await astro.keyboard.up('x');
+  if (back.debrief || back.phase !== 'lobby' || back.where !== 'out' || !back.board || back.facing < 0.8) problems.push('astronaut: holding X in the debrief did not bring them back to the READY board: ' + JSON.stringify(back));
+  await ctl.waitForFunction(() => document.getElementById('crewLamp')?.classList.contains('on'), null, POLL);
+  if (!(await ctl.evaluate(() => !document.getElementById('results').hidden && document.getElementById('lobbyView').hidden))) problems.push('console: the results were pulled away when the astronaut went back to the lobby');
+  await shot(ctl, 'mission-control-results-crew-in-lobby');
+  await ctl.click('#results [data-lobby]');
+  await ctl.waitForFunction(() => !document.getElementById('lobbyView').hidden && document.getElementById('results').hidden, null, POLL);
+  step('back in the lobby');
   // The rest is on the astronaut's page alone. Mission Control's page draws the rover camera, a second
   // 3D scene, and in software rendering the two starve each other.
   await browsers[0].close();

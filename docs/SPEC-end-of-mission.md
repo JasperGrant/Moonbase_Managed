@@ -53,10 +53,10 @@ All of this fires once, on the `end` event. Nothing on the visor.
 
 | Channel | Won | Lost |
 | --- | --- | --- |
-| **Sound** (`voice.js`) | New `won` sting: the current rising triad, played from the wrist. | New `lost` sting: a slower falling minor triad (G, E♭, C), sine, lower and quieter. |
+| **Sound** (`voice.js`) | New `won` sting: the current rising triad. | New `lost` sting: a slower falling minor triad (G, E♭, C), sine, lower and quieter. |
 | **Haptics** | Three short pulses on the left (cuff) hand. | One long pulse on both hands. |
 | **Cuff face** (`arm.js`) | The whole face becomes the debrief face (below). | Same, with a cross. |
-| **Cuff reminder** | Until the cuff has been read for 1 s (`gaugesReadable`), a soft two-tone wrist-watch beep from the cuff every 6 s, so they know where to look. | Same. |
+| **Cuff reminder** | Until the cuff has been read for 1 s (`gaugesReadable`), a soft two-tone wrist-watch beep (`watch`) and a light tap on the cuff hand every 6 s, so they know where to look. | Same. |
 
 **The debrief face** replaces the gauges on the cuff while `debrief` is set. It stays icons only, as the cuff is now: a large tick in `lamp-green` or a cross in `lamp-red` across the middle of the cream `dial` face, in the same stroke style as the current small tick and cross, and an engraved arrow pointing at the EXIT plate (toward the elbow). No words, no score: the score is on Mission Control, and Ops reads it out over the radio. `arm.draw()` gets `info.status = 'won' | 'lost'` and a new `info.debrief = true`; `arm.shown` reports `debrief: true` for the tests.
 
@@ -128,7 +128,7 @@ The verdict (`MISSION COMPLETE` / `MISSION FAILED`) stays where it is. Play the 
 
 **`npm run smoke:shots`** (`test/smoke.mjs`, after the existing results shot)
 
-- Every console shows BACK TO LOBBY. The Technician presses it: the Technician sees the lobby, Ops still sees the results with `CREW IN LOBBY` lit. Ops presses it: Ops sees the lobby.
+- The smoke test runs the 2-player console and the astronaut on a laptop, so the astronaut is the seat that leaves first. The console shows BACK TO LOBBY with the lamp off and the seconds left; the astronaut's cuff shows the debrief. The astronaut holds X: they are outside, at the READY board, facing it, and the server is in the lobby. The console still shows its results, with `CREW IN LOBBY` lit. The console presses BACK TO LOBBY: it sees the lobby. (`hub.test.js` covers the Technician and Scientist sending `lobby`.)
 - Shots: `mission-control-results` (button and lamp off), `mission-control-results-crew-in-lobby`.
 
 **`npm run vr:shots`** (`test/vr.mjs`)

@@ -136,6 +136,14 @@ export class Hub {
       return;
     }
 
+    // Leaving the debrief: any seat, the astronaut's cuff included, takes the crew back to the lobby.
+    // Only from the results, so nobody scrubs a running mission by accident. The others keep their
+    // own copy of the results on screen until they leave too.
+    if (m.t === 'lobby') {
+      if (game.phase === 'results') { game.reset(); this.ready.clear(); this.countdown = null; }
+      return;
+    }
+
     if (ws.role === 'astronaut') {
       // h is the head height in metres: crouching is how you take cover beside the rover.
       if (m.t === 'pose' && [m.x, m.z, m.ry].every(Number.isFinite)) game.astro = { x: m.x, z: m.z, ry: m.ry, h: Number.isFinite(m.h) ? m.h : 1.65 };

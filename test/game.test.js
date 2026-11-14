@@ -301,4 +301,29 @@ const kit = (g, ...tools) => { at(g, PLACES.locker); for (const t of [...g.belt]
   assert.equal(g.mode, 'free', 'the mode survives "Fly again"');
   for (const t of Object.keys(TOOLS)) assert.ok(g.locker.includes(t));
 }
+// ---------- the debrief times out, and the lobby remembers how it went ----------
+{
+  const g = new Game(rng);
+  assert.equal(g.setMode('free'), true);
+  g.start();
+  g.score = 300;
+  g.end(true, 'test');
+  assert.equal(g.phase, 'results');
+  assert.equal(g.debriefLeft, CFG.debriefSeconds);
+  assert.equal(g.view('ops').debriefLeft, CFG.debriefSeconds, 'the consoles get the seconds left');
+  assert.equal(g.view('ops').last, undefined, 'last is a lobby thing');
+  for (let i = 0; i < (CFG.debriefSeconds - 1) * 10; i++) g.tick(0.1);
+  assert.equal(g.phase, 'results', 'not before the time is up');
+  for (let i = 0; i < 20; i++) g.tick(0.1);
+  assert.equal(g.phase, 'lobby', 'an unattended debrief goes back to the lobby');
+  assert.equal(g.mode, 'free', 'and keeps the mode');
+  assert.deepEqual(g.last, { won: true, score: g.last.score, mode: 'free' });
+  assert.ok(g.last.score >= 300, 'the score, bonus included');
+  assert.deepEqual(g.view('astronaut').last, g.last, 'the READY board gets the last mission');
+  g.reset();
+  assert.ok(g.last, 'a second reset from the lobby keeps it');
+  g.start();
+  assert.equal(g.last, null, 'a new mission clears it');
+  assert.equal(g.view('astronaut').last, undefined);
+}
 console.log('all game tests passed');

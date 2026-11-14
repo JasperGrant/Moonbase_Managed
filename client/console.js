@@ -31,6 +31,9 @@ const BRIEF = {
 const net = connect(role);
 const radio = has('ops') ? new Radio(net) : null;
 let state = null, lastEv = 0, rx = false, talking = false, shown = '', planKey = '', resultKey = '';
+// This seat's copy of the results, from the moment the mission ended until this seat presses BACK TO
+// LOBBY (or the next run starts). Someone else going back first does not pull it away.
+let debrief = null;
 
 $('roleName').textContent = ROLES[role];
 document.title = `Moonbase: ${ROLES[role]}`;
@@ -111,22 +114,26 @@ function render() {
     lastEv = s.ev.n;
     const k = s.ev.kind, t = $('toast');
     if (TOAST[k]) { t.className = k; t.textContent = TOAST[k] + (s.ev.pts ? `  +${s.ev.pts}` : ''); }
-    if (k !== 'meteor') radio?.sfx(k);
+    if (k === 'end') radio?.sfx(s.result && s.result.won ? 'won' : 'lost');
+    else if (k !== 'meteor') radio?.sfx(k);
   }
 
-  if (s.phase !== shown) {
-    shown = s.phase;
-    lobby.show(s.phase === 'lobby');
-    if (s.phase !== 'lobby') $('planSheet').hidden = true;
-    for (const id of ['run', 'results']) $(id).hidden = id !== s.phase;
-    if (s.phase === 'lobby') { $('toast').textContent = ''; $('toast').className = ''; }
+  if (s.phase === 'run') debrief = null;
+  if (s.phase === 'results' && s.result && !debrief) debrief = { result: s.result, score: s.score, log: s.log || [] };
+  const view = debrief ? 'results' : s.phase;
+  if (view !== shown) {
+    shown = view;
+    lobby.show(view === 'lobby');
+    if (view !== 'lobby') $('planSheet').hidden = true;
+    for (const id of ['run', 'results']) $(id).hidden = id !== view;
+    if (view === 'lobby') { $('toast').textContent = ''; $('toast').className = ''; }
   }
   lobby.update(s);
   $('static').hidden = !dark;
   if (dark) { $('toast').textContent = ''; if (talking) { talking = false; radio.setTalking(false); paintPtt(); } }
   if (s.phase === 'lobby') renderPlan(s);
-  if (s.phase === 'run' && !dark) renderRun(s);
-  if (s.phase === 'results') renderResults(s);
+  if (view === 'run' && !dark) renderRun(s);
+  if (view === 'results') renderResults(s);
 }
 
 function renderPlan(s) {
@@ -162,22 +169,43 @@ let lastFrame = 0, swinging = 0; // swinging: when a needle last moved
 })(0);
 fontsReady.then(() => { if (state) render(); });
 
+// The debrief. Every seat has its own way back to the lobby, and a lamp that lights once the crew is
+// there (someone else went first, or the debrief timed out), with the seconds left until it does.
 function renderResults(s) {
-  const key = JSON.stringify(s.result) + s.score;
-  if (key === resultKey || !s.result) return;
-  resultKey = key;
-  const r = s.result;
-  $('results').innerHTML = `<div class="panel">
+  const d = debrief;
+  const key = JSON.stringify(d.result) + d.score;
+  if (key !== resultKey) {
+    resultKey = key;
+    const r = d.result;
+    $('results').innerHTML = `<div class="panel">
     <div class="verdict ${r.won ? 'won' : 'lost'}">${r.won ? 'MISSION COMPLETE' : 'MISSION FAILED'}</div>
     <p>${esc(r.reason)}</p>
-    <p><b>Score ${s.score}</b> &nbsp;|&nbsp; fixed ${r.fixed} &nbsp;|&nbsp; blackouts ${r.blackouts} &nbsp;|&nbsp; meteor hits ${r.hits} &nbsp;|&nbsp; wrong plugs ${r.mistakes}${r.won ? ` &nbsp;|&nbsp; oxygen bonus +${r.bonus}` : ''}</p>
+    <p><b>Score ${d.score}</b> &nbsp;|&nbsp; fixed ${r.fixed} &nbsp;|&nbsp; blackouts ${r.blackouts} &nbsp;|&nbsp; meteor hits ${r.hits} &nbsp;|&nbsp; wrong plugs ${r.mistakes}${r.won ? ` &nbsp;|&nbsp; oxygen bonus +${r.bonus}` : ''}</p>
     <h2>What happened</h2>
-    <ul class="log">${(s.log || []).filter(l => l.kind !== 'start').map(l =>
+    <ul class="log">${d.log.filter(l => l.kind !== 'start').map(l =>
       `<li class="${l.kind}"><span class="at">${clock(l.at)}</span><span>${esc(l.text)}</span><span class="d">${l.pts ? '+' + l.pts : ''}${l.o2 ? l.o2 + ' O2' : ''}</span></li>`).join('')}</ul>
-    ${has('ops') ? '<button class="big" data-again>Fly again</button> <span class="hint">Everyone goes back to the lobby and readies up again.</span>' : '<p class="hint">Mission Ops can send the crew back to the lobby for another run.</p>'}
+    <div class="debrief-out">
+      <button class="big" data-lobby type="button">Back to lobby</button>
+      <span class="engraved">Your seat returns. The crew can keep reading.</span>
+      <span class="crew-lamp" id="crewLamp"><i></i>Crew in lobby</span>
+      <b class="nixie" id="debriefLeft"></b>
+    </div>
   </div>`;
+  }
+  const inLobby = s.phase !== 'results';
+  $('crewLamp').classList.toggle('on', inLobby);
+  $('debriefLeft').hidden = inLobby;
+  if (!inLobby) $('debriefLeft').textContent = String(s.debriefLeft ?? '').padStart(2, '0');
 }
-$('results').addEventListener('click', e => { if (e.target.closest('[data-again]')) { resultKey = ''; net.send({ t: 'reset' }); } });
+function backToLobby() {
+  if (!debrief) return;
+  if (state && state.phase === 'results') net.send({ t: 'lobby' });
+  radio?.sfx('relay');
+  debrief = null; resultKey = '';
+  if (state) render();
+}
+$('results').addEventListener('click', e => { if (e.target.closest('[data-lobby]')) backToLobby(); });
+addEventListener('keydown', e => { if (e.key === 'Enter' && debrief && !e.repeat && !e.target.closest?.('button, a, input')) { e.preventDefault(); backToLobby(); } });
 
 // ---------- drawing helpers ----------
 const blinkOn = () => Math.floor(Date.now() / 333) % 2 === 0; // 1.5 Hz: an alarm lamp, not a strobe
@@ -455,4 +483,4 @@ if (has('ops')) {
 }
 
 // For debugging from the browser console.
-window.moonbase = { state: () => state, radio, net, role };
+window.moonbase = { state: () => state, radio, net, role, debrief: () => debrief };

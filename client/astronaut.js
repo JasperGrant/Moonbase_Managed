@@ -10,7 +10,7 @@ import { CFG, CREW, ROLES, PLACES, covers } from '/shared/config.js';
 import { beltWeight, sheltered } from '/shared/rules.js';
 import { seatTaken, kicked } from '/seat.js';
 import { buildArm } from '/arm.js';
-import { PAL } from '/shared/palette.js';
+import { PAL, FONT, nixie, fontsReady } from '/shared/palette.js';
 import { createLobby } from '/lobby.js';
 
 const REACH = 3.2;        // metres: how far away the mouse can work something
@@ -24,6 +24,10 @@ const radio = new Radio(net);
 let state = null, lastEv = 0, rx = false, talking = false, mode = null; // mode: 'vr' | 'desk'
 let flash = '', flashUntil = 0, lastPhase = ''; // flash: 'ok' or 'bad', shown on the gauges for a few seconds
 let nextThump = 0, covered = false;
+// The debrief: set when a mission ends, cleared when the astronaut presses EXIT or the next run starts.
+// It outlives the server's results phase, so nobody else going back to the lobby pulls it away.
+// { won, score, read, readFor, beepAt }
+let debrief = null;
 
 // ---------- scene ----------
 const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -110,6 +114,7 @@ let keyed = false; // the radio is keyed, whether or not there is a microphone
 // for the thing that just happened, and a dark hourglass while waiting in the lobby.
 function status(now) {
   const s = state;
+  if (debrief) return debrief.won ? 'won' : 'lost';
   if (!s || s.phase === 'lobby') return 'standby';
   if (s.phase === 'results') return s.result.won ? 'won' : 'lost';
   return now < flashUntil ? flash : '';
@@ -125,7 +130,7 @@ function alarms() {
   return (sc.dust ? 1 : 0) + (sc.board ? 1 : 0) + (sc.wheel ? 1 : 0) + (sc.hull ? 1 : 0) + (state.suit ? 1 : 0);
 }
 function drawGauges(now) {
-  arm.draw({ state, status: status(now), zoom: scopeOn() ? zoom : 1, total: CFG.roundSeconds, radio: radioState(),
+  arm.draw({ state, status: status(now), debrief: !!debrief, zoom: scopeOn() ? zoom : 1, total: CFG.roundSeconds, radio: radioState(),
     alarms: alarms(), belt: running() ? beltWeight(state.belt) : 0, capacity: CFG.beltCapacity });
   arm.signal(radioState(), now);
 }
@@ -151,22 +156,40 @@ function drawBoard() {
   const missing = CREW.filter(r => !s.crew.some(h => covers(h, r)));
   const waiting = CREW.filter(r => r !== 'astronaut' && !(s.ready || []).some(h => covers(h, r)));
   const n = s.countdown == null ? null : Math.max(1, Math.ceil(s.countdown));
-  const key = [iAmReady(), missing, waiting, n].join('|');
+  const last = s.last || null;
+  const key = [iAmReady(), missing, waiting, n, last && last.won, last && last.score, fontsLoaded].join('|');
   if (key === boardKey) return;
   boardKey = key;
   const g = board2d, W = boardCanvas.width, H = boardCanvas.height, go = iAmReady();
-  g.fillStyle = '#05080a'; g.fillRect(0, 0, W, H);
-  g.strokeStyle = go ? '#58e08a' : '#ffb84a'; g.lineWidth = 14; g.strokeRect(7, 7, W - 14, H - 14);
+  const lamp = go ? PAL.green : PAL.amber;
+  // A painted placard in a bezel: the lamp colour round the edge says whether you are GO.
+  g.fillStyle = PAL.bakelite; g.fillRect(0, 0, W, H);
+  g.strokeStyle = PAL.bezel; g.lineWidth = 6; g.strokeRect(3, 3, W - 6, H - 6);
+  g.strokeStyle = lamp; g.lineWidth = 10; g.strokeRect(14, 14, W - 28, H - 28);
   g.textAlign = 'center'; g.textBaseline = 'middle';
-  g.fillStyle = go ? '#58e08a' : '#ffb84a';
-  g.font = 'bold 150px monospace'; g.fillText(n != null ? String(n) : go ? 'GO' : 'READY?', W / 2, 170);
-  g.fillStyle = '#d6e6e0'; g.font = 'bold 30px monospace';
-  g.fillText(n != null ? 'All four GO. Launching...' : go ? 'Trigger again to stand down' : 'Pull the trigger here when set', W / 2, 300);
-  g.fillStyle = '#7d909c'; g.font = '26px monospace';
+  if (n != null) nixie(g, String(n), W / 2, 160, 150);
+  else { g.fillStyle = lamp; g.font = `92px ${FONT.label}`; g.fillText(go ? 'GO' : 'READY?', W / 2, 160); }
+  g.fillStyle = PAL.ink; g.font = `bold 30px ${FONT.type}`;
+  g.fillText(n != null ? 'All four GO. Launching...' : go ? 'Trigger again to stand down' : 'Pull the trigger here when set', W / 2, 290);
+  g.fillStyle = PAL.inkDim; g.font = `26px ${FONT.type}`;
   const wait = missing.length ? 'Seats open: ' + missing.map(r => ROLES[r]).join(', ') : waiting.length ? 'Not ready yet: ' + waiting.map(r => ROLES[r]).join(', ') : 'Mission control is GO';
-  g.fillText(n != null ? '' : wait, W / 2, 380);
+  g.fillText(n != null ? '' : wait, W / 2, 345);
+  // The last mission: a tick or a cross, and its score on a Nixie counter.
+  if (last) {
+    const y = 412;
+    g.fillStyle = PAL.inkDim; g.font = `15px ${FONT.label}`; g.textAlign = 'right';
+    g.fillText('LAST MISSION', W / 2 - 50, y);
+    g.lineCap = 'round'; g.lineJoin = 'round'; g.lineWidth = 7; g.strokeStyle = last.won ? PAL.green : PAL.red;
+    g.beginPath();
+    if (last.won) { g.moveTo(W / 2 - 28, y); g.lineTo(W / 2 - 18, y + 11); g.lineTo(W / 2 + 2, y - 13); }
+    else { g.moveTo(W / 2 - 25, y - 11); g.lineTo(W / 2 - 3, y + 11); g.moveTo(W / 2 - 3, y - 11); g.lineTo(W / 2 - 25, y + 11); }
+    g.stroke();
+    nixie(g, String(last.score), W / 2 + 24, y, 34, { align: 'left' });
+  }
   boardTex.needsUpdate = true;
 }
+let fontsLoaded = false;
+fontsReady.then(() => { fontsLoaded = true; }); // and the board redraws in its own type
 function useBoard(controller) {
   if (!board.visible) return false;
   aim(controller);
@@ -459,15 +482,19 @@ function followArm() {
   arm.aimUpper(arm.group.worldToLocal(shoulder));
   return true;
 }
-// The EXIT button on the cuff ends the headset session, back to the lobby. Hold the right index fingertip,
-// or the fingers of the right controller's glove, on the cap: it sinks, its lamp warms up, a click on
-// touch and a relay clunk when it goes. Holding for a moment means a brushing hand does not end the game.
+// The EXIT button on the cuff. In the debrief it takes the astronaut back to the READY board, still
+// in the headset; otherwise it ends the headset session, back to the lobby. Hold the right index
+// fingertip, or the fingers of the right controller's glove, on the cap: it sinks, its lamp warms up,
+// a click on touch and a relay clunk when it goes. Holding for a moment means a brushing hand does
+// not end the game, and after it goes it only works again once the finger has come off it.
+// In the debrief its lamp blinks amber, once a second, to say "press me".
 const EXIT = { reach: 0.028, hold: 0.6 };
 let exitHeld = 0, exitTouched = false, exitGone = false;
 const exitPos = new THREE.Vector3(), tipPos = new THREE.Vector3();
-function exitButton(dt, session) {
+const exitInvite = now => !!debrief && Math.floor(now * 2) % 2 === 0;
+function exitButton(dt, now, session) {
   let near = false, hand = -1;
-  if (arm.group.visible && !exitGone) {
+  if (arm.group.visible) {
     exitPos.copy(arm.EXIT_TOP).applyMatrix4(arm.group.matrixWorld);
     hand = controllers.findIndex(c => c.userData.hand === 'right');
     const c = controllers[hand];
@@ -480,15 +507,61 @@ function exitButton(dt, session) {
       near = have && tipPos.distanceTo(exitPos) < EXIT.reach;
     }
   }
+  if (exitGone) { if (!near) exitGone = false; near = false; } // re-arms once the finger is off it
   if (near && !exitTouched) { radio.sfx('click'); pulse(hand, 0.3, 25); }
   exitTouched = near;
   exitHeld = near ? exitHeld + dt : Math.max(0, exitHeld - dt * 3);
-  arm.pressExit(exitHeld / EXIT.hold);
+  arm.pressExit(exitHeld / EXIT.hold, exitInvite(now));
   if (exitHeld >= EXIT.hold && !exitGone) {
-    exitGone = true;
+    exitGone = true; exitHeld = 0;
     radio.sfx('relay'); pulse(hand, 1, 90);
-    session.end().catch(() => {});
+    if (debrief) leaveDebrief();
+    else session.end().catch(() => {});
   }
+}
+// On a laptop, hold X for the same moment.
+function deskExit(dt, now) {
+  const down = !!keys.x;
+  if (exitGone) { if (!down) exitGone = false; }
+  else exitHeld = down ? exitHeld + dt : 0;
+  arm.pressExit(exitGone ? 0 : exitHeld / EXIT.hold, exitInvite(now));
+  if (!exitGone && exitHeld >= EXIT.hold) {
+    exitGone = true; exitHeld = 0;
+    radio.sfx('relay');
+    if (debrief) leaveDebrief();
+    else leaveDesk();
+  }
+}
+function leaveDesk() {
+  mode = null; keyed = false; $('cross').hidden = true;
+  try { document.exitPointerLock?.(); } catch {}
+  lobby.show(true);
+}
+
+// ---------- the debrief: the mission is over ----------
+const leftHand = () => controllers.findIndex(c => c.userData.hand === 'left');
+function startDebrief(s, now) {
+  const won = !!s.result?.won;
+  debrief = { won, score: s.score, read: false, readFor: 0, beepAt: now + 6 };
+  // The sting comes with the 'end' event. The hands feel it too: three short taps on the cuff
+  // hand for a win, one long pull on both for a loss.
+  if (won) for (let k = 0; k < 3; k++) setTimeout(() => pulse(leftHand(), 0.6, 60), k * 180);
+  else { pulse(0, 0.9, 600); pulse(1, 0.9, 600); }
+}
+// Until the cuff has been read for a second, it beeps every few seconds, so they know where to look.
+function debriefStep(dt, now) {
+  if (!debrief || debrief.read) return;
+  const looking = mode === 'vr' ? reading : arm.raise > 0.9;
+  debrief.readFor = looking ? debrief.readFor + dt : 0;
+  if (debrief.readFor >= 1) debrief.read = true;
+  else if (now >= debrief.beepAt) { debrief.beepAt = now + 6; radio.sfx('watch'); pulse(leftHand(), 0.25, 30); }
+}
+// EXIT in the debrief: the crew goes back to the lobby (if nobody has taken it there already) and the
+// astronaut, wherever they were, fades out and back in facing the READY board.
+function leaveDebrief() {
+  if (state && state.phase === 'results') net.send({ t: 'lobby' });
+  debrief = null;
+  passage = { to: 'board', t: 0, moved: false }; shade.visible = true;
 }
 
 // Can the gauges be read right now? Call once a frame, after followArm.
@@ -621,10 +694,21 @@ function place(to) {
   teleport(spot);
   marker.visible = false;
 }
+// Back to the start: outside, at the spawn point, facing the READY board 1.7 m ahead (north).
+function boardNow() {
+  if (where === 'in') place('out');
+  rig.position.set(CFG.spawn.x, 0, CFG.spawn.z); rig.rotation.y = 0; vy = 0;
+  rig.updateMatrixWorld(true);
+  camera.getWorldDirection(fwd);
+  turnRig(-Math.atan2(-fwd.x, -fwd.z)); // wherever the head is turned in the room
+  rig.updateMatrixWorld(true);
+  teleport(CFG.spawn);
+}
+function toBoard() { passage = null; shade.visible = false; boardNow(); }
 function passageStep(dt) {
   if (!passage) return;
   passage.t += dt;
-  if (!passage.moved && passage.t >= FADE) { passage.moved = true; place(passage.to); }
+  if (!passage.moved && passage.t >= FADE) { passage.moved = true; if (passage.to === 'board') boardNow(); else place(passage.to); }
   shade.material.opacity = Math.max(0, Math.min(1, passage.t < FADE ? passage.t / FADE : 2 - passage.t / FADE));
   if (passage.t >= FADE * 2) { passage = null; shade.visible = false; }
 }
@@ -638,7 +722,7 @@ function control(dt, now) {
   if (session) {
     ptt = handControls(ptt);
     if (followArm() && gaugesReadable(dt)) ptt = true;
-    exitButton(dt, session);
+    exitButton(dt, now, session);
     for (const src of session.inputSources) {
       const gp = src.gamepad;
       if (!gp) continue;
@@ -662,6 +746,7 @@ function control(dt, now) {
     camera.position.y += ((keys.c ? CROUCH : 1.65) - camera.position.y) * Math.min(1, dt * 10);
     if (keys.f) fx.patchSuit();
     if (keys.g) fx.pullCord();
+    deskExit(dt, now);
   }
 
   const speed = WALK * dt;
@@ -720,14 +805,16 @@ renderer.setAnimationLoop(() => {
   const run = !!s && s.phase === 'run';
   if (s) {
     if (s.phase !== lastPhase) {
-      if (run) { flashUntil = 0; passage = null; shade.visible = false; if (where === 'in') place('out'); rig.position.set(CFG.spawn.x, 0, CFG.spawn.z); rig.rotation.y = 0; }
+      if (run) { flashUntil = 0; debrief = null; toBoard(); }
+      if (s.phase === 'results' && s.result && !debrief) startDebrief(s, now);
       lastPhase = s.phase;
     }
     if (s.ev && s.ev.n !== lastEv) {
       lastEv = s.ev.n;
       const k = s.ev.kind;
       // The astronaut is never told what broke or where: that is mission control's job.
-      if (['alarm', 'solve', 'mistake', 'hit', 'blackout', 'power', 'gen', 'end'].includes(k)) radio.sfx(k);
+      if (['alarm', 'solve', 'mistake', 'hit', 'blackout', 'power', 'gen'].includes(k)) radio.sfx(k);
+      if (k === 'end') radio.sfx(s.result && s.result.won ? 'won' : 'lost');
       if (k === 'solve') show('ok', 4);
       if (k === 'mistake' || k === 'hit') show('bad', 5);
       if (k === 'hit' || k === 'mistake') { pulse(0, 1, 250); pulse(1, 1, 250); }
@@ -777,8 +864,9 @@ renderer.setAnimationLoop(() => {
   shake *= 0.86;
   if (mode === 'desk') camera.rotation.z = (Math.random() - 0.5) * shake;
   drawBoard();
+  debriefStep(dt, now);
   // On a laptop the radio key swings the arm up. In a headset it is on your own arm (see followArm).
-  if (!arm.tracked) arm.update(Math.min(0.25, now - armFrame), keyed); // real time, so the arm is as quick on a slow machine
+  if (!arm.tracked) arm.update(Math.min(0.25, now - armFrame), keyed || (!!debrief && !!mode)); // real time, so the arm is as quick on a slow machine
   armFrame = now;
   if (arm.group.visible) drawGauges(now);
   renderScope();
@@ -790,7 +878,7 @@ renderer.setAnimationLoop(() => {
 // For debugging from the browser console, and for the tests: moonbase.state(), moonbase.fx.targets() ...
 window.moonbase = { resetStanding: () => { standing = 1.2; }, state: () => state, fx, world, interior, radio, rig, camera, net, board, THREE, scene, use: () => use(null), useBoard: () => useBoard(null), useHatch: () => useHatch(null), sendPose, myPose, teleport, turnRig,
   where: () => where, place, renderer, outage: on => { debugOutage = on; }, wreck: on => { debugDamage = on; },
-  zoom: () => zoom, setZoom, controllers, handControls, scope: scopeMesh, arm, snap, radioState: () => ({ keyed, talking, rx, reading, shown: radioState() }) };
+  zoom: () => zoom, setZoom, debrief: () => debrief, controllers, handControls, scope: scopeMesh, arm, snap, radioState: () => ({ keyed, talking, rx, reading, shown: radioState() }) };
 
 // ---------- start-up screen: the lobby, with the radio and VR steps in the astronaut's panel ----------
 const $ = id => document.getElementById(id);
@@ -804,5 +892,8 @@ $('radioBtn').onclick = async () => {
 $('vrSlot').appendChild(VRButton.createButton(renderer, { optionalFeatures: ['hand-tracking'] }));
 $('deskBtn').onclick = () => { mode = 'desk'; keys.tab = false; $('deskBtn').blur(); lobby.show(false); $('cross').hidden = false; lockPointer(); };
 // In a headset the arm lives in the room with the hands, and follows the left one; on a laptop it hangs off the view.
-renderer.xr.addEventListener('sessionstart', () => { mode = 'vr'; rig.add(arm.group); arm.setTracked(true); lobby.show(false); });
+renderer.xr.addEventListener('sessionstart', () => {
+  mode = 'vr'; rig.add(arm.group); arm.setTracked(true); lobby.show(false);
+  if (state && state.phase === 'lobby' && !debrief) toBoard(); // back in the headset: in front of the READY board
+});
 renderer.xr.addEventListener('sessionend', () => { exitHeld = 0; exitTouched = exitGone = false; arm.pressExit(0); mode = null; zoom = 1; zoomGrab = null; reading = false; readFor = 0; camera.add(arm.group); arm.setTracked(false); lobby.show(true); });
