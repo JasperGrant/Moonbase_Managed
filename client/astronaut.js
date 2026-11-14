@@ -8,7 +8,7 @@ import { buildFixtures } from '/stations.js';
 import { buildInterior, ROOM } from '/interior.js';
 import { CFG, CREW, ROLES, PLACES, covers } from '/shared/config.js';
 import { beltWeight, sheltered } from '/shared/rules.js';
-import { seatTaken } from '/seat.js';
+import { seatTaken, kicked } from '/seat.js';
 import { buildArm } from '/arm.js';
 import { createLobby } from '/lobby.js';
 
@@ -99,9 +99,11 @@ addEventListener('resize', () => {
 // of the face only while the radio is keyed (see client/arm.js).
 const arm = buildArm(THREE);
 camera.add(arm.group);
-// Keying the radio and raising the arm are one action: Tab on a laptop, the left trigger on a
-// controller, the left hand to the helmet with bare hands.
-let keyed = false; // the talk control is held, whether or not there is a microphone
+// Keying the radio and raising the arm are one action. On a laptop, Tab swings the arm up. In a
+// headset the cuff is on your own left arm: bring it up so you can read the gauges and the radio is
+// on, lower it or turn it away and the radio is off (see "the cuff on your own arm" below). The left
+// trigger, and a bare left hand held to the helmet, still key the radio without looking.
+let keyed = false; // the radio is keyed, whether or not there is a microphone
 
 // What the clock dial shows instead of its hourglass: a tick or a cross for the mission's outcome or
 // for the thing that just happened, and a dark hourglass while waiting in the lobby.
@@ -178,6 +180,7 @@ function useBoard(controller) {
 const NOTHING = { belt: [], locker: [], scene: null, suit: false };
 net.onState = s => { state = s; lobby.update(s); fx.sync(s.phase === 'run' ? s : NOTHING); };
 net.onTaken = seatTaken;
+net.onKicked = kicked;
 net.onBinary = buf => radio.receive(buf);
 net.onMsg = m => { if (m.t === 'ptt') { rx = m.on; radio.rxMarker(m.on); } };
 
@@ -413,6 +416,49 @@ function turnRig(angle) { // turn on the spot, around where the head is
   rig.rotation.y += angle;
 }
 
+// ---------- the cuff on your own arm (a headset) ----------
+// The arm follows the left controller or the tracked left hand. The radio is on while the gauges
+// can be read: the face of the cuff is turned toward the eyes, close enough, and near the middle
+// of the view. Each test is looser for staying on than for coming on, and coming on takes a moment
+// of holding still, so an arm swinging through the view does not key the radio.
+const READ = {
+  facing: [0.7, 0.5],    // cosine of the angle between the face of the cuff and the line to the eyes: on, stay on
+  near: [0.55, 0.68],    // metres from the eyes
+  inView: [0.8, 0.62],   // cosine of the angle off the middle of the view
+  hold: 0.25,            // seconds
+};
+const SHOULDER = { side: 0.19, down: 0.26 }; // where the left shoulder is from the eyes, metres
+let reading = false, readFor = 0;
+const cuffPos = new THREE.Vector3(), cuffOut = new THREE.Vector3(), gaze = new THREE.Vector3(), shoulder = new THREE.Vector3();
+// Put the arm on the left hand or controller. Returns true if there is one to put it on.
+function followArm() {
+  const i = controllers.findIndex(c => c.userData.hand === 'left');
+  const c = controllers[i], joint = c && c.userData.isHand ? hands[i].joints?.wrist : null;
+  if (joint && joint.visible) arm.follow(joint.matrix, 'hand');
+  else if (c && !c.userData.isHand && c.visible) arm.follow(c.matrix, 'controller');
+  else arm.follow(null);
+  if (!arm.group.visible) return false;
+  arm.group.updateWorldMatrix(true, false);
+  // The upper arm runs from the elbow to the left shoulder, wherever the head has got to.
+  shoulder.set(headPos.x + fwd.z * SHOULDER.side, headPos.y - SHOULDER.down, headPos.z - fwd.x * SHOULDER.side);
+  arm.aimUpper(arm.group.worldToLocal(shoulder));
+  return true;
+}
+// Can the gauges be read right now? Call once a frame, after followArm.
+function gaugesReadable(dt) {
+  if (!arm.group.visible) { reading = false; readFor = 0; return false; }
+  cuffPos.setFromMatrixPosition(arm.group.matrixWorld);
+  cuffOut.setFromMatrixColumn(arm.group.matrixWorld, 2).normalize();
+  camera.getWorldDirection(gaze);
+  const toEyes = tmpV.copy(headPos).sub(cuffPos), far = toEyes.length();
+  toEyes.divideScalar(far || 1);
+  const n = reading ? 1 : 0;
+  const ok = cuffOut.dot(toEyes) > READ.facing[n] && far < READ.near[n] && -gaze.dot(toEyes) > READ.inView[n];
+  readFor = ok ? readFor + dt : 0;
+  reading = ok && (reading || readFor >= READ.hold);
+  return reading;
+}
+
 // ---------- visor zoom ----------
 // A round scope in the middle of the view showing the scene through a narrow lens. A headset
 // will not let a page change the field of view of the eyes themselves, so the magnified picture
@@ -510,6 +556,7 @@ function control(dt, now) {
   camera.getWorldDirection(fwd); fwd.y = 0; fwd.normalize();
   if (session) {
     ptt = handControls(ptt);
+    if (followArm() && gaugesReadable(dt)) ptt = true;
     for (const src of session.inputSources) {
       const gp = src.gamepad;
       if (!gp) continue;
@@ -646,9 +693,10 @@ renderer.setAnimationLoop(() => {
   shake *= 0.86;
   if (mode === 'desk') camera.rotation.z = (Math.random() - 0.5) * shake;
   drawBoard();
-  arm.update(Math.min(0.25, now - armFrame), keyed); // real time, so the arm is as quick on a slow machine
+  // On a laptop the radio key swings the arm up. In a headset it is on your own arm (see followArm).
+  if (!arm.tracked) arm.update(Math.min(0.25, now - armFrame), keyed); // real time, so the arm is as quick on a slow machine
   armFrame = now;
-  if (arm.raise > 0) drawGauges(now);
+  if (arm.group.visible) drawGauges(now);
   renderScope();
   renderer.render(scene, camera);
   if (snapWaiting) { snapWaiting(renderer.domElement.toDataURL('image/png')); snapWaiting = null; } // must follow the draw in the same frame
@@ -657,7 +705,7 @@ renderer.setAnimationLoop(() => {
 // For debugging from the browser console, and for the tests: moonbase.state(), moonbase.fx.targets() ...
 window.moonbase = { resetStanding: () => { standing = 1.2; }, state: () => state, fx, world, interior, radio, rig, camera, net, board, THREE, scene, use: () => use(null), useBoard: () => useBoard(null), useHatch: () => useHatch(null), sendPose, myPose, teleport, turnRig,
   where: () => where, place, renderer, outage: on => { debugOutage = on; },
-  zoom: () => zoom, setZoom, controllers, handControls, scope: scopeMesh, arm, snap, radioState: () => ({ keyed, talking, rx, shown: radioState() }) };
+  zoom: () => zoom, setZoom, controllers, handControls, scope: scopeMesh, arm, snap, radioState: () => ({ keyed, talking, rx, reading, shown: radioState() }) };
 
 // ---------- start-up screen: the lobby, with the radio and VR steps in the astronaut's panel ----------
 const $ = id => document.getElementById(id);
@@ -670,5 +718,6 @@ $('radioBtn').onclick = async () => {
 };
 $('vrSlot').appendChild(VRButton.createButton(renderer, { optionalFeatures: ['hand-tracking'] }));
 $('deskBtn').onclick = () => { mode = 'desk'; keys.tab = false; $('deskBtn').blur(); lobby.show(false); $('cross').hidden = false; lockPointer(); };
-renderer.xr.addEventListener('sessionstart', () => { mode = 'vr'; lobby.show(false); });
-renderer.xr.addEventListener('sessionend', () => { mode = null; zoom = 1; zoomGrab = null; lobby.show(true); });
+// In a headset the arm lives in the room with the hands, and follows the left one; on a laptop it hangs off the view.
+renderer.xr.addEventListener('sessionstart', () => { mode = 'vr'; rig.add(arm.group); arm.setTracked(true); lobby.show(false); });
+renderer.xr.addEventListener('sessionend', () => { mode = null; zoom = 1; zoomGrab = null; reading = false; readFor = 0; camera.add(arm.group); arm.setTracked(false); lobby.show(true); });

@@ -33,6 +33,9 @@ Each seat has its own URL, so you can hand them out directly:
 | Technician | `/tech` |
 | Scientist | `/sci` |
 | Mission Control (2-player, all three consoles) | `/control` |
+| Admin (start, reset, kick; not a seat) | `/admin` |
+
+**`/admin` is the referee's console.** It is not a seat and nothing on it is delayed. It can start the mission now (skipping the ready-up, with whoever is in), restart it, send everyone back to the lobby, pick the mode, and **kick** any seat: every connection holding that seat is dropped and the seat is free again at once. That is the fix for a seat that reads taken when nobody is actually there (a headset that went to sleep, a tab closed without saying goodbye). The person kicked sees a notice and can rejoin. The console is open by default; to lock it, start the server with `ADMIN_KEY=something npm start` (on Cloudflare, add `ADMIN_KEY` as a Worker variable or secret) and open `/admin?key=something` once per browser.
 
 `npm test` runs the game-rule checks.
 
@@ -64,7 +67,7 @@ If the venue Wi-Fi blocks devices from seeing each other, use a phone hotspot.
 
 | | Controllers | Bare hands (hand tracking) | Laptop (testing) |
 | --- | --- | --- | --- |
-| Radio to Mission Ops, and wrist gauges | hold left trigger | hold your left hand up to your helmet | hold Tab |
+| Radio to Mission Ops, and wrist gauges | raise your left wrist where you can read it, like a watch (the left trigger also keys the radio, without looking) | raise your left wrist where you can read it (a left hand held to the helmet also keys the radio) | hold Tab |
 | Grab (tools off the rack and your belt, cable plugs, the rover wheel, the generator cord) | grip button, with your hand on it | pinch, with your fingers on it | click it |
 | Use a tool | bring it to the work: the brush and patch kit work on contact, the welder lights when its tip is on the crack | same | click the work, hold to keep brushing or welding |
 | Point at something within arm's reach (a fallback for grabbing) | right trigger | | |
@@ -86,7 +89,14 @@ Visor zoom is for looking at something from where you stand, such as whether the
 
 ![The cuff display on the suit's forearm, up while the radio is keyed](docs/astronaut-wrist.png)
 
-The astronaut has no heads-up display. Everything is on a small cuff display strapped to the left forearm of the suit, and the arm is out of sight until the radio is keyed. Keying the radio and raising the arm are one action: hold the radio control (left trigger, left hand to helmet, or Tab on a laptop) and the arm swings up in front of you; let go and it drops. So you read your oxygen while you are talking.
+The astronaut has no heads-up display. Everything is on a small cuff display strapped to the back of the left forearm of the suit, and reading it is what turns the radio on.
+
+- **In a headset** the cuff is on your own left arm: it follows the left controller or the tracked left hand. Bring it up where you can read it, the way you look at a watch, and the radio is on; lower it, turn it over or look away and the radio is off. "Can read it" means the face of the cuff is turned toward your eyes, within about half a metre, and near the middle of your view, held for a quarter of a second so that an arm swinging past does not key the radio. The left trigger, and a bare left hand held to the helmet, still key the radio without looking.
+- **On a laptop** hold Tab: the arm swings up in front of you and the radio is on; let go and it drops.
+
+Either way you read your oxygen while you are talking.
+
+![In a headset: the cuff on your own left arm, raised to read, the microphone lit red because that has put you on the air](docs/astronaut-cuff.png)
 
 The display has no words or numbers on it, only icons:
 
@@ -95,12 +105,13 @@ The display has no words or numbers on it, only icons:
 | Gas bottle in a dial | suit oxygen: the bottle and the dial empty together, and turn red when low |
 | Hourglass in a dial | time left: the sand and the dial run down, amber for the last 30 seconds |
 | Tick or cross in place of the hourglass | something just fixed, or a wrong plug or a meteor hit, for a few seconds; at the end, mission complete or failed |
-| Radio mast | red waves while you are transmitting, blue while Mission Ops is talking, an amber bar through it if the page has no microphone, a red bar and no waves during a blackout: no signal |
+| Microphone | the radio. A grey outline while it is off; solid red with sound coming off it while you are on the air; an amber bar through it if the page has no microphone; a red bar through it during a blackout: no signal |
+| Loudspeaker, in place of the microphone | blue, while Mission Ops is talking to you |
 | Warning triangles | one lit for each thing that is broken right now (up to two). They do not say what |
 | Row of four boxes | the tool belt: one box per weight unit, filled for each unit in use, amber when full |
 | Magnifying glass | lit while the visor zoom is on, with pips for how far in |
 
-The arm being up is itself the sign that your radio is keyed, and the display backs it up: a light strip in its top edge and the frame round the face take the radio's colour. The arm is modelled on an EVA suit's: a woven white outer garment with soft wrinkles, a ribbed elbow, a red identification stripe, the metal wrist disconnect, and a glove with a gauntlet, palm strap, knuckle pad and silicone fingertips.
+The microphone is the sign that your radio is on, and the display backs it up: a light strip in its top edge and the frame round the face take the radio's colour. The arm is modelled on an EVA suit's: a woven white outer garment with soft wrinkles, a ribbed elbow, a red identification stripe, the metal wrist disconnect, and a glove with a gauntlet, palm strap, knuckle pad and silicone fingertips.
 
 Mission Ops holds **Space** to talk. The Technician drives the rover with the **arrow keys**.
 
@@ -181,7 +192,7 @@ client/shared/icons.js   the tool and socket-shape pictures, shared by the conso
 client/shared/horizon.js real LOLA terrain and 360-degree horizon for the site (generated by scripts/lola-horizon.py)
 client/vendor/three/     the three files of three.js the pages import (refresh with npm run vendor)
 server/game.js      all game logic and what each role may see (no networking, unit-tested)
-server/hub.js       who is connected, what each role may send, the 1.3 s delay, radio relay
+server/hub.js       who is connected, what each role may send, the 1.3 s delay, radio relay, admin commands
 server/server.js    the laptop web server and WebSocket, drives hub.js
 worker/             the same thing on Cloudflare: a Worker for the pages, a Durable Object for the room
 client/astronaut.*  VR client: movement, grabbing, pointing, crouch, visor zoom, the airlock
@@ -190,6 +201,7 @@ client/interior.js  the hall inside the habitat: geometry, the lighting states, 
 client/stations.js  the tools, the belt and every repair, each with a grab-it version and a point-at-it version
 client/world.js     the Moon scene and everything that can be seen broken (shared with the rover camera)
 client/console.*    Mission Ops, Technician, Scientist and all-in-one
+client/admin.*      the referee's console: start, reset, kick a seat free
 client/voice.js     push-to-talk radio with 1960s distortion and Quindar beeps, the leak hiss, and the sound effects
 test/fakexr.js      a pretend VR headset for tests: head, controllers with haptics, tracked hands
 test/vr.mjs         every repair done by hand in that headset (npm run vr)
@@ -215,7 +227,7 @@ Nothing is downloaded at run time: real LOLA terrain and skyline (see "Where the
 
 Tested three ways. `npm test` checks the rules in plain Node: the belt's weight limit, every repair refused without its tool or from too far away, the battery draining to a blackout and recovering, voice dropped in both directions during a blackout, the radar and the meteor warning lost with the rover wheel, cover, the meteor hit and the leak it starts, the generator, exactly what each seat is sent, the lobby, and the demo mission played well (a win) and not at all (a loss). `npm run smoke` opens Mission Control and the astronaut in headless Chromium against the real three.js r180 build, readies up, and plays the whole demo mission to a clean win the way a laptop player would: stand somewhere, look at the thing, click. Every repair goes through the same raycast as a mouse click, the switchboard is reached through the airlock, and the socket for each cable is read off the Scientist's wiring diagram on the other page. It then drives the hand-tracking gestures by firing the events a pinch fires (zoom in either pinch order, turn, teleport on release), checks the visor scope's extra pass, the wrist gauges with no microphone (icons only, nothing else fixed to the view), the hall's outage lighting, and, in a second browser with a pretend microphone, the radio both ways. It needs `npm i -D playwright && npx playwright install chromium` once `npm run smoke:shots` also saves screenshots in `test/shots/`. It passes against the laptop server and against the Cloudflare worker (`npm run dev:cf`, then `SMOKE_URL=http://localhost:8787 npm run smoke`).
 
-`npm run vr` puts the astronaut's page in a pretend headset (`test/fakexr.js`, a stand-in for the browser's WebXR: a head, two controllers with grip, trigger and haptics, or two tracked hands with a pinch) and does every repair by hand, the way a player in a Quest would: reach for the tool, close the hand, bring it to the work. With controllers it takes tools off the rack and the belt with either hand, is refused the tire on a full belt, sweeps the brush over all three panels (and checks that waving it 35 cm off the panel does nothing), welds the crack point by point (and that leaving a point early does not weld it), goes in through the airlock and pushes plugs into a full socket, a wrong one and the right ones, pulls the wheel and fits the tire, pulls the generator cord in a blackout, patches each forearm with the other hand, listens to the hiss in each ear with the crack on the left, on the right, near and far, and stands, crouches and hides through meteor showers. It repeats the grabbing with bare hands and checks that a pinch on a tool grabs while two empty-handed pinches still zoom. It also measures how far every action makes the arm reach, and fails if any needs more than 0.8 m: that check is why the tire and the generator were moved up the rack and why the belt stays at the hips. The last step draws real frames for both eyes. `npm run vr:shots` saves those as pictures in `test/shots/`.
+`npm run vr` puts the astronaut's page in a pretend headset (`test/fakexr.js`, a stand-in for the browser's WebXR: a head, two controllers with grip, trigger and haptics, or two tracked hands with a pinch) and does every repair by hand, the way a player in a Quest would: reach for the tool, close the hand, bring it to the work. With controllers it takes tools off the rack and the belt with either hand, is refused the tire on a full belt, sweeps the brush over all three panels (and checks that waving it 35 cm off the panel does nothing), welds the crack point by point (and that leaving a point early does not weld it), goes in through the airlock and pushes plugs into a full socket, a wrong one and the right ones, pulls the wheel and fits the tire, pulls the generator cord in a blackout, patches each forearm with the other hand, listens to the hiss in each ear with the crack on the left, on the right, near and far, and stands, crouches and hides through meteor showers. It repeats the grabbing with bare hands and checks that a pinch on a tool grabs while two empty-handed pinches still zoom. With a pretend microphone it then checks the cuff, with controllers and with bare hands: the arm hanging at the side leaves the radio off, an arm brought up for an instant does not key it, holding the cuff up like a watch puts the astronaut on the air with the microphone icon lit, the cuff then faces the eyes the right way up on the forearm behind the wrist, and looking away, turning the arm over or lowering it turns the radio off. It also measures how far every action makes the arm reach, and fails if any needs more than 0.8 m: that check is why the tire and the generator were moved up the rack and why the belt stays at the hips. The last step draws real frames for both eyes. `npm run vr:shots` saves those as pictures in `test/shots/`.
 
 **What that leaves untested: a real headset.** The pretend one proves the code runs and the distances are reachable. It cannot say whether the gestures feel right, whether the belt sits where a hand expects it, whether the haptics are too strong, how real hand tracking behaves when a pinch is half-recognised, or how the scene performs on the Quest's GPU. Try those first on the day. Every distance is a named constant at the top of `client/stations.js` (`GRAB`, `GRAB_RACK`, `SOCKET_SNAP`, `WHEEL_PULL`, `CORD_PULL`, `TIRE_FIT`, `PATCH_RANGE`, `BELT_AT`, `WELD_RANGE`, `WELD_DWELL`). If a gesture misbehaves, pointing the right trigger at the thing from within 1.6 m does the same job. If it stutters, the first things to turn down are in `client/world.js`: the terrain segment count (`SEG`), the boulder counts in the three `scatter` calls, and the shadow map size.
 
