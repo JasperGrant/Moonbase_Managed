@@ -8,13 +8,16 @@
 // doing: red while transmitting, blue while Mission Ops is talking, amber with no microphone.
 //
 // The arm is modelled on an EVA suit's: a white outer garment over the pressure bladder, with its
-// soft wrinkles, the ribbed elbow joint, a red identification stripe, the metal wrist disconnect,
-// and a glove with a gauntlet, a palm strap, a knuckle pad and silicone fingertips. Sizes are a
-// suited arm's, in metres. The gauge face has no words or numbers on it, only icons.
+// soft wrinkles, the ribbed elbow joint, a red identification stripe and the metal wrist disconnect.
+// The hand is the NASA EVA glove model (client/assets/models/glove.glb). Sizes are a suited arm's,
+// in metres. The gauge face is a 1960s instrument (docs/DESIGN.md): cream dials with needles, jewel
+// lamps, no words or numbers, only icons. Beside it is the EXIT button that ends the headset session.
+import { PAL, jewel } from '/shared/palette.js';
+import { loadGlove } from '/shared/assets.js';
 
 const W = 640, H = 374;                        // gauge face, in canvas pixels
 const FACE_W = 0.17, FACE_H = FACE_W * H / W;  // and in metres: a cuff display, not a tablet
-const GREEN = '#58e08a', RED = '#ff5c5c', AMBER = '#ffb347', BLUE = '#6fb6ff', DIM = '#3a4750', INK = '#e8f0f2';
+const GREEN = PAL.green, RED = PAL.red, AMBER = PAL.amber, BLUE = PAL.blue, DIM = PAL.rule, INK = PAL.ink;
 
 export function buildArm(THREE) {
   const group = new THREE.Group();
@@ -37,7 +40,7 @@ export function buildArm(THREE) {
     t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(18, 26); t.colorSpace = THREE.SRGBColorSpace;
     return t;
   }
-  const whiteWeave = weave('#ebe8df', '#8f8a7c'), redWeave = weave('#b3271f', '#4d0f0b'), greyWeave = weave('#c9c9c4', '#6f7074');
+  const whiteWeave = weave('#ebe8df', '#8f8a7c'), redWeave = weave('#9a3428', '#4d1a12'), greyWeave = weave('#c9c9c4', '#6f7074');
   // A touch of emissive keeps the arm readable when the sun is behind the astronaut.
   const cloth = (map, emissive) => new THREE.MeshStandardMaterial({ map, bumpMap: map, bumpScale: 0.6, roughness: 0.95, emissive });
   const fabric = cloth(whiteWeave, 0x121214), stripe = cloth(redWeave, 0x140303), gloveCloth = cloth(greyWeave, 0x0f0f10);
@@ -45,8 +48,8 @@ export function buildArm(THREE) {
   const webbing = new THREE.MeshStandardMaterial({ color: 0x7d838a, roughness: 0.9, emissive: 0x0a0a0b });
   const aluminium = new THREE.MeshStandardMaterial({ color: 0xb9bec4, roughness: 0.32, metalness: 0.95 });
   const satin = new THREE.MeshStandardMaterial({ color: 0x9aa0a6, roughness: 0.6, metalness: 0.7 });
-  const anodised = new THREE.MeshStandardMaterial({ color: 0xa5231c, roughness: 0.35, metalness: 0.8 });
-  const housing = new THREE.MeshStandardMaterial({ color: 0x20252a, roughness: 0.55, metalness: 0.6 });
+  const anodised = new THREE.MeshStandardMaterial({ color: 0x8e3426, roughness: 0.35, metalness: 0.8 });
+  const housing = new THREE.MeshStandardMaterial({ color: PAL.hex.console, roughness: 0.75, metalness: 0.15 }); // painted steel
   const cable = new THREE.MeshStandardMaterial({ color: 0x16181b, roughness: 0.7 });
 
   // ---------- the arm ----------
@@ -109,33 +112,17 @@ export function buildArm(THREE) {
     const a = i / 6 * Math.PI * 2 + 0.4;
     add(new THREE.BoxGeometry(0.012, 0.008, 0.008), aluminium, WRIST + 0.022, Math.cos(a) * 0.054, AZ + Math.sin(a) * 0.054).rotation.x = -a;
   }
-  // Glove: back of the hand toward the eyes, fingers relaxed and curling away. It is a group of its
-  // own because a headset draws the real hand (a controller's glove, or the tracked fingers) instead.
+  // Glove: the NASA EVA glove, back of the hand toward the eyes, its cuff over the disconnect ring. It is
+  // a group of its own because a headset draws the real hand (a controller's glove, or the tracked
+  // fingers) instead. The model arrives a moment after the arm is built.
   const glove = new THREE.Group();
+  glove.name = 'Hand';
   group.add(glove);
-  tube(WRIST + 0.036, WRIST + 0.075, x => 0.045 - 0.1 * (x - WRIST - 0.036), gloveCloth, 6, glove); // glove wrist
-  const HAND = WRIST + 0.105;
-  add(new THREE.SphereGeometry(0.05, 24, 16), gloveCloth, HAND, 0, AZ, glove).scale.set(1, 0.96, 0.52);
-  const palmStrap = add(new THREE.TorusGeometry(0.047, 0.0045, 8, 28), webbing, HAND + 0.004, 0, AZ, glove);
-  palmStrap.rotation.y = Math.PI / 2; palmStrap.scale.set(0.58, 1, 3);
-  add(new THREE.CapsuleGeometry(0.0125, 0.068, 4, 12), silicone, HAND + 0.036, 0, AZ + 0.013, glove); // knuckle pad
-  // One finger: a chain of segments, each bent a little more toward the palm (-z) than the last.
-  function finger(x, y, z, radius, lengths, curls, lean = 0) {
-    let parent = new THREE.Group();
-    parent.position.set(x, y, z); parent.rotation.z = lean;
-    glove.add(parent);
-    lengths.forEach((len, i) => {
-      const joint = new THREE.Group();
-      joint.rotation.y = curls[i];
-      parent.add(joint);
-      const tip = i === lengths.length - 1;
-      add(new THREE.CapsuleGeometry(radius * (1 - 0.07 * i), len, 4, 12), tip ? silicone : gloveCloth, len / 2, 0, 0, joint).rotation.z = Math.PI / 2;
-      parent = new THREE.Group(); parent.position.x = len; joint.add(parent);
-    });
-  }
-  [[0.034, 0.95], [0.012, 1], [-0.01, 0.95], [-0.032, 0.8]].forEach(([y, k], i) =>
-    finger(HAND + 0.04, y, AZ + 0.004, 0.0128, [0.036 * k, 0.026 * k, 0.02 * k], [0.3 + i * 0.05, 0.5, 0.4]));
-  finger(HAND - 0.02, 0.04, AZ + 0.006, 0.015, [0.036, 0.028], [0.35, 0.45], 0.95); // thumb
+  loadGlove(THREE, { emissive: 0x121214 }).then(m => {
+    m.position.set(WRIST + 0.024, 0, AZ);
+    m.traverse(o => { if (o.isMesh) o.renderOrder = 10; });
+    glove.add(m);
+  }).catch(e => console.warn('glove model', e));
 
   // ---------- the gauge cluster ----------
   // A slim cuff unit strapped round the forearm, with a cable back to the suit.
@@ -152,13 +139,60 @@ export function buildArm(THREE) {
     add(new THREE.TubeGeometry(path, 24, 0.0032, 8), cable);
     add(new THREE.CylinderGeometry(0.006, 0.006, 0.014, 12), aluminium, -0.163, -0.027, z(-0.16) - 0.005).rotation.z = Math.PI / 2 - 0.4;
   }
-  // Radio light strip in the top edge of the bezel. Dark until the radio does something.
-  const SIGNAL = { tx: 0xff3b3b, rx: 0x4da3ff, nomic: 0xffa52e, dead: 0x7a1010 };
-  const stripMat = new THREE.MeshBasicMaterial({ color: 0x1a1f24, toneMapped: false });
+  // The EXIT button, on a plate at the elbow end of the cuff: a red-collared plunger under a guard ring,
+  // and an engraved label. Hold a fingertip on it (client/astronaut.js) and the cap sinks, the lamp in it
+  // lights, and the headset session ends: the way back to the lobby without taking the headset off.
+  const EXIT_X = -FACE_W / 2 - 0.03, EXIT_Y = 0.006;
+  const exitButton = new THREE.Group();
+  exitButton.name = 'Button_Exit';
+  exitButton.position.set(EXIT_X, EXIT_Y, -0.006);
+  group.add(exitButton);
+  {
+    const shape = new THREE.Shape(); // a rounded plate, bevelled, on the side of the housing
+    const pw = 0.038, ph = 0.05, pr = 0.006;
+    shape.moveTo(-pw / 2 + pr, -ph / 2); shape.lineTo(pw / 2 - pr, -ph / 2); shape.quadraticCurveTo(pw / 2, -ph / 2, pw / 2, -ph / 2 + pr);
+    shape.lineTo(pw / 2, ph / 2 - pr); shape.quadraticCurveTo(pw / 2, ph / 2, pw / 2 - pr, ph / 2); shape.lineTo(-pw / 2 + pr, ph / 2);
+    shape.quadraticCurveTo(-pw / 2, ph / 2, -pw / 2, ph / 2 - pr); shape.lineTo(-pw / 2, -ph / 2 + pr); shape.quadraticCurveTo(-pw / 2, -ph / 2, -pw / 2 + pr, -ph / 2);
+    const plate = add(new THREE.ExtrudeGeometry(shape, { depth: 0.006, bevelEnabled: true, bevelSize: 0.0015, bevelThickness: 0.0015, bevelSegments: 2 }), housing, 0, -0.008, -0.002, exitButton);
+    plate.name = 'Plate';
+    const label = document.createElement('canvas'); label.width = 128; label.height = 48;
+    const lg = label.getContext('2d');
+    lg.fillStyle = PAL.dial; lg.fillRect(0, 0, 128, 48);
+    lg.strokeStyle = PAL.inkDial; lg.lineWidth = 3; lg.strokeRect(4, 4, 120, 40);
+    lg.fillStyle = PAL.inkDial; lg.font = 'bold 30px "Courier Prime", "Courier New", monospace'; lg.textAlign = 'center'; lg.textBaseline = 'middle';
+    lg.fillText('EXIT', 64, 26);
+    const labelTex = new THREE.CanvasTexture(label); labelTex.colorSpace = THREE.SRGBColorSpace;
+    add(new THREE.PlaneGeometry(0.03, 0.0112), new THREE.MeshStandardMaterial({ map: labelTex, roughness: 0.8, metalness: 0, emissive: 0x18160f }), 0, -0.024, 0.0056, exitButton).name = 'Label';
+    const guard = add(new THREE.TorusGeometry(0.0115, 0.0022, 8, 24), aluminium, 0, 0.004, 0.0062, exitButton); // guard ring
+    guard.name = 'Guard';
+    const collar = add(new THREE.CylinderGeometry(0.0095, 0.0105, 0.004, 24), anodised, 0, 0.004, 0.0062, exitButton);
+    collar.rotation.x = Math.PI / 2;
+  }
+  // The cap: a Bakelite plunger, rounded on top, with a jewel lamp in its crown.
+  const capPts = [[0, 0], [0.0078, 0], [0.0078, 0.006], [0.0072, 0.0075], [0.0055, 0.0085], [0, 0.009]].map(([r, y]) => new THREE.Vector2(r, y));
+  const exitCap = add(new THREE.LatheGeometry(capPts, 24), new THREE.MeshStandardMaterial({ color: PAL.hex.bakelite, roughness: 0.45, metalness: 0 }), 0, 0.004, 0.006, exitButton);
+  exitCap.rotation.x = Math.PI / 2; exitCap.name = 'Cap';
+  const exitLampMat = new THREE.MeshBasicMaterial({ color: PAL.hex.redOff, toneMapped: false });
+  const exitLamp = add(new THREE.CircleGeometry(0.0042, 20), exitLampMat, 0, 0.0091, 0, exitCap);
+  exitLamp.rotation.x = -Math.PI / 2; exitLamp.name = 'Lamp_Exit';
+  // Where a fingertip has to be to press it, in this group's coordinates, and how far the cap sinks.
+  const EXIT_TOP = new THREE.Vector3(EXIT_X, EXIT_Y + 0.004, 0.012);
+  let pressing = 0;
+  // 0..1: how far the button is pressed. Moves the cap and lights the lamp.
+  function pressExit(f) {
+    pressing = Math.max(0, Math.min(1, f));
+    exitCap.position.z = 0.006 - 0.004 * pressing;
+    exitLampMat.color.setHex(pressing > 0 ? PAL.hex.red : PAL.hex.redOff);
+    if (pressing > 0 && pressing < 1) exitLampMat.color.multiplyScalar(0.55 + 0.45 * pressing);
+  }
+
+  // Radio lamp in the top edge of the bezel: a long jewel, dark until the radio does something.
+  const SIGNAL = { tx: PAL.hex.red, rx: PAL.hex.blue, nomic: PAL.hex.amber, dead: PAL.hex.redOff };
+  const stripMat = new THREE.MeshBasicMaterial({ color: PAL.hex.consoleDeep, toneMapped: false });
   add(new THREE.BoxGeometry(FACE_W * 0.5, 0.0035, 0.003), stripMat, 0, FACE_H / 2 + 0.004, 0);
   function signal(radio, now) {
-    if (!SIGNAL[radio]) { stripMat.color.setHex(0x1a1f24); return; }
-    const pulse = radio === 'tx' ? 0.7 + 0.3 * Math.sin(now * 9) : 1; // transmitting: a quick throb
+    if (!SIGNAL[radio]) { stripMat.color.setHex(PAL.hex.consoleDeep); return; }
+    const pulse = radio === 'tx' ? 0.75 + 0.25 * Math.sin(now * 9) : 1; // transmitting: a slow filament throb
     stripMat.color.setHex(SIGNAL[radio]).multiplyScalar(pulse);
   }
 
@@ -174,26 +208,40 @@ export function buildArm(THREE) {
 
   // ---------- drawing the gauge face: icons only ----------
   const A0 = Math.PI * 0.75, SWEEP = Math.PI * 1.5; // dials run from bottom-left, clockwise, to bottom-right
-  function dial(cx, cy, r, frac, colour, redBelow) {
-    g.lineCap = 'butt'; g.lineWidth = 17;
-    g.strokeStyle = '#1b2329'; g.beginPath(); g.arc(cx, cy, r, A0, A0 + SWEEP); g.stroke();
-    if (redBelow) { g.strokeStyle = '#5a1f1f'; g.beginPath(); g.arc(cx, cy, r, A0, A0 + SWEEP * redBelow); g.stroke(); }
-    if (frac > 0) { g.strokeStyle = colour; g.beginPath(); g.arc(cx, cy, r, A0, A0 + SWEEP * Math.min(1, frac)); g.stroke(); }
-    g.strokeStyle = '#5d6d76'; g.lineWidth = 3;
+  // A cream dial face in a bezel: dark ticks, a red-painted arc over the bad range, a thin dark needle
+  // with a counterweight and a brass hub. The needle is drawn last, by needle(), over the icon.
+  function dial(cx, cy, r, redBelow, redColour = PAL.red) {
+    g.fillStyle = PAL.bezel; g.beginPath(); g.arc(cx, cy, r + 22, 0, 7); g.fill();
+    g.fillStyle = PAL.bakelite; g.beginPath(); g.arc(cx, cy, r + 16, 0, 7); g.fill();
+    const face = g.createRadialGradient(cx - r * 0.3, cy - r * 0.35, r * 0.1, cx, cy, r + 14);
+    face.addColorStop(0, PAL.dial); face.addColorStop(1, '#c9bfa4'); // a little shade toward the rim
+    g.fillStyle = face; g.beginPath(); g.arc(cx, cy, r + 13, 0, 7); g.fill();
+    g.lineCap = 'butt';
+    if (redBelow) { g.globalAlpha = 0.6; g.strokeStyle = redColour; g.lineWidth = 12; g.beginPath(); g.arc(cx, cy, r + 2, A0, A0 + SWEEP * redBelow); g.stroke(); g.globalAlpha = 1; }
+    g.strokeStyle = PAL.inkDial;
     for (let i = 0; i <= 10; i++) {
-      const a = A0 + SWEEP * i / 10, r0 = r + 12, r1 = r + (i % 5 ? 18 : 24);
+      const a = A0 + SWEEP * i / 10, major = i % 5 === 0, r0 = r - (major ? 10 : 4), r1 = r + 8;
+      g.lineWidth = major ? 5 : 3;
       g.beginPath(); g.moveTo(cx + Math.cos(a) * r0, cy + Math.sin(a) * r0); g.lineTo(cx + Math.cos(a) * r1, cy + Math.sin(a) * r1); g.stroke();
     }
+  }
+  function needle(cx, cy, r, frac) {
+    const a = A0 + SWEEP * Math.max(0, Math.min(1, frac)), c = Math.cos(a), sn = Math.sin(a);
+    g.strokeStyle = PAL.inkDial; g.lineCap = 'round';
+    g.lineWidth = 5; g.beginPath(); g.moveTo(cx - c * 18, cy - sn * 18); g.lineTo(cx + c * (r - 4), cy + sn * (r - 4)); g.stroke();
+    g.lineWidth = 11; g.beginPath(); g.moveTo(cx - c * 10, cy - sn * 10); g.lineTo(cx - c * 22, cy - sn * 22); g.stroke(); // counterweight
+    g.fillStyle = PAL.foilGold; g.beginPath(); g.arc(cx, cy, 9, 0, 7); g.fill();                                       // brass hub
+    g.fillStyle = PAL.inkDial; g.beginPath(); g.arc(cx, cy, 3, 0, 7); g.fill();
   }
   // Oxygen: a gas bottle, filled to the level left.
   function bottle(cx, cy, frac, colour) {
     const body = () => { g.beginPath(); g.roundRect(cx - 22, cy - 26, 44, 66, 14); };
     g.save(); body(); g.clip();
-    g.fillStyle = '#141a1f'; g.fillRect(cx - 22, cy - 26, 44, 66);
+    g.fillStyle = '#cfc5aa'; g.fillRect(cx - 22, cy - 26, 44, 66);
     g.fillStyle = colour; g.fillRect(cx - 22, cy + 40 - 66 * frac, 44, 66 * frac);
     g.restore();
-    g.strokeStyle = INK; g.lineWidth = 5; g.lineJoin = 'round'; body(); g.stroke();
-    g.fillStyle = INK; g.fillRect(cx - 7, cy - 38, 14, 12);                 // neck
+    g.strokeStyle = PAL.inkDial; g.lineWidth = 6; g.lineJoin = 'round'; body(); g.stroke();
+    g.fillStyle = PAL.inkDial; g.fillRect(cx - 7, cy - 38, 14, 12);         // neck
     g.beginPath(); g.roundRect(cx - 17, cy - 46, 34, 9, 4); g.fill();       // valve
   }
   // Time: an hourglass, the sand in the top bulb running out.
@@ -202,25 +250,31 @@ export function buildArm(THREE) {
     const bulb = top => { g.beginPath(); g.moveTo(cx - w, cy + (top ? -h : h)); g.lineTo(cx + w, cy + (top ? -h : h)); g.lineTo(cx, cy); g.closePath(); };
     for (const top of [true, false]) {
       g.save(); bulb(top); g.clip();
-      g.fillStyle = '#141a1f'; g.fillRect(cx - w, cy - h, w * 2, h * 2);
+      g.fillStyle = '#cfc5aa'; g.fillRect(cx - w, cy - h, w * 2, h * 2);
       if (lit) {
         g.fillStyle = colour;
         const f = Math.sqrt(top ? frac : 1 - frac); // a triangle's area goes as its height squared
         if (top) g.fillRect(cx - w, cy - h * f, w * 2, h * f); else g.fillRect(cx - w, cy + h - h * f * 0.7, w * 2, h);
       }
       g.restore();
-      g.strokeStyle = lit ? INK : DIM; g.lineWidth = 4; g.lineJoin = 'round'; bulb(top); g.stroke();
+      g.strokeStyle = lit ? PAL.inkDial : PAL.inkDim; g.lineWidth = 5; g.lineJoin = 'round'; bulb(top); g.stroke();
     }
-    g.strokeStyle = lit ? INK : DIM; g.lineWidth = 7; g.lineCap = 'round';
+    g.strokeStyle = lit ? PAL.inkDial : PAL.inkDim; g.lineWidth = 7; g.lineCap = 'round';
     for (const s of [-1, 1]) { g.beginPath(); g.moveTo(cx - w - 5, cy + s * (h + 4)); g.lineTo(cx + w + 5, cy + s * (h + 4)); g.stroke(); }
   }
   function tick(cx, cy, colour) { // done, fixed, mission complete
-    g.strokeStyle = colour; g.lineWidth = 15; g.lineCap = 'round'; g.lineJoin = 'round';
-    g.beginPath(); g.moveTo(cx - 36, cy + 2); g.lineTo(cx - 10, cy + 28); g.lineTo(cx + 38, cy - 28); g.stroke();
+    g.lineCap = 'round'; g.lineJoin = 'round';
+    for (const [c, w] of [[PAL.inkDial, 23], [colour, 14]]) {
+      g.strokeStyle = c; g.lineWidth = w;
+      g.beginPath(); g.moveTo(cx - 36, cy + 2); g.lineTo(cx - 10, cy + 28); g.lineTo(cx + 38, cy - 28); g.stroke();
+    }
   }
   function cross(cx, cy, colour) { // mistake, mission failed
-    g.strokeStyle = colour; g.lineWidth = 15; g.lineCap = 'round';
-    for (const s of [-1, 1]) { g.beginPath(); g.moveTo(cx - 30, cy - 30 * s); g.lineTo(cx + 30, cy + 30 * s); g.stroke(); }
+    g.lineCap = 'round';
+    for (const [c, w] of [[PAL.inkDial, 23], [colour, 14]]) {
+      g.strokeStyle = c; g.lineWidth = w;
+      for (const s of [-1, 1]) { g.beginPath(); g.moveTo(cx - 30, cy - 30 * s); g.lineTo(cx + 30, cy + 30 * s); g.stroke(); }
+    }
   }
   // Radio: a microphone. Solid, with sound coming off it, while you are on the air; an outline when the
   // radio is off; a bar through it when it cannot work (no microphone, or no signal).
@@ -249,20 +303,22 @@ export function buildArm(THREE) {
   // Alarm: a warning triangle, lit while one is active.
   function warning(cx, cy, lit) {
     g.beginPath(); g.moveTo(cx, cy - 30); g.lineTo(cx + 34, cy + 26); g.lineTo(cx - 34, cy + 26); g.closePath();
-    g.lineJoin = 'round'; g.lineWidth = 8;
-    g.strokeStyle = lit ? AMBER : DIM; g.stroke();
-    if (lit) { g.fillStyle = AMBER; g.fill(); }
-    g.strokeStyle = g.fillStyle = lit ? '#1a1206' : DIM; g.lineWidth = 7; g.lineCap = 'round';
+    g.lineJoin = 'round'; g.lineWidth = 9;
+    g.strokeStyle = PAL.bezel; g.stroke();                       // a triangular jewel in a bezel
+    if (lit) { g.shadowColor = AMBER; g.shadowBlur = 14; }
+    g.fillStyle = lit ? AMBER : PAL.amberOff; g.fill();
+    g.shadowBlur = 0;
+    g.strokeStyle = g.fillStyle = lit ? PAL.inkDial : '#2a1f0c'; g.lineWidth = 7; g.lineCap = 'round';
     g.beginPath(); g.moveTo(cx, cy - 10); g.lineTo(cx, cy + 6); g.stroke();
     g.beginPath(); g.arc(cx, cy + 17, 4, 0, Math.PI * 2); g.fill();
   }
   // Visor zoom: a magnifying glass, with a row of pips for how far in.
   function magnifier(cx, cy, level) {
-    const colour = level > 0 ? GREEN : DIM;
+    const colour = level > 0 ? INK : PAL.inkDim;
     g.strokeStyle = colour; g.lineWidth = 7; g.lineCap = 'round';
     g.beginPath(); g.arc(cx - 6, cy - 6, 19, 0, Math.PI * 2); g.stroke();
     g.beginPath(); g.moveTo(cx + 9, cy + 9); g.lineTo(cx + 26, cy + 26); g.stroke();
-    for (let i = 0; i < 5; i++) { g.fillStyle = i < level ? GREEN : '#1b2329'; g.beginPath(); g.roundRect(cx - 40 + i * 17, cy + 40, 12, 12, 3); g.fill(); }
+    for (let i = 0; i < 5; i++) jewel(g, cx - 34 + i * 17, cy + 46, 6, 'green', i < level);
   }
 
   // Draw an icon made for the point (0, 0) at (cx, cy), k times its size.
@@ -280,40 +336,48 @@ export function buildArm(THREE) {
     if (k === key) return;
     key = k;
 
-    const radio = { tx: ['TRANSMITTING', RED], rx: ['MISSION OPS', BLUE], nomic: ['NO MICROPHONE', AMBER], dead: ['NO SIGNAL', RED] }[info.radio];
-    g.fillStyle = '#0a0e11'; g.fillRect(0, 0, W, H);
-    g.strokeStyle = radio ? radio[1] : '#2a343b'; g.lineWidth = radio ? 9 : 4; // the frame lights up with the radio
-    g.beginPath(); g.roundRect(7, 7, W - 14, H - 14, 20); g.stroke();
+    const radio = { tx: ['TRANSMITTING', RED, 'red'], rx: ['MISSION OPS', BLUE, 'blue'], nomic: ['NO MICROPHONE', AMBER, 'amber'], dead: ['NO SIGNAL', RED, 'red'] }[info.radio];
+    // A painted panel in a bezel, with a screw in each corner. The radio state is a lamp, not a frame flood.
+    g.fillStyle = PAL.consoleDeep; g.fillRect(0, 0, W, H);
+    g.globalAlpha = 0.05;
+    for (let i = 0; i < 90; i++) { g.fillStyle = i % 2 ? PAL.bakelite : PAL.inkDim; g.fillRect((i * 151) % W, (i * 67) % H, 3 + (i % 5), 2); } // fixed wear, not random
+    g.globalAlpha = 1;
+    g.strokeStyle = PAL.bezel; g.lineWidth = 8; g.strokeRect(6, 6, W - 12, H - 12);
+    g.strokeStyle = PAL.bakelite; g.lineWidth = 2; g.strokeRect(12, 12, W - 24, H - 24);
+    for (const [x, y] of [[22, 22], [W - 22, 22], [22, H - 22], [W - 22, H - 22]]) {
+      g.fillStyle = PAL.bezel; g.beginPath(); g.arc(x, y, 6, 0, 7); g.fill();
+      g.strokeStyle = PAL.bakelite; g.lineWidth = 2; g.beginPath(); g.moveTo(x - 4, y - 2); g.lineTo(x + 4, y + 2); g.stroke();
+    }
 
-    // Suit oxygen.
+    // Suit oxygen: the needle on the dial, a bottle below the hub filled to the level left.
     const frac = s ? Math.max(0, Math.min(1, s.oxygen / s.o2Max)) : 0, low = s ? s.oxygen < 25 : false;
-    dial(122, 190, 86, frac, low ? RED : GREEN, s ? Math.min(1, 25 / s.o2Max) : 0.25);
-    at(122, 186, 1.15, () => bottle(0, 0, frac, low ? RED : GREEN));
+    dial(122, 182, 80, s ? Math.min(1, 25 / s.o2Max) : 0.25);
+    at(122, 236, 0.5, () => bottle(0, 0, frac, low ? RED : GREEN));
+    needle(122, 182, 80, frac);
+    jewel(g, 122, 330, 13, 'red', low);                    // low-oxygen lamp under the dial
 
     // Mission clock, or the outcome: a tick for fixed or complete, a cross for a mistake or failed.
     const left = s && info.total ? Math.max(0, Math.min(1, s.timeLeft / info.total)) : 0;
     const running = !!s && info.status !== 'standby', hurry = running && t <= 30;
-    dial(346, 190, 86, left, hurry ? AMBER : BLUE);
-    if (info.status === 'ok' || info.status === 'won') at(346, 190, 1.15, () => tick(0, 0, GREEN));
-    else if (info.status === 'bad' || info.status === 'lost') at(346, 190, 1.15, () => cross(0, 0, RED));
-    else at(346, 190, 1.15, () => hourglass(0, 0, left, hurry ? AMBER : BLUE, running));
+    dial(338, 182, 80, 30 / (info.total || 300), PAL.amber);
+    at(338, 236, 0.5, () => hourglass(0, 0, left, hurry ? AMBER : PAL.inkDial, running));
+    needle(338, 182, 80, running ? left : 0);
+    if (info.status === 'ok' || info.status === 'won') at(338, 182, 1.15, () => tick(0, 0, GREEN));
+    else if (info.status === 'bad' || info.status === 'lost') at(338, 182, 1.15, () => cross(0, 0, RED));
+    jewel(g, 338, 330, 13, 'amber', hurry);               // hurry lamp under the dial
 
-    // Radio, alarms, visor zoom.
-    if (info.radio === 'rx') speaker(506, 190, BLUE);
-    else microphone(506, 192, radio ? radio[1] : '#77868f', info.radio === 'tx', info.radio === 'dead' ? RED : info.radio === 'nomic' ? AMBER : null);
+    // Radio: a lamp in the radio's colour above the microphone or the loudspeaker.
+    jewel(g, 506, 70, 17, radio ? radio[2] : 'white', !!radio && info.radio !== 'dead');
+    if (info.radio === 'rx') speaker(506, 196, BLUE);
+    else microphone(506, 198, radio ? radio[1] : PAL.inkDim, info.radio === 'tx', info.radio === 'dead' ? RED : info.radio === 'nomic' ? AMBER : null);
 
-    // The tool belt: one box per weight unit it can carry, filled for each unit in use.
-    for (let i = 0; i < cap; i++) {
-      const x = 50 + i * 44;
-      g.lineWidth = 5; g.strokeStyle = i < belt ? (belt >= cap ? AMBER : GREEN) : DIM;
-      g.beginPath(); g.roundRect(x, 304, 34, 34, 6); g.stroke();
-      if (i < belt) { g.fillStyle = belt >= cap ? AMBER : GREEN; g.beginPath(); g.roundRect(x + 8, 312, 18, 18, 3); g.fill(); }
-    }
+    // The tool belt: a row of jewel lamps, one per weight unit it can carry, lit for each unit in use.
+    for (let i = 0; i < cap; i++) jewel(g, 468 + i * 30, 330, 10, belt >= cap ? 'amber' : 'green', i < belt);
     for (let i = 0; i < 2; i++) at(592, 96 + i * 72, 0.78, () => warning(0, 0, i < alarms));
     at(594, 258, 0.88, () => magnifier(0, 0, level));
 
     tex.needsUpdate = true;
-    shown = { radio: radio ? radio[0] : 'STANDBY', icon: info.radio === 'rx' ? 'speaker' : info.radio === 'tx' ? 'microphone, live' : radio ? 'microphone, barred' : 'microphone, off', frame: radio ? radio[1] : null, oxygen: o2, seconds: t, alarms, zoomPips: level, status: info.status || '', belt };
+    shown = { radio: radio ? radio[0] : 'STANDBY', icon: info.radio === 'rx' ? 'speaker' : info.radio === 'tx' ? 'microphone, live' : radio ? 'microphone, barred' : 'microphone, off', lamp: radio ? radio[1] : null, oxygen: o2, seconds: t, alarms, zoomPips: level, status: info.status || '', belt };
   }
 
   // ---------- raising and lowering ----------
@@ -365,5 +429,5 @@ export function buildArm(THREE) {
     group.matrixWorldNeedsUpdate = true;
   }
 
-  return { group, canvas, draw, update, signal, setTracked, follow, aimUpper, get tracked() { return tracked; }, get raise() { return raise; }, get shown() { return shown; } };
+  return { group, canvas, draw, update, signal, setTracked, follow, aimUpper, exitButton, EXIT_TOP, pressExit, get pressing() { return pressing; }, get tracked() { return tracked; }, get raise() { return raise; }, get shown() { return shown; } };
 }

@@ -9,6 +9,7 @@ import { beltWeight } from '/shared/rules.js';
 import { drawTool, drawShape } from '/shared/icons.js';
 import { seatTaken, kicked } from '/seat.js';
 import { createLobby } from '/lobby.js';
+import { PAL, CABLE, FONT, nixie, jewel, fontsReady } from '/shared/palette.js';
 
 // /console.html?role=ops or the clean URL /ops; /control is the all-in-one seat.
 const PATH_ROLE = { ops: 'ops', tech: 'tech', sci: 'sci', control: 'all', all: 'all' };
@@ -18,8 +19,8 @@ const has = r => role === r || role === 'all';
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const clock = s => `${Math.floor(Math.max(0, s) / 60)}:${String(Math.floor(Math.max(0, s) % 60)).padStart(2, '0')}`;
-const C = { bg: '#05080a', line: '#243240', ink: '#d6e6e0', dim: '#7d909c', green: '#58e08a', amber: '#ffb84a', red: '#ff5c5c', blue: '#6fb6ff' };
-const CABLE = { red: '#e0453a', blue: '#3f7fe8', yellow: '#f0cf3a', green: '#45c463' };
+// Colours and type: the 1960s palette (docs/DESIGN.md). The lobby keeps its own look.
+const C = { bg: PAL.consoleDeep, line: PAL.rule, ink: PAL.ink, dim: PAL.inkDim, green: PAL.green, amber: PAL.amber, red: PAL.red, blue: PAL.blue };
 
 const BRIEF = {
   ops: '<b>You are the only voice the astronaut hears.</b> Hold SPACE to talk; it takes 1.3 s to reach the Moon. You see what is on their belt and what is left in the locker. Decide what they carry and what gets fixed first.',
@@ -149,6 +150,15 @@ function renderRun(s) {
   if (has('sci')) { if (tabOn.sci === 0) drawPower(s); else drawAir(s); }
 }
 
+// Needles swing and the radar sweeps between state updates: redraw the instruments at 30 frames a second.
+let lastFrame = 0;
+(function frame(t) {
+  requestAnimationFrame(frame);
+  if (t - lastFrame < 33 || !state || state.phase !== 'run' || !state.powered || document.hidden) return;
+  lastFrame = t; renderRun(state);
+})(0);
+fontsReady.then(() => { if (state) render(); });
+
 function renderResults(s) {
   const key = JSON.stringify(s.result) + s.score;
   if (key === resultKey || !s.result) return;
@@ -167,151 +177,198 @@ function renderResults(s) {
 $('results').addEventListener('click', e => { if (e.target.closest('[data-again]')) { resultKey = ''; net.send({ t: 'reset' }); } });
 
 // ---------- drawing helpers ----------
-const blinkOn = () => Math.floor(Date.now() / 300) % 2 === 0;
-function label(g, text, x, y, size = 14, color = C.dim, align = 'center') {
-  g.font = `bold ${size}px ui-monospace, Menlo, Consolas, monospace`; g.textAlign = align; g.textBaseline = 'middle'; g.fillStyle = color; g.fillText(text, x, y);
+const blinkOn = () => Math.floor(Date.now() / 333) % 2 === 0; // 1.5 Hz: an alarm lamp, not a strobe
+function label(g, text, x, y, size = 14, color = C.dim, align = 'center') { // engraved label
+  g.font = `${Math.round(size * 0.72)}px ${FONT.label}`; g.textAlign = align; g.textBaseline = 'middle'; g.fillStyle = color; g.fillText(text, x, y);
 }
-// A half-circle dial from 0 to max, with the low end marked red.
+function typed(g, text, x, y, size = 14, color = C.ink, align = 'center') { // teletype text and numbers that are not counters
+  g.font = `bold ${size}px ${FONT.type}`; g.textAlign = align; g.textBaseline = 'middle'; g.fillStyle = color; g.fillText(text, x, y);
+}
+function plate(g, text, x, y, w, size = 12) { // a cream label plate, engraved in dark ink
+  g.fillStyle = PAL.dial; g.fillRect(x - w / 2, y - size, w, size * 2);
+  g.strokeStyle = 'rgba(0,0,0,.35)'; g.lineWidth = 1; g.strokeRect(x - w / 2 + 0.5, y - size + 0.5, w - 1, size * 2 - 1);
+  label(g, text, x, y + 1, size, PAL.inkDial);
+}
+function panelBg(g, W, H) { // the console face behind every instrument
+  g.fillStyle = PAL.consoleDeep; g.fillRect(0, 0, W, H);
+  g.strokeStyle = 'rgba(143,138,120,0.08)'; g.lineWidth = 1;
+  for (let y = 0.5; y < H; y += 4) { g.beginPath(); g.moveTo(0, y); g.lineTo(W, y); g.stroke(); } // brushed
+}
+// Needles ease toward their value and overshoot a little, like a real meter movement.
+const needles = new Map();
+function needle(key, target) {
+  const n = needles.get(key) || { v: target, vel: 0, t: performance.now() };
+  const now = performance.now(), dt = Math.min(0.1, (now - n.t) / 1000); n.t = now;
+  n.vel += ((target - n.v) * 60 - n.vel * 9) * dt; n.v += n.vel * dt;
+  needles.set(key, n); return n.v;
+}
+// A meter: cream face in a bezel, ticks and numerals, the bad range painted red, a dark needle on a brass hub.
+// Out of range, the red jewel lamp beside it lights; the value is on a Nixie counter below.
 function dial(g, x, y, r, value, max, name, { redBelow = 0, redAbove = Infinity, unit = '' } = {}) {
-  const ang = v => Math.PI + Math.max(0, Math.min(1, v / max)) * Math.PI;
-  g.lineWidth = r * 0.16; g.lineCap = 'butt';
-  g.strokeStyle = C.line; g.beginPath(); g.arc(x, y, r, Math.PI, 2 * Math.PI); g.stroke();
-  g.strokeStyle = '#5a1f1f';
-  if (redBelow > 0) { g.beginPath(); g.arc(x, y, r, Math.PI, ang(redBelow)); g.stroke(); }
-  if (redAbove < max) { g.beginPath(); g.arc(x, y, r, ang(redAbove), 2 * Math.PI); g.stroke(); }
-  const bad = value < redBelow || value > redAbove;
-  const a = ang(value);
-  g.strokeStyle = bad ? C.red : C.green; g.lineWidth = 5; g.lineCap = 'round';
-  g.beginPath(); g.moveTo(x, y); g.lineTo(x + Math.cos(a) * r * 0.92, y + Math.sin(a) * r * 0.92); g.stroke();
-  g.fillStyle = C.ink; g.beginPath(); g.arc(x, y, 7, 0, 7); g.fill();
-  label(g, `${Math.round(value)}${unit}`, x, y + 32, 30, bad ? C.red : C.ink);
-  label(g, name, x, y + 62, 16, C.dim);
+  const ang = v => Math.PI * 1.15 + Math.max(0, Math.min(1, v / max)) * Math.PI * 0.7;
+  g.fillStyle = PAL.bezel; g.beginPath(); g.arc(x, y, r * 1.12, Math.PI, 2 * Math.PI); g.lineTo(x + r * 1.12, y + r * 0.22); g.lineTo(x - r * 1.12, y + r * 0.22); g.fill();
+  g.fillStyle = PAL.dial; g.beginPath(); g.arc(x, y, r * 1.03, Math.PI, 2 * Math.PI); g.lineTo(x + r * 1.03, y + r * 0.14); g.lineTo(x - r * 1.03, y + r * 0.14); g.fill();
+  g.lineWidth = r * 0.1; g.lineCap = 'butt'; g.strokeStyle = 'rgba(196,82,58,0.7)';
+  if (redBelow > 0) { g.beginPath(); g.arc(x, y, r * 0.86, ang(0), ang(redBelow)); g.stroke(); }
+  if (redAbove < max) { g.beginPath(); g.arc(x, y, r * 0.86, ang(redAbove), ang(max)); g.stroke(); }
+  g.strokeStyle = PAL.inkDial; g.fillStyle = PAL.inkDial;
+  for (let i = 0; i <= 20; i++) {
+    const a = ang(max * i / 20), big = i % 5 === 0, r0 = r * (big ? 0.72 : 0.8);
+    g.lineWidth = big ? 2.5 : 1.2; g.beginPath(); g.moveTo(x + Math.cos(a) * r0, y + Math.sin(a) * r0); g.lineTo(x + Math.cos(a) * r * 0.92, y + Math.sin(a) * r * 0.92); g.stroke();
+    if (big) { g.font = `bold ${Math.round(r * 0.13)}px ${FONT.type}`; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(String(Math.round(max * i / 20 * 10) / 10), x + Math.cos(a) * r * 0.58, y + Math.sin(a) * r * 0.58); }
+  }
+  label(g, unit === '%' ? 'PERCENT' : unit === 'x' ? 'RATE' : '', x, y - r * 0.32, r * 0.13, PAL.inkDim);
+  const bad = value < redBelow || value > redAbove, a = ang(needle(name, value));
+  g.strokeStyle = PAL.inkDial; g.lineWidth = 3; g.lineCap = 'round';
+  g.beginPath(); g.moveTo(x - Math.cos(a) * r * 0.12, y - Math.sin(a) * r * 0.12); g.lineTo(x + Math.cos(a) * r * 0.9, y + Math.sin(a) * r * 0.9); g.stroke();
+  g.fillStyle = PAL.foilGold; g.beginPath(); g.arc(x, y, r * 0.07, 0, 7); g.fill();
+  nixie(g, unit === 'x' ? value.toFixed(1) : String(Math.round(value)).padStart(3, ' '), x - r * 0.12, y + r * 0.44, r * 0.24);
+  jewel(g, x + r * 0.62, y + r * 0.44, r * 0.09, 'red', bad && blinkOn());
+  plate(g, name, x, y + r * 0.8, r * 1.4, r * 0.11);
 }
 
 // ---------- Mission Ops: the belt and the locker ----------
 function drawKit(s) {
   {
     const cv = $('beltCv'), g = cv.getContext('2d'), W = cv.width, H = cv.height;
-    g.fillStyle = C.bg; g.fillRect(0, 0, W, H);
-    const used = beltWeight(s.belt), u = 110, gap = 12, x0 = (W - (CFG.beltCapacity * (u + gap) - gap)) / 2, y0 = 16;
-    for (let i = 0; i < CFG.beltCapacity; i++) {
-      g.strokeStyle = i < used ? C.green : C.line; g.lineWidth = 3;
-      g.strokeRect(x0 + i * (u + gap), y0, u, u);
-      if (i < used) { g.fillStyle = 'rgba(88,224,138,0.12)'; g.fillRect(x0 + i * (u + gap), y0, u, u); }
+    panelBg(g, W, H);
+    const used = beltWeight(s.belt), u = 100, gap = 12, x0 = (W - (CFG.beltCapacity * (u + gap) - gap)) / 2, y0 = 14;
+    for (let i = 0; i < CFG.beltCapacity; i++) { // a recessed bay per weight unit, a lamp under each
+      const x = x0 + i * (u + gap);
+      g.fillStyle = PAL.bakelite; g.fillRect(x, y0, u, u);
+      g.strokeStyle = PAL.bezel; g.lineWidth = 2; g.strokeRect(x + 1, y0 + 1, u - 2, u - 2);
+      jewel(g, x + u / 2, y0 + u + 14, 6, 'green', i < used);
     }
     let slot = 0;
-    for (const t of s.belt) { // a heavy tool is drawn across the boxes it fills
+    for (const t of s.belt) { // a heavy tool is drawn across the bays it fills
       const w = TOOLS[t].weight, span = w * (u + gap) - gap;
       drawTool(g, t, x0 + slot * (u + gap) + span / 2, y0 + u / 2, u - 24, C.ink);
       slot += w;
     }
-    label(g, `${used} / ${CFG.beltCapacity}`, W / 2, H - 16, 18, used >= CFG.beltCapacity ? C.amber : C.dim);
+    nixie(g, `${used}/${CFG.beltCapacity}`, W - 52, H - 18, 18);
+    jewel(g, 30, H - 18, 7, 'amber', used >= CFG.beltCapacity);
+    label(g, 'FULL', 52, H - 18, 12, C.dim, 'left');
   }
   {
     const cv = $('lockerCv'), g = cv.getContext('2d'), W = cv.width, H = cv.height;
-    g.fillStyle = C.bg; g.fillRect(0, 0, W, H);
+    panelBg(g, W, H);
     const ids = Object.keys(TOOLS), cell = W / ids.length;
     ids.forEach((t, i) => {
       const here = s.locker.includes(t), cx = cell * i + cell / 2;
-      g.globalAlpha = here ? 1 : 0.16;
+      g.globalAlpha = here ? 1 : 0.18;
       drawTool(g, t, cx, 56, 78, C.ink);
-      g.globalAlpha = here ? 1 : 0.3;
-      for (let k = 0; k < TOOLS[t].weight; k++) { // one pip per weight unit
-        g.fillStyle = C.amber; g.fillRect(cx - TOOLS[t].weight * 9 + k * 18 + 2, 118, 14, 14);
-      }
       g.globalAlpha = 1;
+      for (let k = 0; k < TOOLS[t].weight; k++) jewel(g, cx - (TOOLS[t].weight - 1) * 9 + k * 18, 124, 5, 'amber', here); // one lamp per weight unit
     });
   }
 }
 
-// ---------- Technician: the radar map ----------
-function noise(g, W, H, alpha = 1) {
+// ---------- Technician: the radar scope ----------
+function noise(g, W, H, alpha = 1) { // warm grey static, not white on black
   const img = g.createImageData(W, H), d = img.data;
-  for (let i = 0; i < d.length; i += 4) { const v = Math.random() * 190; d[i] = d[i + 1] = d[i + 2] = v; d[i + 3] = 255 * alpha; }
+  for (let i = 0; i < d.length; i += 4) { const v = 20 + Math.random() * 120; d[i] = v * 1.05; d[i + 1] = v; d[i + 2] = v * 0.85; d[i + 3] = 255 * alpha; }
   g.putImageData(img, 0, 0);
 }
+const phos = a => `rgba(156,194,122,${a})`;
 function drawMap(s) {
-  const cv = $('map'), g = cv.getContext('2d'), W = cv.width, k = W / (2 * (CFG.bounds + 2));
+  const cv = $('map'), g = cv.getContext('2d'), W = cv.width, k = (W - 40) / (2 * (CFG.bounds + 2));
   const X = x => W / 2 + x * k, Y = z => W / 2 + z * k; // north (-z) is up
+  const R = W / 2 - 18;
+  panelBg(g, W, W);
   if (!s.radar) { // the radar is on the rover, and the rover is stuck
-    noise(g, W, W);
-    g.fillStyle = 'rgba(5,8,10,0.75)'; g.fillRect(W / 2 - 120, W / 2 - 30, 240, 60);
-    label(g, 'NO RADAR', W / 2, W / 2, 30, C.red);
+    g.save(); g.beginPath(); g.arc(W / 2, W / 2, R, 0, 7); g.clip(); noise(g, W, W); g.restore();
+    g.strokeStyle = PAL.bezel; g.lineWidth = 8; g.beginPath(); g.arc(W / 2, W / 2, R + 4, 0, 7); g.stroke();
+    plate(g, 'NO SIGNAL', W / 2, W / 2, 190, 16);
     return;
   }
-  g.fillStyle = C.bg; g.fillRect(0, 0, W, W);
-  g.strokeStyle = '#16222b'; g.lineWidth = 1;
+  // the scope: bezel, dark glass, a phosphor graticule
+  g.strokeStyle = PAL.bezel; g.lineWidth = 8; g.beginPath(); g.arc(W / 2, W / 2, R + 4, 0, 7); g.stroke();
+  g.save(); g.beginPath(); g.arc(W / 2, W / 2, R, 0, 7); g.clip();
+  const glass = g.createRadialGradient(W / 2, W / 2, 0, W / 2, W / 2, R);
+  glass.addColorStop(0, '#152015'); glass.addColorStop(1, PAL.glass);
+  g.fillStyle = glass; g.fillRect(0, 0, W, W);
+  g.strokeStyle = phos(0.13); g.lineWidth = 1;
   for (let m = -20; m <= 20; m += 5) { g.beginPath(); g.moveTo(X(m), 0); g.lineTo(X(m), W); g.moveTo(0, Y(m)); g.lineTo(W, Y(m)); g.stroke(); }
-  g.strokeStyle = '#2c4150'; g.beginPath(); g.arc(X(0), Y(0), CFG.bounds * k, 0, 7); g.stroke();
-  label(g, 'N', W / 2, 12, 12);
-  // The base: habitat, canopy, and the places the astronaut works.
+  g.strokeStyle = phos(0.35); g.beginPath(); g.arc(X(0), Y(0), CFG.bounds * k, 0, 7); g.stroke();
+  // the sweep, with an afterglow behind it
+  const sweep = (Date.now() / 1000 * 1.6) % (Math.PI * 2);
+  for (let i = 0; i < 24; i++) {
+    g.fillStyle = phos(0.16 * (1 - i / 24)); g.beginPath(); g.moveTo(W / 2, W / 2);
+    g.arc(W / 2, W / 2, R, sweep - (i + 1) * 0.03, sweep - i * 0.03); g.closePath(); g.fill();
+  }
+  label(g, 'N', W / 2, 26, 12, phos(0.7));
+  // The base, in phosphor outline: habitat, canopy, and the places the astronaut works.
   const cn = PLACES.canopy;
-  g.fillStyle = '#3a4a2a'; g.fillRect(X(cn.x0), Y(cn.z0), (cn.x1 - cn.x0) * k, (cn.z1 - cn.z0) * k);
-  g.fillStyle = '#c9d6dc'; g.beginPath(); g.arc(X(0), Y(0), CFG.habRadius * k, 0, 7); g.fill();
-  label(g, 'HAB', X(0), Y(0) + 8, 11, C.bg);
-  label(g, 'COVER', X(0), Y(cn.z1) + 9, 10, '#9db07a');
-  const mark = (p, name, w = 10, h = 10) => { g.fillStyle = C.green; g.fillRect(X(p.x) - w / 2, Y(p.z) - h / 2, w, h); if (name) label(g, name, X(p.x), Y(p.z) - h / 2 - 9, 11); };
+  g.strokeStyle = phos(0.7); g.lineWidth = 1.5;
+  g.strokeRect(X(cn.x0), Y(cn.z0), (cn.x1 - cn.x0) * k, (cn.z1 - cn.z0) * k);
+  for (let i = 1; i < 5; i++) { g.beginPath(); g.moveTo(X(cn.x0) + i * (cn.x1 - cn.x0) * k / 5, Y(cn.z0)); g.lineTo(X(cn.x0) + (i - 1) * (cn.x1 - cn.x0) * k / 5, Y(cn.z1)); g.stroke(); }
+  g.beginPath(); g.arc(X(0), Y(0), CFG.habRadius * k, 0, 7); g.stroke();
+  label(g, 'HAB', X(0), Y(0) + 3, 10, phos(0.9));
+  label(g, 'COVER', X(0), Y(cn.z1) + 10, 9, phos(0.6));
+  const mark = (p, name, w = 10, h = 10) => { g.strokeStyle = phos(0.9); g.strokeRect(X(p.x) - w / 2, Y(p.z) - h / 2, w, h); if (name) label(g, name, X(p.x), Y(p.z) - h / 2 - 9, 9, phos(0.75)); };
   mark(PLACES.locker, 'LOCKER');
-  // The switchboard is inside the habitat.
-  g.fillStyle = C.green; g.fillRect(X(0) - 5, Y(-1.5) - 5, 10, 10);
-  label(g, 'BOARD', X(0), Y(0) - CFG.habRadius * k - 9, 11);
+  g.fillStyle = phos(0.9); g.fillRect(X(0) - 4, Y(-1.5) - 4, 8, 8); // the switchboard is inside the habitat
+  label(g, 'BOARD', X(0), Y(0) - CFG.habRadius * k - 9, 9, phos(0.75));
   PLACES.panels.forEach((p, i) => mark(p, i === 0 ? 'SOLAR' : '', 6, 22));
-  for (const p of [PLACES.depot, PLACES.dish, PLACES.drill]) { g.fillStyle = '#31424d'; g.fillRect(X(p.x) - 4, Y(p.z) - 4, 8, 8); }
-
-  const arrow = (x, z, ry, color, name) => {
-    g.save(); g.translate(X(x), Y(z)); label(g, name, 0, 22, 12, color);
+  for (const p of [PLACES.depot, PLACES.dish, PLACES.drill]) { g.strokeStyle = phos(0.4); g.strokeRect(X(p.x) - 4, Y(p.z) - 4, 8, 8); }
+  const blip = (x, z, ry, colour, name) => {
+    g.save(); g.translate(X(x), Y(z)); label(g, name, 0, 20, 9, colour);
     g.rotate(Math.atan2(Math.sin(ry), -Math.cos(ry))); // heading (sin ry, cos ry) in x,z -> screen
-    g.fillStyle = color; g.beginPath(); g.moveTo(0, -10); g.lineTo(7, 8); g.lineTo(-7, 8); g.closePath(); g.fill(); g.restore();
+    g.shadowColor = colour; g.shadowBlur = 6; g.fillStyle = colour;
+    g.beginPath(); g.moveTo(0, -9); g.lineTo(6, 7); g.lineTo(-6, 7); g.closePath(); g.fill(); g.restore();
   };
-  arrow(s.rover.x, s.rover.z, s.rover.ry, C.amber, 'ROVER');
-  if (s.astro && s.crew.includes('astronaut')) arrow(s.astro.x, s.astro.z, s.astro.ry, C.blue, 'ASTRONAUT');
-
-  // Meteors: blips closing on the base, a ring that shrinks to nothing at the first impact, and seconds to go.
+  blip(s.rover.x, s.rover.z, s.rover.ry, C.amber, 'ROVER');
+  if (s.astro && s.crew.includes('astronaut')) blip(s.astro.x, s.astro.z, s.astro.ry, C.blue, 'ASTRONAUT');
+  // Meteors: amber blips closing on the base and a ring that shrinks to nothing at the first impact.
   if (s.meteor) {
-    const m = s.meteor, f = m.eta / CFG.meteorWarnSeconds, hot = blinkOn();
+    const m = s.meteor, f = m.eta / CFG.meteorWarnSeconds;
     if (!m.falling) {
-      g.strokeStyle = C.red; g.lineWidth = 3;
-      g.beginPath(); g.arc(X(0), Y(0), Math.max(4, f * (W / 2 - 8)), 0, 7); g.stroke();
+      g.strokeStyle = C.amber; g.lineWidth = 2.5; g.shadowColor = C.amber; g.shadowBlur = 6;
+      g.beginPath(); g.arc(X(0), Y(0), Math.max(4, f * (R - 8)), 0, 7); g.stroke();
       for (let i = 0; i < 9; i++) {
-        const a = i * 2.4 + 0.5, r = (0.25 + f * 0.75) * (W / 2 - 14) * (0.8 + (i % 3) * 0.1);
-        g.fillStyle = C.red; g.beginPath(); g.arc(W / 2 + Math.cos(a) * r, W / 2 + Math.sin(a) * r, 5, 0, 7); g.fill();
+        const a = i * 2.4 + 0.5, r = (0.25 + f * 0.75) * (R - 14) * (0.8 + (i % 3) * 0.1);
+        g.fillStyle = C.amber; g.beginPath(); g.arc(W / 2 + Math.cos(a) * r, W / 2 + Math.sin(a) * r, 4.5, 0, 7); g.fill();
       }
-      g.fillStyle = 'rgba(5,8,10,0.8)'; g.fillRect(W - 96, 8, 88, 62);
-      label(g, String(Math.ceil(m.eta)), W - 52, 40, 44, C.red);
-    } else {
-      g.strokeStyle = hot ? C.red : '#5a1f1f'; g.lineWidth = 10; g.strokeRect(5, 5, W - 10, W - 10);
-      for (let i = 0; i < 14; i++) { g.fillStyle = C.red; g.beginPath(); g.arc(Math.random() * W, Math.random() * W, 4, 0, 7); g.fill(); }
+      g.shadowBlur = 0;
+    } else { // impacts: the scope flares
+      g.fillStyle = phos(blinkOn() ? 0.16 : 0.06); g.fillRect(0, 0, W, W);
+      for (let i = 0; i < 14; i++) { g.fillStyle = C.amber; g.beginPath(); g.arc(Math.random() * W, Math.random() * W, 4, 0, 7); g.fill(); }
     }
+  }
+  g.restore();
+  // seconds to impact on a Nixie counter in the corner of the console, with its lamp
+  if (s.meteor) {
+    nixie(g, s.meteor.falling ? '00' : String(Math.ceil(s.meteor.eta)).padStart(2, '0'), W - 40, 30, 26);
+    jewel(g, W - 84, 30, 8, 'red', blinkOn());
   }
 }
 
 // ---------- Scientist: POWER ----------
 function drawPower(s) {
   const cv = $('powerCv'), g = cv.getContext('2d'), W = cv.width, H = cv.height, p = s.power;
-  g.fillStyle = C.bg; g.fillRect(0, 0, W, H);
-  // The battery: how long until the lights go out.
-  const bx = 60, by = 30, bw = W - 150, bh = 110, low = p.battery < 30;
-  g.strokeStyle = C.ink; g.lineWidth = 5; g.strokeRect(bx, by, bw, bh);
-  g.fillStyle = C.ink; g.fillRect(bx + bw + 4, by + 30, 16, bh - 60);
-  g.fillStyle = low ? (blinkOn() ? C.red : '#5a1f1f') : p.battery < 60 ? C.amber : C.green;
-  g.fillRect(bx + 8, by + 8, (bw - 16) * p.battery / 100, bh - 16);
-  label(g, `${Math.round(p.battery)}%`, bx + bw / 2, by + bh / 2, 46, p.battery > 55 && !low ? '#05130a' : C.ink);
-  label(g, 'BATTERY', bx + bw / 2, by + bh + 22, 16);
+  panelBg(g, W, H);
+  // The battery: a fuel-gauge dial with its percentage on Nixie tubes, and a LOW BATT lamp.
+  const low = p.battery < 30;
+  dial(g, W * 0.5, 128, 100, p.battery, 100, 'BATTERY', { redBelow: 30, unit: '%' });
+  jewel(g, W * 0.5 - 150, 150, 9, 'red', low && blinkOn()); label(g, 'LOW', W * 0.5 - 150, 172, 10, C.dim);
   // Where the power is lost: coming in from the sun, or going out through the board.
-  dial(g, W * 0.27, 296, 100, p.solar, 100, 'SOLAR IN', { redBelow: 60, unit: '%' });
-  dial(g, W * 0.73, 296, 100, p.board, 100, 'BOARD OUT', { redBelow: 60, unit: '%' });
-  g.strokeStyle = C.line; g.lineWidth = 3; g.beginPath(); g.moveTo(W * 0.27 + 112, 250); g.lineTo(W * 0.73 - 122, 250); g.stroke();
-  g.fillStyle = C.line; g.beginPath(); g.moveTo(W * 0.73 - 122, 240); g.lineTo(W * 0.73 - 108, 250); g.lineTo(W * 0.73 - 122, 260); g.fill();
-  // The wiring diagram: each loose cable and the socket it belongs in.
+  dial(g, W * 0.27, 316, 90, p.solar, 100, 'SOLAR IN', { redBelow: 60, unit: '%' });
+  dial(g, W * 0.73, 316, 90, p.board, 100, 'BOARD OUT', { redBelow: 60, unit: '%' });
+  g.strokeStyle = PAL.rule; g.lineWidth = 3; g.beginPath(); g.moveTo(W * 0.27 + 104, 300); g.lineTo(W * 0.73 - 112, 300); g.stroke();
+  g.fillStyle = PAL.rule; g.beginPath(); g.moveTo(W * 0.73 - 112, 291); g.lineTo(W * 0.73 - 100, 300); g.lineTo(W * 0.73 - 112, 309); g.fill();
+  // The wiring diagram, printed on a cream card: each loose cable and the socket it belongs in.
   if (s.wiring) {
-    g.strokeStyle = C.line; g.lineWidth = 2; g.strokeRect(20, 392, W - 40, H - 408);
-    const n = s.wiring.length, row = (H - 424) / Math.max(1, n);
+    const top = 420, bottom = H - 14;
+    g.fillStyle = PAL.dial; g.fillRect(20, top, W - 40, bottom - top);
+    g.strokeStyle = PAL.inkDim; g.lineWidth = 1; g.strokeRect(26.5, top + 6.5, W - 53, bottom - top - 13);
+    const n = s.wiring.length, row = (bottom - top - 16) / Math.max(1, n);
     s.wiring.forEach((w, i) => {
-      const y = 400 + row * i + row / 2, col = CABLE[w.color];
-      g.fillStyle = col; g.fillRect(70, y - 13, 60, 26); g.fillRect(130, y - 7, 16, 14);    // the plug
-      g.strokeStyle = col; g.lineWidth = 6; g.beginPath(); g.moveTo(152, y); g.lineTo(W - 190, y); g.stroke();
-      g.fillStyle = col; g.beginPath(); g.moveTo(W - 190, y - 12); g.lineTo(W - 166, y); g.lineTo(W - 190, y + 12); g.fill();
-      drawShape(g, SOCKET_SHAPES[w.socket], W - 110, y, 44, C.ink);
+      const y = top + 8 + row * i + row / 2, col = CABLE[w.color];
+      g.fillStyle = col; g.strokeStyle = PAL.inkDial; g.lineWidth = 1.5;
+      g.fillRect(70, y - 11, 56, 22); g.strokeRect(70, y - 11, 56, 22); g.fillRect(126, y - 6, 14, 12);
+      g.strokeStyle = col; g.lineWidth = 6; g.beginPath(); g.moveTo(146, y); g.lineTo(W - 190, y); g.stroke();
+      g.fillStyle = col; g.beginPath(); g.moveTo(W - 190, y - 11); g.lineTo(W - 168, y); g.lineTo(W - 190, y + 11); g.fill();
+      drawShape(g, SOCKET_SHAPES[w.socket], W - 110, y, Math.min(40, row * 0.8), PAL.inkDial);
     });
   }
 }
@@ -319,25 +376,17 @@ function drawPower(s) {
 // ---------- Scientist: AIR ----------
 function drawAir(s) {
   const cv = $('airCv'), g = cv.getContext('2d'), W = cv.width, H = cv.height;
-  g.fillStyle = C.bg; g.fillRect(0, 0, W, H);
-  // Oxygen left.
-  const frac = Math.max(0, Math.min(1, s.oxygen / s.o2Max)), low = s.oxygen < 25;
-  g.strokeStyle = C.ink; g.lineWidth = 5; g.strokeRect(60, 30, W - 120, 90);
-  g.fillStyle = low ? C.red : C.green; g.fillRect(68, 38, (W - 136) * frac, 74);
-  label(g, String(Math.round(s.oxygen)), W / 2, 75, 44, frac > 0.55 ? '#05130a' : C.ink);
-  label(g, 'OXYGEN', W / 2, 142, 16);
-  // How fast it is going.
-  dial(g, W * 0.3, 360, 120, s.drain, CFG.leakMultiplier * 2 - 0.5, 'DRAIN', { redAbove: 1.6, unit: 'x' });
+  panelBg(g, W, H);
+  // Oxygen left, and how fast it is going.
+  dial(g, W * 0.5, 140, 110, s.oxygen, s.o2Max, 'OXYGEN', { redBelow: 25 });
+  dial(g, W * 0.3, 410, 100, s.drain, CFG.leakMultiplier * 2 - 0.5, 'DRAIN', { redAbove: 1.6, unit: 'x' });
   // The leak lamp. It does not say where.
-  const on = s.leak, lit = on && blinkOn(), lx = W * 0.74, ly = 310;
-  g.fillStyle = lit ? C.red : on ? '#5a1f1f' : '#141c22';
-  g.beginPath(); g.arc(lx, ly, 78, 0, 7); g.fill();
-  g.strokeStyle = on ? C.red : C.line; g.lineWidth = 5; g.beginPath(); g.arc(lx, ly, 78, 0, 7); g.stroke();
-  // Air hissing out of a hole.
-  g.strokeStyle = on ? '#fff' : C.line; g.lineWidth = 5; g.lineCap = 'round';
-  g.beginPath(); g.arc(lx - 34, ly, 10, 0, 7); g.stroke();
-  for (const a of [-0.5, 0, 0.5]) { g.beginPath(); g.moveTo(lx - 14 + Math.cos(a) * 6, ly + Math.sin(a) * 6); g.lineTo(lx - 14 + Math.cos(a) * 50, ly + Math.sin(a) * 50); g.stroke(); }
-  label(g, 'LEAK', lx, ly + 106, 18, on ? C.red : C.dim);
+  const on = s.leak, lx = W * 0.74, ly = 380;
+  jewel(g, lx, ly, 60, 'red', on && blinkOn());
+  g.strokeStyle = on ? 'rgba(36,34,30,0.8)' : 'rgba(143,138,120,0.35)'; g.lineWidth = 5; g.lineCap = 'round'; // air hissing out of a hole, cast in the lens
+  g.beginPath(); g.arc(lx - 26, ly, 8, 0, 7); g.stroke();
+  for (const a of [-0.5, 0, 0.5]) { g.beginPath(); g.moveTo(lx - 10 + Math.cos(a) * 6, ly + Math.sin(a) * 6); g.lineTo(lx - 10 + Math.cos(a) * 38, ly + Math.sin(a) * 38); g.stroke(); }
+  plate(g, 'LEAK', lx, ly + 102, 110, 13);
 }
 
 // ---------- blackout: static, and a dead battery ----------
@@ -345,10 +394,10 @@ setInterval(() => {
   if ($('static').hidden) return;
   const cv = $('staticCv'), g = cv.getContext('2d'), W = cv.width, H = cv.height;
   noise(g, W, H);
-  g.fillStyle = 'rgba(5,8,10,0.82)'; g.fillRect(W / 2 - 44, H / 2 - 26, 88, 52);
-  g.strokeStyle = C.red; g.lineWidth = 3; g.strokeRect(W / 2 - 30, H / 2 - 14, 54, 28);
-  g.fillStyle = C.red; g.fillRect(W / 2 + 26, H / 2 - 6, 5, 12);
-  if (blinkOn()) g.fillRect(W / 2 - 26, H / 2 - 10, 5, 20); // one last sliver
+  g.fillStyle = 'rgba(29,28,25,0.85)'; g.fillRect(W / 2 - 44, H / 2 - 26, 88, 52);
+  g.strokeStyle = PAL.inkDim; g.lineWidth = 3; g.strokeRect(W / 2 - 30, H / 2 - 14, 54, 28);
+  g.fillStyle = PAL.inkDim; g.fillRect(W / 2 + 26, H / 2 - 6, 5, 12);
+  if (blinkOn()) { g.fillStyle = PAL.red; g.fillRect(W / 2 - 26, H / 2 - 10, 5, 20); } // one last sliver
 }, 90);
 
 // ---------- Technician: rover ----------

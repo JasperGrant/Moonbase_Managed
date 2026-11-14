@@ -10,6 +10,8 @@
 // shadow. The light fixtures are glowing boxes; three real lights do the lighting, and they change
 // intensity rather than switch on and off so no shader is ever recompiled mid-game.
 import { CFG } from '/shared/config.js';
+import { PAL } from '/shared/palette.js';
+import { loadPeriod, loadGlove, textureUrl } from '/shared/assets.js';
 import { buildDamage } from '/damage.js';
 
 export const ROOM = {
@@ -27,6 +29,7 @@ const SOLIDS = [
   [-2.0, 1.5, -4.9, -4.0],           // workbench, long arm
   [-2.0, -1.1, -6.5, -4.9],          // workbench, short arm
   [2.9, 3.5, -3.05, -0.95],          // suit lockers
+  [2.9, 3.5, -0.95, -0.05],          // the empty pressure suit beside them
   [-3.5, -1.95, -12, -10.25],        // life support stack
 ];
 const ROOF_ROWS = [-1.5, -4.2, -6.9, -9.6]; // z of each row of roof lights (two lights per row)
@@ -51,22 +54,22 @@ export function buildInterior(THREE, scene, { sfx = () => {} } = {}) {
   const wallTex = texture(1024, (g, S) => {
     const y = m => S - (m / H) * S; // metres above the floor -> canvas row
     const grad = g.createLinearGradient(0, 0, 0, S);
-    grad.addColorStop(0, '#a9adb0'); grad.addColorStop(0.12, '#c3c6c8'); grad.addColorStop(0.7, '#babdc0'); grad.addColorStop(1, '#8b8f93');
+    grad.addColorStop(0, '#b3ad9e'); grad.addColorStop(0.12, '#cfc8b6'); grad.addColorStop(0.7, '#c4bdac'); grad.addColorStop(1, '#958f80');
     g.fillStyle = grad; g.fillRect(0, 0, S, S);
-    g.fillStyle = '#6f7479'; g.fillRect(0, y(0.38), S, S - y(0.38));               // kick band
-    g.fillStyle = '#585d62'; g.fillRect(0, y(0.38) - 5, S, 5);
+    g.fillStyle = '#4c5652'; g.fillRect(0, y(0.38), S, S - y(0.38));               // kick band
+    g.fillStyle = '#3f4a47'; g.fillRect(0, y(0.38) - 5, S, 5);
     for (let i = 0; i < 4; i++) {                                                   // panel seams
       const x = i * 256;
-      g.fillStyle = '#4a4f54'; g.fillRect(x - 3, 0, 6, S);
+      g.fillStyle = '#5e5a50'; g.fillRect(x - 3, 0, 6, S);
       g.fillStyle = 'rgba(255,255,255,0.35)'; g.fillRect(x + 3, 0, 2, S);
       g.fillStyle = 'rgba(0,0,0,0.10)'; g.fillRect(x + 5, 0, 14, S);
     }
-    for (const m of [1.05, 2.3]) { g.fillStyle = '#4f5459'; g.fillRect(0, y(m) - 2, S, 4); g.fillStyle = 'rgba(255,255,255,0.3)'; g.fillRect(0, y(m) + 2, S, 2); }
-    g.fillStyle = '#3f4449';
+    for (const m of [1.05, 2.3]) { g.fillStyle = '#5e5a50'; g.fillRect(0, y(m) - 2, S, 4); g.fillStyle = 'rgba(255,255,255,0.3)'; g.fillRect(0, y(m) + 2, S, 2); }
+    g.fillStyle = '#4a463e';
     for (let i = 0; i < 4; i++) for (const m of [0.5, 0.95, 1.15, 2.2, 2.4, 3.05]) for (const dx of [20, 236]) { g.beginPath(); g.arc(i * 256 + dx, y(m), 4, 0, 7); g.fill(); }
     // inset service hatch and a vent grille, one of each per tile
-    g.strokeStyle = '#4a4f54'; g.lineWidth = 5; g.strokeRect(300, y(2.0), 170, 200); g.fillStyle = 'rgba(0,0,0,0.07)'; g.fillRect(300, y(2.0), 170, 200);
-    g.fillStyle = '#34383c'; for (let i = 0; i < 9; i++) g.fillRect(820, y(2.95) + i * 14, 150, 7);
+    g.strokeStyle = '#5e5a50'; g.lineWidth = 5; g.strokeRect(300, y(2.0), 170, 200); g.fillStyle = 'rgba(0,0,0,0.07)'; g.fillRect(300, y(2.0), 170, 200);
+    g.fillStyle = '#3c3a33'; for (let i = 0; i < 9; i++) g.fillRect(820, y(2.95) + i * 14, 150, 7);
     g.fillStyle = 'rgba(40,44,48,0.75)'; g.font = 'bold 34px monospace'; g.fillText('HAB-01', 40, y(2.55)); g.font = 'bold 22px monospace'; g.fillText('B4  115V', 560, y(1.2)); g.fillText('NO STEP', 310, y(1.35));
     g.fillStyle = '#b08a1f'; g.fillRect(540, y(1.5), 180, 12);                       // one yellow caution strip
     for (let i = 0; i < 50; i++) {                                                  // a few light scuffs: it is kept clean
@@ -77,14 +80,14 @@ export function buildInterior(THREE, scene, { sfx = () => {} } = {}) {
   });
   // Floor: one tile is 4 m square. Deck plates 1 m square with seams, bolts and stains.
   const floorTex = texture(1024, (g, S) => {
-    g.fillStyle = '#8d9195'; g.fillRect(0, 0, S, S);
+    g.fillStyle = '#8d8a80'; g.fillRect(0, 0, S, S);
     for (let i = 0; i < 4; i++) for (let j = 0; j < 4; j++) {
       const v = Math.round((rnd() - 0.5) * 16);
-      g.fillStyle = `rgb(${141 + v},${145 + v},${149 + v})`; g.fillRect(i * 256, j * 256, 256, 256);
+      g.fillStyle = `rgb(${141 + v},${138 + v},${128 + v})`; g.fillRect(i * 256, j * 256, 256, 256);
       g.strokeStyle = 'rgba(0,0,0,0.08)'; g.lineWidth = 2; g.strokeRect(i * 256 + 26, j * 256 + 26, 204, 204);
-      g.fillStyle = '#5a5f64'; for (const [dx, dy] of [[14, 14], [242, 14], [14, 242], [242, 242]]) { g.beginPath(); g.arc(i * 256 + dx, j * 256 + dy, 5, 0, 7); g.fill(); }
+      g.fillStyle = '#5e5a50'; for (const [dx, dy] of [[14, 14], [242, 14], [14, 242], [242, 242]]) { g.beginPath(); g.arc(i * 256 + dx, j * 256 + dy, 5, 0, 7); g.fill(); }
     }
-    for (let i = 0; i <= 4; i++) { g.fillStyle = '#4b5055'; g.fillRect(i * 256 - 3, 0, 6, S); g.fillRect(0, i * 256 - 3, S, 6); g.fillStyle = 'rgba(255,255,255,0.25)'; g.fillRect(i * 256 + 3, 0, 2, S); g.fillRect(0, i * 256 + 3, S, 2); }
+    for (let i = 0; i <= 4; i++) { g.fillStyle = '#5a564c'; g.fillRect(i * 256 - 3, 0, 6, S); g.fillRect(0, i * 256 - 3, S, 6); g.fillStyle = 'rgba(255,255,255,0.25)'; g.fillRect(i * 256 + 3, 0, 2, S); g.fillRect(0, i * 256 + 3, S, 2); }
     for (let i = 0; i < 10; i++) {
       const x = rnd() * S, yy = rnd() * S, r = 20 + rnd() * 90, rg = g.createRadialGradient(x, yy, 0, x, yy, r);
       rg.addColorStop(0, `rgba(30,32,36,${0.03 + rnd() * 0.05})`); rg.addColorStop(1, 'rgba(30,32,36,0)');
@@ -150,11 +153,11 @@ export function buildInterior(THREE, scene, { sfx = () => {} } = {}) {
     const a = new THREE.Vector3(...from), b = new THREE.Vector3(...to), dir = b.clone().sub(a), len = dir.length();
     put('cyl', color, [r, len, r], a.add(b).multiplyScalar(0.5).toArray(), new THREE.Quaternion().setFromUnitVectors(UP, dir.normalize()));
   }
-  const W = 0xdfe1e2, G = 0x9ea3a7, D = 0x41464c, K = 0x1b1e22, O = 0xc9662b, Y = 0xd0a11c, R = 0xa8372c;
+  const W = PAL.hex.enamel, G = PAL.hex.bezel, D = PAL.hex.console, K = PAL.hex.consoleDeep, O = PAL.hex.orange, Y = PAL.hex.hazard, R = 0xa8402f;
 
   // Ceilings, wall ribs, roof beams, skirting conduit
-  box(0x6a6f74, 7, 0.1, 12, 0, H + 0.05, -6);
-  box(0x6a6f74, 2, 0.1, 3, 2.5, CH + 0.05, -13.5);
+  box(0x6e675a, 7, 0.1, 12, 0, H + 0.05, -6);
+  box(0x6e675a, 2, 0.1, 3, 2.5, CH + 0.05, -13.5);
   for (let z = -1; z > -12; z -= 2) {
     for (const x of [-3.43, 3.43]) box(G, 0.14, H, 0.2, x, H / 2, z);
     box(D, 7, 0.16, 0.2, 0, H - 0.08, z);
@@ -185,8 +188,8 @@ export function buildInterior(THREE, scene, { sfx = () => {} } = {}) {
 
   // Sealed door with a lit window, west wall, after the door in the concept sketch
   box(D, 0.2, 2.4, 1.6, -3.42, 1.2, -3); box(G, 0.08, 2.2, 1.4, -3.3, 1.15, -3); box(W, 0.08, 1.9, 1.1, -3.27, 1.0, -3);
-  box(D, 0.04, 0.62, 0.72, -3.235, 1.45, -3); glow(0xffc98a, 0.02, 0.5, 0.6, -3.22, 1.45, -3);
-  box(K, 0.05, 0.22, 0.15, -3.4, 1.3, -1.95); glow(0xff3b30, 0.01, 0.03, 0.03, -3.37, 1.36, -1.95);
+  box(D, 0.04, 0.62, 0.72, -3.235, 1.45, -3); glow(0xe8b872, 0.02, 0.5, 0.6, -3.22, 1.45, -3);
+  box(K, 0.05, 0.22, 0.15, -3.4, 1.3, -1.95); glow(PAL.hex.red, 0.01, 0.03, 0.03, -3.37, 1.36, -1.95);
   for (const z of [-3.62, -2.38]) for (const y of [0.4, 1.9]) cyl(D, 0.05, 0.1, -3.25, y, z, 0, 0, Math.PI / 2);
 
   // Workbench island: an L of two heavy benches with drawers and a gauge. Kept tidy: a working lab.
@@ -204,20 +207,25 @@ export function buildInterior(THREE, scene, { sfx = () => {} } = {}) {
   // on the benches
   cyl(W, 0.05, 0.22, 0.95, 1.07, -4.25); cyl(O, 0.04, 0.16, 1.1, 1.04, -4.4); cyl(G, 0.06, 0.3, 0.8, 1.11, -4.55); cyl(D, 0.02, 0.05, 0.95, 1.2, -4.25);
   box(O, 0.46, 0.2, 0.26, -0.7, 1.06, -4.55, 0, 0.3, 0); box(D, 0.2, 0.03, 0.04, -0.7, 1.18, -4.55, 0, 0.3, 0);
-  box(K, 0.52, 0.36, 0.04, 0.15, 1.16, -4.7, -0.25, 0, 0); glow(0x58e08a, 0.46, 0.3, 0.01, 0.15, 1.16, -4.678, -0.25, 0, 0);
-  box(W, 0.6, 0.5, 0.6, -1.55, 1.21, -6.05); box(D, 0.02, 0.3, 0.4, -1.245, 1.25, -6.05); glow(0xffb030, 0.012, 0.04, 0.04, -1.24, 1.42, -5.82);
+  box(K, 0.52, 0.36, 0.04, 0.15, 1.16, -4.7, -0.25, 0, 0); glow(0x5f7f4a, 0.46, 0.3, 0.01, 0.15, 1.16, -4.678, -0.25, 0, 0);
+  box(W, 0.6, 0.5, 0.6, -1.55, 1.21, -6.05); box(D, 0.02, 0.3, 0.4, -1.245, 1.25, -6.05); glow(PAL.hex.amber, 0.012, 0.04, 0.04, -1.24, 1.42, -5.82);
   cyl(D, 0.12, 0.1, -1.6, 1.01, -5.3); cyl(G, 0.09, 0.14, -1.6, 1.03, -5.3);
-  const helmet = new THREE.Mesh(new THREE.SphereGeometry(0.17, 14, 10), new THREE.MeshLambertMaterial({ color: W }));
-  helmet.position.set(-1.45, 1.13, -4.4); group.add(helmet);
-  const visor = new THREE.Mesh(new THREE.SphereGeometry(0.13, 12, 8), new THREE.MeshLambertMaterial({ color: 0x23272b }));
-  visor.position.set(-1.42, 1.14, -4.31); group.add(visor);
+  // NASA models (docs/ASSETS.md): a helmet and a spare glove on the bench, a crew lock bag by the airlock,
+  // an empty pressure suit at the end of the suit lockers. Small, so none casts a shadow; blobs sit under them.
+  const nasa = (id, x, y, z, ry, opts) => loadPeriod(THREE, id, opts).then(m => { m.position.set(x, y, z); m.rotation.y = ry; group.add(m); return m; })
+    .catch(e => console.warn(id, e));
+  nasa('helmet', -1.45, 0.96, -4.4, Math.PI - 0.4, { merge: true, rough: 0.6, metal: 0.1, by: { visor: { color: PAL.hex.foilGold, rough: 0.25, metal: 0.7 }, White: { color: PAL.hex.enamel }, helmet: { color: PAL.hex.enamel }, Tree: { color: PAL.hex.console } } });
+  loadGlove(THREE).then(m => { m.position.set(-0.95, 1.0, -4.3); m.rotation.set(-Math.PI / 2, 0.5, 0); group.add(m); }).catch(e => console.warn('glove', e));
+  nasa('crew-lock-bag', -1.4, 0.95, -0.2, Math.PI);
+  nasa('aces-suit', 3.2, 0, -0.5, Math.PI / 2, { merge: true, rough: 0.85, sat: 0.8 });
+  blob(0.8, 0.9, 3.2, -0.5);
 
   // Ceiling gantry over the island. Its cables are dressed in short loops and clipped to the frame.
   box(G, 2.6, 0.5, 1.1, -0.3, 2.55, -5.0); box(D, 2.7, 0.08, 1.2, -0.3, 2.28, -5.0); box(W, 0.9, 0.4, 0.8, -1.3, 2.05, -5.1);
   box(D, 3.2, 0.08, 0.08, -0.3, 2.85, -4.5); box(D, 3.2, 0.08, 0.08, -0.3, 2.85, -5.5);
   for (const x of [-1.5, 0.9]) for (const z of [-4.5, -5.5]) tube(D, [x, 2.8, z], [x, H, z], 0.035);
   cyl(D, 0.24, 0.12, 0.55, 2.18, -4.65); cyl(K, 0.1, 0.3, -0.5, 2.15, -5.3);
-  box(K, 0.62, 0.42, 0.05, 0.75, 1.95, -4.15, 0.3, 0, 0); glow(0x6fb6ff, 0.54, 0.34, 0.01, 0.75, 1.95, -4.12, 0.3, 0, 0); tube(D, [0.75, 2.14, -4.2], [0.75, 2.3, -4.5], 0.02);
+  box(K, 0.62, 0.42, 0.05, 0.75, 1.95, -4.15, 0.3, 0, 0); glow(0x5f7f4a, 0.54, 0.34, 0.01, 0.75, 1.95, -4.12, 0.3, 0, 0); tube(D, [0.75, 2.14, -4.2], [0.75, 2.3, -4.5], 0.02);
   const cableMat = new THREE.MeshLambertMaterial({ color: K });
   for (const pts of [
     [[-0.9, 2.26, -4.62], [-0.55, 2.1, -4.5], [-0.15, 2.12, -4.5], [0.3, 2.26, -4.62]],
@@ -229,9 +237,18 @@ export function buildInterior(THREE, scene, { sfx = () => {} } = {}) {
   const mount = new THREE.Group();
   mount.position.set(ROOM.panel.x, 0, ROOM.panel.z); mount.rotation.y = Math.PI / 2; // local +z faces into the room
   group.add(mount);
+  // NASA flight-deck photos (docs/ASSETS.md), warmed: breaker panel "R14" as the surround the board sits in,
+  // and the toggle-switch panel beside the habitat-power display on the east wall.
+  const photo = (id, w, h, x, y, z, ry) => {
+    const t = new THREE.TextureLoader().load(textureUrl(id)); t.colorSpace = THREE.SRGBColorSpace;
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshLambertMaterial({ map: t, color: PAL.hex.photoTint }));
+    m.position.set(x, y, z); m.rotation.y = ry; m.name = 'Panel_' + id; group.add(m);
+  };
+  photo('flight-deck-panel-c', 1.5, 1.2, -3.47, 1.4, -7.7, Math.PI / 2);
+  photo('flight-deck-panel-b', 0.9, 0.72, 3.47, 1.55, -9.95, -Math.PI / 2);
   box(D, 0.1, 0.3, 0.5, -3.44, 2.15, -7.7); tube(G, [-3.42, 2.3, -7.8], [-3.42, H, -7.8], 0.04); tube(G, [-3.42, 2.3, -7.6], [-3.42, H, -7.6], 0.04);
   for (const z of [-8.45, -6.95]) box(Y, 0.9, 0.004, 0.08, -3.0, 0.004, z); box(Y, 0.08, 0.004, 1.58, -2.55, 0.004, -7.7);
-  const beacon = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 0.12, 10), new THREE.MeshBasicMaterial({ color: 0x3a2606, toneMapped: false }));
+  const beacon = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 0.12, 10), new THREE.MeshBasicMaterial({ color: PAL.hex.amberOff, toneMapped: false }));
   beacon.position.set(-3.34, 2.36, -7.7); group.add(beacon);
   box(D, 0.14, 0.04, 0.14, -3.34, 2.29, -7.7);
 
@@ -243,14 +260,14 @@ export function buildInterior(THREE, scene, { sfx = () => {} } = {}) {
   blob(2.2, 2.6, -2.8, -11.2);
 
   // East wall: a cabinet, an extinguisher, a status screen
-  box(G, 0.3, 0.9, 1.6, 3.33, 1.5, -6.0); box(D, 0.02, 0.8, 0.02, 3.175, 1.5, -6.0); glow(0x58e08a, 0.012, 0.04, 0.04, 3.175, 1.85, -5.4);
+  box(G, 0.3, 0.9, 1.6, 3.33, 1.5, -6.0); box(D, 0.02, 0.8, 0.02, 3.175, 1.5, -6.0); glow(PAL.hex.green, 0.012, 0.04, 0.04, 3.175, 1.85, -5.4);
   cyl(R, 0.07, 0.42, 3.38, 1.0, -4.1); cyl(K, 0.03, 0.08, 3.38, 1.25, -4.1);
   box(K, 0.06, 0.7, 1.2, 3.45, 1.6, -8.6);
 
   // Corridor stub and its sealed bulkhead
   for (const z of [-13, -14]) { for (const x of [1.57, 3.43]) box(G, 0.12, CH, 0.16, x, CH / 2, z); box(D, 2, 0.12, 0.16, 2.5, CH - 0.06, z); }
   box(D, 1.5, 2.3, 0.16, 2.5, 1.15, -14.92); box(W, 1.0, 1.9, 0.08, 2.5, 1.0, -14.82); box(D, 0.5, 0.06, 0.03, 2.5, 1.0, -14.77);
-  box(K, 0.12, 0.2, 0.05, 3.15, 1.3, -14.9); glow(0xff3b30, 0.04, 0.04, 0.01, 3.15, 1.34, -14.87);
+  box(K, 0.12, 0.2, 0.05, 3.15, 1.3, -14.9); glow(PAL.hex.red, 0.04, 0.04, 0.01, 3.15, 1.34, -14.87);
 
   // Build the four batches
   const m4 = new THREE.Matrix4(), v3 = new THREE.Vector3(), s3 = new THREE.Vector3(), col = new THREE.Color();
@@ -276,22 +293,22 @@ export function buildInterior(THREE, scene, { sfx = () => {} } = {}) {
     const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshBasicMaterial({ map: tex, toneMapped: false }));
     m.position.set(x, y, z); m.rotation.y = ry; group.add(m);
     return rows => { // rows: [text, size, colour]
-      g.fillStyle = '#041008'; g.fillRect(0, 0, pw, ph); g.textAlign = 'center'; g.textBaseline = 'top';
+      g.fillStyle = PAL.glass; g.fillRect(0, 0, pw, ph); g.textAlign = 'center'; g.textBaseline = 'top';
       let yy = 10; for (const [text, size, colour] of rows) { g.font = `bold ${size}px monospace`; g.fillStyle = colour; g.fillText(text, pw / 2, yy); yy += size + 8; }
       tex.needsUpdate = true;
     };
   }
-  screen(0.9, 0.2, 360, 80, 0, 2.47, -0.03, Math.PI)([['AIRLOCK  EXIT', 44, '#58e08a']]);
-  screen(1.0, 0.2, 400, 80, 2.5, 2.42, -14.83, 0)([['CREW QUARTERS', 40, '#ffb84a'], ['SEALED', 18, '#ff5c5c']]);
+  screen(0.9, 0.2, 360, 80, 0, 2.47, -0.03, Math.PI)([['AIRLOCK  EXIT', 44, PAL.phosphor]]);
+  screen(1.0, 0.2, 400, 80, 2.5, 2.42, -14.83, 0)([['CREW QUARTERS', 40, PAL.amber], ['SEALED', 18, PAL.red]]);
   const lifeScreen = screen(0.5, 0.5, 256, 256, -2.945, 1.25, -10.75, Math.PI / 2);
   const busScreen = screen(1.1, 0.6, 440, 240, 3.415, 1.6, -8.6, -Math.PI / 2);
   function drawScreens(out) {
     lifeScreen(out
-      ? [['LIFE SUPPORT', 26, '#7d909c'], ['ON', 54, '#ff5c5c'], ['BATTERY', 54, '#ff5c5c'], ['FANS OFF', 28, '#ffb84a']]
-      : [['LIFE SUPPORT', 26, '#7d909c'], ['O2 21%', 52, '#58e08a'], ['CO2 OK', 52, '#58e08a'], ['FANS 100%', 28, '#7d909c']]);
+      ? [['LIFE SUPPORT', 26, PAL.inkDim], ['ON', 54, PAL.red], ['BATTERY', 54, PAL.red], ['FANS OFF', 28, PAL.amber]]
+      : [['LIFE SUPPORT', 26, PAL.inkDim], ['O2 21%', 52, PAL.phosphor], ['CO2 OK', 52, PAL.phosphor], ['FANS 100%', 28, PAL.inkDim]]);
     busScreen(out
-      ? [['HABITAT POWER', 30, '#7d909c'], ['MAIN BUS', 46, '#ff5c5c'], ['OFFLINE', 70, '#ff5c5c'], ['BACKUP LIGHTING ONLY', 26, '#ffb84a']]
-      : [['HABITAT POWER', 30, '#7d909c'], ['MAIN BUS', 46, '#58e08a'], ['ONLINE', 70, '#58e08a'], ['SOLAR 4.1 kW   LOAD 2.6 kW', 24, '#7d909c']]);
+      ? [['HABITAT POWER', 30, PAL.inkDim], ['MAIN BUS', 46, PAL.red], ['OFFLINE', 70, PAL.red], ['BACKUP LIGHTING ONLY', 26, PAL.amber]]
+      : [['HABITAT POWER', 30, PAL.inkDim], ['MAIN BUS', 46, PAL.phosphor], ['ONLINE', 70, PAL.phosphor], ['SOLAR 4.1 kW   LOAD 2.6 kW', 24, PAL.inkDim]]);
   }
   drawScreens(false);
 
@@ -312,14 +329,14 @@ export function buildInterior(THREE, scene, { sfx = () => {} } = {}) {
 
   // Three real lights, always on in the shader; only their intensity and colour change.
   const hemi = new THREE.HemisphereLight(0xffffff, 0xffffff, 1);
-  const down = new THREE.DirectionalLight(0xf4f7ff, 0);
+  const down = new THREE.DirectionalLight(PAL.hex.incandescent, 0);
   down.position.set(1.2, 6, -4.6); down.target.position.set(0, 0, -6);
-  const red = new THREE.PointLight(0xff3018, 0, 7, 1.4);
+  const red = new THREE.PointLight(0xb8402a, 0, 7, 1.4);
   red.position.set(-2.5, 1.7, ROOM.panel.z);
   group.add(hemi, down, down.target, red);
 
-  const SKY = new THREE.Color(0xf1f5ff), GROUND = new THREE.Color(0x9a9da2), RSKY = new THREE.Color(0xff2a14), RGROUND = new THREE.Color(0x5a0c06);
-  const ON = new THREE.Color(1, 0.98, 0.93), OFF = new THREE.Color(0x15171a), RON = new THREE.Color(1, 0.13, 0.06), ROFF = new THREE.Color(0x1c0504);
+  const SKY = new THREE.Color(0xe8dcc4), GROUND = new THREE.Color(0x6e675a), RSKY = new THREE.Color(0x8a2e1e), RGROUND = new THREE.Color(0x3a140c);
+  const ON = new THREE.Color(0xffe8c4), OFF = new THREE.Color(0x2b2a26), RON = new THREE.Color(PAL.hex.red), ROFF = new THREE.Color(PAL.hex.redOff);
   const MAIN_FILL = 1.75, MAIN_DOWN = 1.4, DARK_FILL = 0.035, BACKUP_FILL = 0.2, BACKUP_POINT = 9;
   // Roof rows re-strike starting with the one nearest the breaker panel.
   const ORDER = ROOF_ROWS.map((z, i) => i).sort((a, b) => Math.abs(ROOF_ROWS[a] - ROOM.panel.z) - Math.abs(ROOF_ROWS[b] - ROOM.panel.z));
@@ -336,7 +353,7 @@ export function buildInterior(THREE, scene, { sfx = () => {} } = {}) {
     col.copy(ROFF).lerp(RON, backupLevel);
     for (let i = 0; i < BACKUP.length; i++) backup.setColorAt(i, col);
     roof.instanceColor.needsUpdate = backup.instanceColor.needsUpdate = true;
-    beacon.material.color.setHex(backupLevel > 0.2 && Math.floor(time * 3) % 2 === 0 ? 0xffb030 : 0x3a2606);
+    beacon.material.color.setHex(backupLevel > 0.2 && Math.floor(time * 3) % 2 === 0 ? PAL.hex.amber : PAL.hex.amberOff);
   }
   apply(0);
 

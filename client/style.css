@@ -199,3 +199,72 @@ canvas.pic { width:100%; display:block; background:#05080a; border:1px solid var
 #adminGate input { font:inherit; padding:.6em .8em; background:#000; color:var(--ink); border:1px solid var(--line); border-radius:4px; margin-right:8px; }
 .adminlink { display:block; text-align:center; margin:1.5em 0; color:var(--dim); font-size:12px; letter-spacing:.15em; text-transform:uppercase; text-decoration:none; }
 .adminlink:hover { color:var(--amber); }
+
+/* ===================================================================================================
+   The 1960s console look (docs/DESIGN.md). It covers the Mission Control header, the toast, the
+   consoles and the results, and nothing else: the lobby (the loading screen) keeps the variables at
+   the top of this file and its own section above, untouched. Colours come from client/shared/palette.js.
+   =================================================================================================== */
+@font-face { font-family:"Michroma"; src:url(/fonts/michroma-400.woff2) format("woff2"); font-weight:400; font-display:swap; }
+@font-face { font-family:"Courier Prime"; src:url(/fonts/courier-prime-400.woff2) format("woff2"); font-weight:400; font-display:swap; }
+@font-face { font-family:"Courier Prime"; src:url(/fonts/courier-prime-700.woff2) format("woff2"); font-weight:700; font-display:swap; }
+:root {
+  --p-bakelite:#1d1c19; --p-console:#3f4a47; --p-deep:#2b3230; --p-bezel:#8b887d; --p-rule:#55605b; --p-dial:#e3d9bf;
+  --p-ink:#d6ccb4; --p-dim:#8f8a78; --p-ink-dial:#24221e;
+  --p-green:#8fb05a; --p-green-off:#2c3a22; --p-amber:#e0a347; --p-amber-off:#4a3514; --p-red:#c4523a; --p-red-off:#3d1a14;
+  --p-blue:#7a99b0; --p-blue-off:#1f2a33; --p-nixie:#ff8a3d; --p-phosphor:#9cc27a;
+  --p-label:"Michroma", "Eurostile", "Arial Narrow", sans-serif; --p-type:"Courier Prime", "Courier New", monospace;
+}
+body.period { background:var(--p-bakelite); }
+.period header, .period #toast, .period #run, .period #results { font-family:var(--p-type); color:var(--p-ink); }
+.period header { background:var(--p-console); border-bottom:3px solid var(--p-deep); box-shadow:inset 0 -1px 0 var(--p-bezel); }
+.period .brand { font-family:var(--p-label); font-weight:400; color:var(--p-ink); letter-spacing:.24em; font-size:14px; }
+.period .brand span { font-family:var(--p-type); color:var(--p-dim); letter-spacing:.08em; }
+.period .stat label { font-family:var(--p-label); font-size:8px; color:var(--p-dim); letter-spacing:.18em; }
+.period .stat b { font-weight:700; color:var(--p-nixie); text-shadow:0 0 5px rgba(255,138,61,.55); background:#16120e; border:1px solid var(--p-rule); border-radius:3px; padding:0 .3em; letter-spacing:.08em; }
+.period .bar { background:var(--p-deep); border:1px solid var(--p-bezel); border-radius:1px;
+  background-image:repeating-linear-gradient(90deg, transparent 0 15px, rgba(143,138,120,.45) 15px 16px); }
+.period .bar i { background:var(--p-green); } .period .bar i.low { background:var(--p-red); }
+.period #crew i { font-family:var(--p-label); font-size:8px; letter-spacing:.1em; border:0; border-radius:0; color:var(--p-dim); padding:2px 4px 2px 16px; position:relative; background:none; }
+.period #crew i::before { content:''; position:absolute; left:2px; top:50%; width:9px; height:9px; margin-top:-5px; border-radius:50%; background:var(--p-green-off); box-shadow:0 0 0 2px var(--p-bezel); }
+.period #crew i.on { color:var(--p-ink); background:none; }
+.period #crew i.on::before { background:radial-gradient(circle at 35% 35%, #fff3d6, var(--p-green) 45%); box-shadow:0 0 0 2px var(--p-bezel), 0 0 6px var(--p-green); }
+.period #link { color:var(--p-red); font-family:var(--p-label); font-size:9px; letter-spacing:.15em; }
+.period header button, .period #run button, .period #results button {
+  font-family:var(--p-label); font-weight:400; font-size:11px; letter-spacing:.14em; text-transform:uppercase;
+  color:var(--p-ink); background:var(--p-console); border:2px solid var(--p-bezel); border-radius:2px;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.12), inset 0 -2px 0 rgba(0,0,0,.35); }
+.period header button:active, .period #run button:active, .period #results button:active { transform:translateY(1px); box-shadow:inset 0 2px 3px rgba(0,0,0,.4); }
+.period #radioBtn { background:var(--p-console); border-color:var(--p-amber); color:var(--p-amber); }
+.period header { gap:18px; }
+.period #toast { background:var(--p-deep); border-bottom:1px solid var(--p-rule); font-family:var(--p-label); font-size:12px; letter-spacing:.2em; color:var(--p-dim); }
+.period #toast.spawn, .period #toast.alarm, .period #toast.hit { color:var(--p-amber); }
+.period #toast.solve, .period #toast.power, .period #toast.gen { color:var(--p-green); }
+.period #toast.mistake, .period #toast.miss { color:var(--p-red); }
+.period #run .panel, .period #results .panel { background:var(--p-console); border:1px solid var(--p-bezel); border-radius:2px;
+  box-shadow:inset 0 0 0 3px var(--p-deep), inset 0 0 0 4px rgba(139,136,125,.35), 0 2px 0 #000;
+  background-image:radial-gradient(circle at 9px 9px, var(--p-bezel) 2px, transparent 3px), radial-gradient(circle at calc(100% - 9px) 9px, var(--p-bezel) 2px, transparent 3px),
+    radial-gradient(circle at 9px calc(100% - 9px), var(--p-bezel) 2px, transparent 3px), radial-gradient(circle at calc(100% - 9px) calc(100% - 9px), var(--p-bezel) 2px, transparent 3px); }
+.period #run .panel > h3 { display:inline-block; font-family:var(--p-label); font-weight:400; font-size:11px; letter-spacing:.22em; text-transform:uppercase;
+  color:var(--p-ink-dial); background:var(--p-dial); padding:4px 12px; border-radius:1px; box-shadow:inset 0 0 0 1px rgba(0,0,0,.3); }
+.period #run h2 { font-family:var(--p-label); font-weight:400; font-size:9px; letter-spacing:.24em; color:var(--p-dim); }
+.period #run .hint { color:var(--p-dim); }
+.period #run .tabs button { background:var(--p-deep); color:var(--p-dim); border-color:var(--p-rule); padding:.8em .6em .8em 2.2em; position:relative; }
+.period #run .tabs button::before { content:''; position:absolute; left:.9em; top:50%; width:9px; height:9px; margin-top:-5px; border-radius:50%; background:var(--p-amber-off); box-shadow:0 0 0 2px var(--p-bezel); }
+.period #run .tabs button.on { background:var(--p-console); color:var(--p-ink); border-color:var(--p-bezel); }
+.period #run .tabs button.on::before { background:radial-gradient(circle at 35% 35%, #fff3d6, var(--p-amber) 45%); box-shadow:0 0 0 2px var(--p-bezel), 0 0 6px var(--p-amber); }
+.period canvas.pic, .period #map, .period #cam { background:var(--p-deep); border:2px solid var(--p-bezel); border-radius:2px; }
+.period #static { background:var(--p-bakelite); border-radius:2px; }
+.period #ptt { font-family:var(--p-label); font-size:12px; letter-spacing:.14em; padding:1.1em 1em 1.1em 3.2em; position:relative; background:var(--p-console); color:var(--p-ink); }
+.period #ptt::before, .period #ptt::after { content:''; position:absolute; top:50%; width:12px; height:12px; margin-top:-6px; border-radius:50%; box-shadow:0 0 0 2px var(--p-bezel); }
+.period #ptt::before { left:1em; background:var(--p-red-off); } .period #ptt::after { left:2.2em; background:var(--p-blue-off); }
+.period #ptt.tx { background:var(--p-console); color:var(--p-ink); } .period #ptt.tx::before { background:radial-gradient(circle at 35% 35%, #fff3d6, var(--p-red) 45%); box-shadow:0 0 0 2px var(--p-bezel), 0 0 8px var(--p-red); }
+.period #ptt.rx { background:var(--p-console); color:var(--p-ink); } .period #ptt.rx::after { background:radial-gradient(circle at 35% 35%, #fff3d6, var(--p-blue) 45%); box-shadow:0 0 0 2px var(--p-bezel), 0 0 8px var(--p-blue); }
+.period #run::before { content:''; position:fixed; inset:0; z-index:-1; pointer-events:none; opacity:.09; background:url(/assets/textures/mission-control-room.webp) center/cover no-repeat; filter:sepia(.4); }
+.period .verdict { font-family:var(--p-label); font-weight:400; letter-spacing:.2em; font-size:26px; }
+.period .verdict.won { color:var(--p-green); } .period .verdict.lost { color:var(--p-red); }
+.period .log li { border-bottom-color:var(--p-rule); }
+.period .log .at { color:var(--p-dim); }
+.period .log .solve, .period .log .power, .period .log .gen { color:var(--p-green); }
+.period .log .mistake, .period .log .miss, .period .log .hit, .period .log .blackout { color:var(--p-red); }
+.period .log .spawn, .period .log .alarm, .period .log .meteor { color:var(--p-dim); }

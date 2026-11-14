@@ -10,6 +10,7 @@
 // All motion is integrated at lunar gravity (1.62 m/s^2), so things fall slowly, the way they would.
 // Everything is in room coordinates (see interior.js). Cheap for the Quest: three panels, two cables
 // drawn as one instanced mesh each, one points cloud for sparks and vapour.
+import { PAL, CABLE_HEX } from '/shared/palette.js';
 
 const G = 1.62;
 
@@ -22,16 +23,16 @@ export function buildDamage(THREE, group, { sfx = () => {} } = {}) {
   function panelTexture() {
     const c = document.createElement('canvas'); c.width = c.height = 256;
     const g = c.getContext('2d');
-    g.fillStyle = '#c4c7c9'; g.fillRect(0, 0, 256, 256);
-    g.strokeStyle = '#5a5f64'; g.lineWidth = 8; g.strokeRect(4, 4, 248, 248);
+    g.fillStyle = '#c9c2b2'; g.fillRect(0, 0, 256, 256);
+    g.strokeStyle = '#5e5a50'; g.lineWidth = 8; g.strokeRect(4, 4, 248, 248);
     g.strokeStyle = 'rgba(0,0,0,0.12)'; g.lineWidth = 3; g.strokeRect(30, 30, 196, 196);
-    g.fillStyle = '#3f4449'; for (const [x, y] of [[18, 18], [238, 18], [18, 238], [238, 238], [128, 18], [128, 238]]) { g.beginPath(); g.arc(x, y, 5, 0, 7); g.fill(); }
+    g.fillStyle = PAL.bezel; for (const [x, y] of [[18, 18], [238, 18], [18, 238], [238, 238], [128, 18], [128, 238]]) { g.beginPath(); g.arc(x, y, 5, 0, 7); g.fill(); }
     const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
   }
   const faceMat = new THREE.MeshLambertMaterial({ map: panelTexture() });
-  const backMat = new THREE.MeshLambertMaterial({ color: 0x6a6f74 });
-  const holeMat = new THREE.MeshLambertMaterial({ color: 0x121417 });
-  const wireCols = [0xa8372c, 0xd0a11c, 0x3b6fd6, 0x2f8f4e, 0xdfe1e2];
+  const backMat = new THREE.MeshLambertMaterial({ color: 0x6e675a });
+  const holeMat = new THREE.MeshLambertMaterial({ color: PAL.hex.bakelite });
+  const wireCols = [CABLE_HEX.red, CABLE_HEX.yellow, CABLE_HEX.blue, CABLE_HEX.green, PAL.hex.enamel];
 
   // A cavity behind a panel: dark, with a few coloured wires and a pipe across it. It is always
   // there, just covered while the panel is in place.
@@ -43,9 +44,9 @@ export function buildDamage(THREE, group, { sfx = () => {} } = {}) {
       const wire = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, h * 0.92, 6), new THREE.MeshLambertMaterial({ color: wireCols[i] }));
       wire.position.set(-w * 0.32 + i * w * 0.07, 0, 0.02); g.add(wire);
     }
-    const pipe = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, w * 0.9, 10), new THREE.MeshLambertMaterial({ color: 0x9ea3a7 }));
+    const pipe = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, w * 0.9, 10), new THREE.MeshLambertMaterial({ color: PAL.hex.aluminium }));
     pipe.rotation.z = Math.PI / 2; pipe.position.set(0, h * 0.22, 0.04); g.add(pipe);
-    const box = new THREE.Mesh(new THREE.BoxGeometry(w * 0.22, h * 0.2, 0.06), new THREE.MeshLambertMaterial({ color: 0x41464c }));
+    const box = new THREE.Mesh(new THREE.BoxGeometry(w * 0.22, h * 0.2, 0.06), new THREE.MeshLambertMaterial({ color: PAL.hex.console }));
     box.position.set(w * 0.25, -h * 0.15, 0.03); g.add(box);
     g.userData.pipeEnd = new THREE.Vector3(w * 0.45, h * 0.22, 0.06); // where a vent would blow from
     return g;
@@ -95,7 +96,7 @@ export function buildDamage(THREE, group, { sfx = () => {} } = {}) {
 
   // ---------- cables: a chain of points, clipped along a run until it tears loose ----------
   const segGeo = new THREE.CylinderGeometry(1, 1, 1, 6);
-  const cableMat = new THREE.MeshLambertMaterial({ color: 0x1b1e22 });
+  const cableMat = new THREE.MeshLambertMaterial({ color: PAL.hex.consoleDeep });
   function cable(trigger, { from, to, n = 12, slack = 1.35, sparks = false, r = 0.018 }) {
     const a = new THREE.Vector3(...from), b = new THREE.Vector3(...to);
     const rest = Array.from({ length: n }, (_, i) => a.clone().lerp(b, i / (n - 1)));

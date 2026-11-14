@@ -20,6 +20,7 @@ import { spawn } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { PAL } from '../client/shared/palette.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const OUT = path.join(ROOT, 'test', 'shots');
@@ -401,7 +402,7 @@ try {
   if (!face.drawn || !Number.isFinite(face.oxygen) || !Number.isFinite(face.seconds) || !Number.isFinite(face.alarms)) problems.push('wrist gauges: the gauge face is missing something: ' + JSON.stringify(face));
   if (face.text !== 0) problems.push(`wrist gauges: the face is meant to be icons only, but text was drawn on it ${face.text} time(s)`);
   if (face.overlays) problems.push(`wrist gauges: ${face.overlays} other thing(s) are still fixed to the view`);
-  if (face.radio !== 'NO MICROPHONE' || face.frame !== '#ffb347' || face.icon !== 'microphone, barred') problems.push('wrist gauges: the face does not show a barred microphone in amber: ' + JSON.stringify(face));
+  if (face.radio !== 'NO MICROPHONE' || face.lamp !== PAL.amber || face.icon !== 'microphone, barred') problems.push('wrist gauges: the face does not show a barred microphone in amber: ' + JSON.stringify(face));
   await view(astro, 'astronaut-wrist');
   await astro.keyboard.up('Tab');
   await until('wrist gauges: letting go of Tab did not lower the arm', async () => (await armState(astro)).raise === 0);
@@ -465,7 +466,7 @@ try {
   await until('radio: Mission Ops was not told the astronaut is transmitting', async () => /ASTRONAUT IS TRANSMITTING/.test(await opsButton()));
   await radioman.waitForTimeout(1500);
   const red = await gaugeFace(radioman);
-  if (red.radio !== 'TRANSMITTING' || red.frame !== '#ff5c5c' || red.icon !== 'microphone, live') problems.push('wrist gauges: the face does not show a live microphone in red: ' + JSON.stringify(red));
+  if (red.radio !== 'TRANSMITTING' || red.lamp !== PAL.red || red.icon !== 'microphone, live') problems.push('wrist gauges: the face does not show a live microphone in red: ' + JSON.stringify(red));
   await radioman.keyboard.up('Tab');
   await until('radio: letting go of Tab did not lower the arm', async () => (await armState(radioman)).raise === 0);
   const offAir = await armState(radioman);

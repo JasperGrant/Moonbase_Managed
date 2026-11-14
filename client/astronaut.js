@@ -10,6 +10,7 @@ import { CFG, CREW, ROLES, PLACES, covers } from '/shared/config.js';
 import { beltWeight, sheltered } from '/shared/rules.js';
 import { seatTaken, kicked } from '/seat.js';
 import { buildArm } from '/arm.js';
+import { PAL } from '/shared/palette.js';
 import { createLobby } from '/lobby.js';
 
 const REACH = 3.2;        // metres: how far away the mouse can work something
@@ -31,7 +32,7 @@ renderer.setSize(innerWidth, innerHeight);
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.toneMapping = THREE.ACESFilmicToneMapping; // filmic roll-off: the sun is harsh, the shadows stay readable
-renderer.toneMappingExposure = 1.05;
+renderer.toneMappingExposure = 0.95;
 renderer.xr.enabled = true;
 renderer.xr.setFoveation(1);
 document.body.appendChild(renderer.domElement);
@@ -63,7 +64,7 @@ function pulse(i, strength = 0.5, ms = 40) {
 }
 const fx = buildFixtures(THREE, world, { rig, camera, send: a => net.send({ t: 'do', a }), sfx: k => radio.sfx(k), pulse });
 
-const lamp = new THREE.SpotLight(0xfff4e4, 14, 16, 0.65, 0.7, 1.4); // candela; 40 blew out panels at arm's length
+const lamp = new THREE.SpotLight(PAL.hex.incandescent, 14, 16, 0.65, 0.7, 1.4); // candela; 40 blew out panels at arm's length
 lamp.target.position.set(0, -0.15, -1);
 camera.add(lamp, lamp.target);
 lamp.intensity = 14; // always on: the shadow side of the dome is black, and that is where cracks hide
@@ -76,9 +77,9 @@ scene.add(hatchOut);
 {
   const c = document.createElement('canvas'); c.width = 384; c.height = 96;
   const g = c.getContext('2d');
-  g.fillStyle = '#041008'; g.fillRect(0, 0, 384, 96); g.strokeStyle = '#58e08a'; g.lineWidth = 4; g.strokeRect(2, 2, 380, 92);
-  g.textAlign = 'center'; g.fillStyle = '#58e08a'; g.font = 'bold 40px monospace'; g.fillText('AIRLOCK', 192, 44);
-  g.fillStyle = '#d6e6e0'; g.font = 'bold 20px monospace'; g.fillText('POINT AND SELECT TO ENTER', 192, 78);
+  g.fillStyle = PAL.console; g.fillRect(0, 0, 384, 96); g.strokeStyle = PAL.bezel; g.lineWidth = 6; g.strokeRect(3, 3, 378, 90);
+  g.textAlign = 'center'; g.fillStyle = PAL.dial; g.font = 'bold 40px monospace'; g.fillText('AIRLOCK', 192, 44);
+  g.fillStyle = PAL.ink; g.font = 'bold 20px monospace'; g.fillText('POINT AND SELECT TO ENTER', 192, 78);
   const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace;
   const sign = new THREE.Mesh(new THREE.PlaneGeometry(0.72, 0.18), new THREE.MeshBasicMaterial({ map: tex, toneMapped: false }));
   sign.position.set(0, 0.52, 3.31);
@@ -275,7 +276,7 @@ const GAP_MIN = 0.1;      // metres: hands closer than this count as this far ap
                           // that starts with the fingers touching does not jump to full zoom
 const ground = new THREE.Plane(UP, 0);
 const hitPoint = new THREE.Vector3(), tmpV = new THREE.Vector3(), gapA = new THREE.Vector3(), gapB = new THREE.Vector3();
-const marker = new THREE.Mesh(new THREE.RingGeometry(0.22, 0.3, 32), new THREE.MeshBasicMaterial({ color: 0x58e08a, transparent: true, opacity: 0.8, side: THREE.DoubleSide, depthWrite: false, toneMapped: false }));
+const marker = new THREE.Mesh(new THREE.RingGeometry(0.22, 0.3, 32), new THREE.MeshBasicMaterial({ color: PAL.hex.amber, transparent: true, opacity: 0.8, side: THREE.DoubleSide, depthWrite: false, toneMapped: false }));
 marker.rotation.x = -Math.PI / 2; marker.visible = false;
 scene.add(marker);
 
@@ -301,7 +302,7 @@ function lateral(controller) {
 
 const controllers = [], hands = [];
 const jointGeo = new THREE.SphereGeometry(0.009, 8, 6);
-const jointMat = new THREE.MeshStandardMaterial({ color: 0xe9e7e1, roughness: 0.6 });
+const jointMat = new THREE.MeshStandardMaterial({ color: PAL.hex.enamel, roughness: 0.85 });
 let leftDrag = null, helmetTalk = false; // leftDrag = { x } while the left hand is pinched
 let zoomGrab = null;                     // { gap, zoom } at the moment both hands pinched
 const usingHands = () => controllers.some(c => c.userData.isHand);
@@ -326,7 +327,7 @@ for (const i of [0, 1]) {
     c.userData.isHand = !!e.data.hand;
     if (c.userData.hand !== 'left' && !c.userData.ray) {
       const geo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 0, -REACH)]);
-      c.userData.ray = new THREE.Line(geo, new THREE.LineBasicMaterial({ color: 0x58e08a }));
+      c.userData.ray = new THREE.Line(geo, new THREE.LineBasicMaterial({ color: PAL.hex.inkDim }));
       c.add(c.userData.ray);
     }
   });
@@ -446,6 +447,38 @@ function followArm() {
   arm.aimUpper(arm.group.worldToLocal(shoulder));
   return true;
 }
+// The EXIT button on the cuff ends the headset session, back to the lobby. Hold the right index fingertip,
+// or the fingers of the right controller's glove, on the cap: it sinks, its lamp warms up, a click on
+// touch and a relay clunk when it goes. Holding for a moment means a brushing hand does not end the game.
+const EXIT = { reach: 0.028, hold: 0.6 };
+let exitHeld = 0, exitTouched = false, exitGone = false;
+const exitPos = new THREE.Vector3(), tipPos = new THREE.Vector3();
+function exitButton(dt, session) {
+  let near = false, hand = -1;
+  if (arm.group.visible && !exitGone) {
+    exitPos.copy(arm.EXIT_TOP).applyMatrix4(arm.group.matrixWorld);
+    hand = controllers.findIndex(c => c.userData.hand === 'right');
+    const c = controllers[hand];
+    if (c) {
+      const tip = c.userData.isHand ? hands[hand].joints?.['index-finger-tip'] : null, glove = fx.gloves[hand];
+      let have = true;
+      if (tip && tip.visible) tip.getWorldPosition(tipPos);
+      else if (!c.userData.isHand && glove?.visible) tipPos.set(0, 0, -0.075).applyMatrix4(glove.matrixWorld); // the glove's fingers
+      else have = false;
+      near = have && tipPos.distanceTo(exitPos) < EXIT.reach;
+    }
+  }
+  if (near && !exitTouched) { radio.sfx('click'); pulse(hand, 0.3, 25); }
+  exitTouched = near;
+  exitHeld = near ? exitHeld + dt : Math.max(0, exitHeld - dt * 3);
+  arm.pressExit(exitHeld / EXIT.hold);
+  if (exitHeld >= EXIT.hold && !exitGone) {
+    exitGone = true;
+    radio.sfx('relay'); pulse(hand, 1, 90);
+    session.end().catch(() => {});
+  }
+}
+
 // Can the gauges be read right now? Call once a frame, after followArm.
 function gaugesReadable(dt) {
   if (!arm.group.visible) { reading = false; readFor = 0; return false; }
@@ -559,6 +592,7 @@ function control(dt, now) {
   if (session) {
     ptt = handControls(ptt);
     if (followArm() && gaugesReadable(dt)) ptt = true;
+    exitButton(dt, session);
     for (const src of session.inputSources) {
       const gp = src.gamepad;
       if (!gp) continue;
@@ -723,4 +757,4 @@ $('vrSlot').appendChild(VRButton.createButton(renderer, { optionalFeatures: ['ha
 $('deskBtn').onclick = () => { mode = 'desk'; keys.tab = false; $('deskBtn').blur(); lobby.show(false); $('cross').hidden = false; lockPointer(); };
 // In a headset the arm lives in the room with the hands, and follows the left one; on a laptop it hangs off the view.
 renderer.xr.addEventListener('sessionstart', () => { mode = 'vr'; rig.add(arm.group); arm.setTracked(true); lobby.show(false); });
-renderer.xr.addEventListener('sessionend', () => { mode = null; zoom = 1; zoomGrab = null; reading = false; readFor = 0; camera.add(arm.group); arm.setTracked(false); lobby.show(true); });
+renderer.xr.addEventListener('sessionend', () => { exitHeld = 0; exitTouched = exitGone = false; arm.pressExit(0); mode = null; zoom = 1; zoomGrab = null; reading = false; readFor = 0; camera.add(arm.group); arm.setTracked(false); lobby.show(true); });
