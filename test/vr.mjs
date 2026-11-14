@@ -663,8 +663,8 @@ try {
   });
   await letGo('right');
   if (SHOTS) {
-    await faceTool('patch');
     await kit();
+    await faceTool('patch');
     await draw('rack', async () => {
       const v = window.vr, mb = window.moonbase;
       await v.move('right', v.wp(mb.fx.tools.welder).add(v.V(0.03, -0.02, 0.12)), 4, v.V(0, 0, -1));
@@ -688,6 +688,32 @@ try {
       await v.frames(6);
     });
     await letGo('right');
+    // Inside, a plug in the hand on its way to a socket.
+    await P(async () => { window.moonbase.place('in'); await window.vr.frames(3); });
+    g.break('board');
+    await P(() => window.vr.until(s => s.scene.board, 3));
+    await stand(boardAt.x + boardAt.nx * 0.75, boardAt.z + boardAt.nz * 0.75, boardAt.x, boardAt.z);
+    await draw('plug', async () => {
+      const v = window.vr, mb = window.moonbase, F = mb.world.fixtures, cable = mb.state().scene.board.findIndex(c => !c.seated);
+      const n = F.board.getWorldDirection(new v.T.Vector3()), into = n.clone().negate();
+      await v.until(() => F.plugs[cable].position.distanceTo(F.plugRest[cable]) < 0.01, 5);
+      await v.sleep(2500); await v.frames(3); // the hall is on its red backup lights by now
+      await v.move('right', v.wp(F.plugs[cable]), 5, into); await v.frames(2);
+      v.grip('right', true); await v.frames(2);
+      const free = [0, 1, 2, 3].find(k => !mb.state().scene.board.some(c => c.seated && c.socket === k));
+      await v.move('right', F.board.localToWorld(F.sockets[free].clone()).addScaledVector(n, 0.2).add(v.V(0, -0.02, 0)), 6, into);
+      window.fakeXR.head(0, 1.7, 0, 0, -0.25);
+      await v.frames(3);
+    });
+    await P(async () => { window.vr.grip('right', false); await window.vr.frames(2); window.moonbase.place('out'); await window.vr.frames(3); });
+    delete g.faults.board;
+    // The base, from the spawn side.
+    await draw('base', async () => {
+      const v = window.vr;
+      await v.stand(1.2, 10.5, -0.6, 0);
+      window.fakeXR.head(0, 1.7, 0, 0, -0.05);
+      await v.frames(3);
+    });
     g.break('suit', true);
     await P(() => window.vr.until(s => s.suit, 3));
     await draw('forearm', async () => {

@@ -212,10 +212,13 @@ export function buildFixtures(THREE, world, { rig, camera, send, sfx = () => {},
   const gloveMat = mat(0xe9e7e1, { roughness: 0.8, metalness: 0 });
   const gloves = [0, 1].map(() => {
     const g = new THREE.Group();
-    add(g, new THREE.BoxGeometry(0.085, 0.035, 0.11), gloveMat, 0, -0.01, 0.05);                 // palm and fingers, closed round the grip
-    add(g, new THREE.BoxGeometry(0.03, 0.03, 0.06), gloveMat, 0, 0.02, 0.02);                      // thumb on top
-    add(g, new THREE.CylinderGeometry(0.045, 0.05, 0.1, 10), gloveMat, 0, -0.01, 0.15).rotation.x = Math.PI / 2; // cuff
-    add(g, new THREE.CylinderGeometry(0.052, 0.052, 0.015, 10), mat(0xd9662b), 0, -0.01, 0.11).rotation.x = Math.PI / 2;
+    add(g, new THREE.BoxGeometry(0.075, 0.03, 0.09), gloveMat, 0, -0.005, 0.04);                 // palm and fingers, closed round the grip
+    add(g, new THREE.BoxGeometry(0.026, 0.026, 0.05), gloveMat, 0, 0.02, 0.015);                   // thumb on top
+    add(g, new THREE.CylinderGeometry(0.036, 0.042, 0.09, 10), gloveMat, 0, -0.005, 0.125).rotation.x = Math.PI / 2; // cuff
+    add(g, new THREE.CylinderGeometry(0.044, 0.044, 0.012, 10), mat(0xd9662b), 0, -0.005, 0.085).rotation.x = Math.PI / 2;
+    // A controller points where the fingers point, but the forearm behind it runs down and back to the
+    // elbow. Tilted that way the glove stays below the line of sight, and does not hide what the hand is reaching for.
+    g.rotation.x = 0.6;
     g.visible = false;
     return g;
   });
@@ -446,7 +449,8 @@ export function buildFixtures(THREE, world, { rig, camera, send, sfx = () => {},
         const arm = vr ? hands.find((h, n) => n !== patchHand && (patchHand >= 0 || h.side === 'left')) || hands.find((_, n) => n !== patchHand) : null;
         const parent = arm ? arm.obj : camera;
         if (spot.parent !== parent) parent.add(spot);
-        if (arm) spot.position.set(0, 0.045, 0.16); else spot.position.set(-0.22, -0.2, -0.5);
+        // On the cuff of the glove (which runs down and back from a controller), or the back of a bare wrist.
+        if (arm) spot.position.set(0, arm.tracked ? 0.025 : -0.03, arm.tracked ? 0.07 : 0.125); else spot.position.set(-0.22, -0.2, -0.5);
         spot.scale.setScalar(beat);
         // The leaking arm throbs, so you look at it.
         if (arm) once('leakBuzz', () => pulse(hands.indexOf(arm), 0.6, 120), 1.1);

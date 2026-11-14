@@ -625,7 +625,7 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
       const b = new THREE.Mesh(new THREE.SphereGeometry(0.045, 10, 8), new THREE.MeshBasicMaterial({ color: 0x0a0a0a, toneMapped: false }));
       crack.add(b); beads.push(b);
     }
-    const puff = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.35, depthWrite: false });
+    const puff = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.22, depthWrite: false });
     for (let i = 0; i < 10; i++) { const v = new THREE.Mesh(new THREE.SphereGeometry(0.05, 8, 6), puff); crack.add(v); vapour.push(v); }
     crack.visible = false;
     scene.add(crack);
@@ -765,7 +765,7 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
         const u = (time - p.userData.born) / 0.7;
         if (u >= 1) { p.visible = false; continue; }
         p.position.addScaledVector(p.userData.dir, 0.012); p.position.y -= 0.004 * u; // off the face of the panel, then sinking: there is no air to hold it up
-        p.scale.setScalar(0.25 + u * 0.5); p.material.opacity = 0.55 * (1 - u);
+        p.scale.setScalar(0.05 + u * 0.1); p.material.opacity = 0.5 * (1 - u);
       }
 
       // Switchboard: seated plugs sit in their socket, loose ones hang underneath.
@@ -800,9 +800,10 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
         vapour.forEach((v, i) => {
           const u = (time * 1.3 + i / vapour.length) % 1;
           v.visible = i / vapour.length < open;
-          v.position.copy(crack.userData.centre).addScaledVector(crack.userData.normal, 0.05 + u * 0.9);
-          v.position.y += Math.sin(i * 2.4) * 0.08 * u; v.position.x += Math.cos(i * 1.7) * 0.07 * u;
-          v.scale.setScalar(0.5 + u * 2.2);
+          // A thin jet, half a metre long: enough to see where the air is going, not a cloud in the welder's face.
+          v.position.copy(crack.userData.centre).addScaledVector(crack.userData.normal, 0.03 + u * 0.5);
+          v.position.y += Math.sin(i * 2.4) * 0.05 * u + 0.12 * u * u; v.position.x += Math.cos(i * 1.7) * 0.04 * u;
+          v.scale.setScalar(0.25 + u * 0.9);
         });
       }
 

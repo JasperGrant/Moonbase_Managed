@@ -65,7 +65,7 @@ If the venue Wi-Fi blocks devices from seeing each other, use a phone hotspot.
 | | Controllers | Bare hands (hand tracking) | Laptop (testing) |
 | --- | --- | --- | --- |
 | Radio to Mission Ops, and wrist gauges | hold left trigger | hold your left hand up to your helmet | hold Tab |
-| Grab (tools off the rack and your belt, cable plugs, the rover wheel, the generator cord) | grip button | pinch | click it |
+| Grab (tools off the rack and your belt, cable plugs, the rover wheel, the generator cord) | grip button, with your hand on it | pinch, with your fingers on it | click it |
 | Use a tool | bring it to the work: the brush and patch kit work on contact, the welder lights when its tip is on the crack | same | click the work, hold to keep brushing or welding |
 | Point at something within arm's reach (a fallback for grabbing) | right trigger | | |
 | Go in or out of the habitat | point at the airlock hatch, pull trigger | point at the hatch, pinch and let go | click the hatch |
@@ -117,7 +117,25 @@ Tools hang in the locker beside the airlock. The belt carries 4 weight units, an
 | Space tire | 3 | Broken rover wheel. Used up when fitted; a new one reaches the locker 30 s later |
 | Backup generator | 3 | Nothing. One pull gives 25 s of power during a blackout, once per mission |
 
-Welder, brush and patch kit fill the belt exactly, so the tire or the generator always means leaving something behind. Grab a tool on the rack and it goes on your belt. Let go of a tool at the locker and it goes back; let go anywhere else and it snaps back to your belt, so nothing is ever lost on the ground.
+Welder, brush and patch kit fill the belt exactly, so the tire or the generator always means leaving something behind. Grab a tool on the rack and it is on your belt and in your hand, ready to use. Let go and it hangs on your belt. To put one back, take it off your belt and let go of it at the locker. A tool let go anywhere else snaps back to your belt, so nothing is ever lost on the ground.
+
+Nothing on the rack is below waist height, and the belt rides at your hips: it stays there when you bend over the rover's wheel, and only sinks when you crouch right down.
+
+### What your hands tell you (headset)
+
+| You see or feel | It means |
+| --- | --- |
+| A green ring, and a light tick in that hand | this is what the hand will grab if you close it now |
+| A red ring on a tool on the rack | too heavy for what is already on your belt. Close your hand and it shakes, buzzes twice, and stays |
+| A buzz as your hand closes | you have it |
+| A tick for each patch of dust, and a puff off the panel | brushed clean |
+| A steady buzz, a spark, and the point of the crack glowing redder | welding: stay on that point. A strong buzz and a bright bead: done, move along |
+| A white ring on a socket | the plug in your hand will go in there. Red: that socket is full |
+| The wheel, or the generator cord, buzzing harder as you pull | keep pulling: 30 cm for the wheel, 40 cm for the cord |
+| One arm throbbing, with a red spot on its cuff | that is the suit leak. Press the patch kit on the spot |
+| Impacts that sound dull and far off | you are under cover |
+
+Controllers get a suit glove so there is a hand to see. With bare hands the Quest's own tracked joints are drawn, and there is no buzz: the rings, the sounds and what you see carry it.
 
 ## What breaks
 
@@ -126,9 +144,9 @@ Welder, brush and patch kit fill the belt exactly, so the tire or the generator 
 | Dusty solar panels | Scientist: battery falling, **SOLAR IN** low | Sweep the brush over all three panels |
 | Tripped switchboard | Scientist: battery falling, SOLAR IN fine, **BOARD OUT** low, and a wiring diagram. The habitat's windows turn red | Go in through the airlock. The board is on the west wall of the hall. Push each loose cable into the socket with the right shape. No tool. A wrong socket sparks and costs 4 oxygen |
 | Broken rover wheel | Technician: the radar map turns to static | Pull the broken wheel off, push the space tire on |
-| Hull breach | Scientist: the **LEAK** lamp, and oxygen draining 3x | Find the hiss, which comes from a place on the habitat wall, and weld along the crack |
+| Hull breach | Scientist: the **LEAK** lamp, and oxygen draining 3x | Find the hiss: it comes from a place on the habitat wall, louder in the ear that is nearer and louder as you walk toward it. Weld along the crack, 0.4 s on each of its six points |
 | Suit leak | Scientist: the same LEAK lamp, the same 3x drain | The hiss is inside the helmet and does not move when you turn. Patch the red spot on your forearm |
-| Meteor shower | Technician: blips and a countdown on the radar, 15 s ahead, if the radar is working | Stand under the airlock canopy, go inside, or crouch beside the rover |
+| Meteor shower | Technician: blips and a countdown on the radar, 15 s ahead, if the radar is working | Stand under the airlock canopy, go inside, or crouch beside the rover. Crouching is measured against how tall you stand (below about two thirds), so it works for a child and for someone seated |
 
 And how it cascades, which is where the strategy is:
 
@@ -172,26 +190,33 @@ client/stations.js  the tools, the belt and every repair, each with a grab-it ve
 client/world.js     the Moon scene and everything that can be seen broken (shared with the rover camera)
 client/console.*    Mission Ops, Technician, Scientist and all-in-one
 client/voice.js     push-to-talk radio with 1960s distortion and Quindar beeps, the leak hiss, and the sound effects
+test/fakexr.js      a pretend VR headset for tests: head, controllers with haptics, tracked hands
+test/vr.mjs         every repair done by hand in that headset (npm run vr)
 ```
 
 **Adding a fault** takes four edits: its name and tool in `FAULTS` (`config.js`); its data, its repair and what each role sees in `server/game.js` (`break`, `act`, `scene`, `view`); how it looks in `world.js` (`apply`); and how hands fix it in `client/stations.js`. To change what happens in the demo, edit `SCRIPTS.demo` in `config.js`.
 
 ## What has and has not been tested
 
-![The base: tool locker and airlock canopy](docs/astronaut-habitat.png)
+The pictures below are the left eye of the pretend headset the tests use (see "What has and has not been tested"), with controllers in the hands.
+
+![The base: tool locker, airlock canopy and the habitat](docs/astronaut-habitat.png)
 
 | | |
 | --- | --- |
-| ![The tool locker](docs/astronaut-locker.png) | ![Dusty solar panels, one half brushed](docs/astronaut-solar.png) |
-| ![The tripped switchboard](docs/astronaut-switchboard.png) | ![A hull breach, two points welded, and the outline of the tool you are missing](docs/astronaut-hull.png) |
+| ![The tool locker: a green ring on the welder, which this hand would grab](docs/astronaut-locker.png) | ![The belt, looking down: brush, patch kit, welder](docs/astronaut-belt.png) |
+| ![Brushing a solar panel: the cell under the brush is clean](docs/astronaut-solar.png) | ![Welding a hull breach: two points beaded, the next one heating](docs/astronaut-hull.png) |
+| ![The switchboard, inside on red backup lights: a plug in the hand, and the socket it is about to go into ringed in white](docs/astronaut-switchboard.png) | ![A suit leak: the red spot on the cuff of the left glove](docs/astronaut-forearm.png) |
 
 ![Mission control: belt and locker, radar with a meteor warning, power gauges and the wiring diagram](docs/mission-control.png)
 
 Everything is procedural, nothing is downloaded: cratered regolith with a generated grain texture and vertex-colour variation, boulder fields from noise-displaced rocks (none inside the play area, so you never walk through one), a Milky Way of 5,000 stars with their own sizes and colours, the sun as a disc and glow along the light direction, and an Earth with continents, drifting clouds, a sunlit atmosphere rim and a phase from the same sun that lights the ground. Filmic tone mapping and an environment map make the gold foil, visors and steel reflect something. The habitat has a ribbed dome, insulated skirt, hatch with porthole, floodlight, radiators and a dish aimed at Earth; the solar array, switchboard, tool locker, rover and a lander with its flag on the horizon follow suit. The scene is about 260k triangles, which is within a Quest 2's budget. It has five lights and nothing in the repairs adds one, because every light costs the headset on every pixel. The look was tuned from desktop screenshots in `docs/`.
 
-Tested two ways. `npm test` checks the rules in plain Node: the belt's weight limit, every repair refused without its tool or from too far away, the battery draining to a blackout and recovering, voice dropped in both directions during a blackout, the radar and the meteor warning lost with the rover wheel, cover, the meteor hit and the leak it starts, the generator, exactly what each seat is sent, the lobby, and the demo mission played well (a win) and not at all (a loss). `npm run smoke` opens Mission Control and the astronaut in headless Chromium against the real three.js r180 build, readies up, and plays the whole demo mission to a clean win the way a laptop player would: stand somewhere, look at the thing, click. Every repair goes through the same raycast as a mouse click, the switchboard is reached through the airlock, and the socket for each cable is read off the Scientist's wiring diagram on the other page. It then drives the hand-tracking gestures by firing the events a pinch fires (zoom in either pinch order, turn, teleport on release), checks the visor scope's extra pass, the wrist gauges with no microphone (icons only, nothing else fixed to the view), the hall's outage lighting, and, in a second browser with a pretend microphone, the radio both ways. It needs `npm i -D playwright && npx playwright install chromium` once `npm run smoke:shots` also saves screenshots in `test/shots/`. It passes against the laptop server and against the Cloudflare worker (`npm run dev:cf`, then `SMOKE_URL=http://localhost:8787 npm run smoke`).
+Tested three ways. `npm test` checks the rules in plain Node: the belt's weight limit, every repair refused without its tool or from too far away, the battery draining to a blackout and recovering, voice dropped in both directions during a blackout, the radar and the meteor warning lost with the rover wheel, cover, the meteor hit and the leak it starts, the generator, exactly what each seat is sent, the lobby, and the demo mission played well (a win) and not at all (a loss). `npm run smoke` opens Mission Control and the astronaut in headless Chromium against the real three.js r180 build, readies up, and plays the whole demo mission to a clean win the way a laptop player would: stand somewhere, look at the thing, click. Every repair goes through the same raycast as a mouse click, the switchboard is reached through the airlock, and the socket for each cable is read off the Scientist's wiring diagram on the other page. It then drives the hand-tracking gestures by firing the events a pinch fires (zoom in either pinch order, turn, teleport on release), checks the visor scope's extra pass, the wrist gauges with no microphone (icons only, nothing else fixed to the view), the hall's outage lighting, and, in a second browser with a pretend microphone, the radio both ways. It needs `npm i -D playwright && npx playwright install chromium` once `npm run smoke:shots` also saves screenshots in `test/shots/`. It passes against the laptop server and against the Cloudflare worker (`npm run dev:cf`, then `SMOKE_URL=http://localhost:8787 npm run smoke`).
 
-**Not yet seen on a headset:** everything you do with your hands. Grabbing tools off the rack and the belt, sweeping the brush, holding the welder on the crack, pushing plugs into sockets, pulling the wheel, the generator cord, patching your forearm, the hiss in your ears, crouching for cover, where the belt and the HUD sit, and how the scene performs on the Quest's GPU. None of that can be run without a headset, so it has only been read, not played. The distances and sizes to tune first are at the top of `client/stations.js` (`GRAB`, `BELT_R`, `BELT_SLOT`, `WELD_RANGE`, `WELD_DWELL`). If a gesture misbehaves on the day, pointing the right trigger at the thing from within 1.6 m does the same job. Start there, with the Quest plugged in over USB or on the deployed URL. If it stutters, the first things to turn down are in `client/world.js`: the terrain segment count (`SEG`), the boulder counts in the three `scatter` calls, and the shadow map size.
+`npm run vr` puts the astronaut's page in a pretend headset (`test/fakexr.js`, a stand-in for the browser's WebXR: a head, two controllers with grip, trigger and haptics, or two tracked hands with a pinch) and does every repair by hand, the way a player in a Quest would: reach for the tool, close the hand, bring it to the work. With controllers it takes tools off the rack and the belt with either hand, is refused the tire on a full belt, sweeps the brush over all three panels (and checks that waving it 35 cm off the panel does nothing), welds the crack point by point (and that leaving a point early does not weld it), goes in through the airlock and pushes plugs into a full socket, a wrong one and the right ones, pulls the wheel and fits the tire, pulls the generator cord in a blackout, patches each forearm with the other hand, listens to the hiss in each ear with the crack on the left, on the right, near and far, and stands, crouches and hides through meteor showers. It repeats the grabbing with bare hands and checks that a pinch on a tool grabs while two empty-handed pinches still zoom. It also measures how far every action makes the arm reach, and fails if any needs more than 0.8 m: that check is why the tire and the generator were moved up the rack and why the belt stays at the hips. The last step draws real frames for both eyes. `npm run vr:shots` saves those as pictures in `test/shots/`.
+
+**What that leaves untested: a real headset.** The pretend one proves the code runs and the distances are reachable. It cannot say whether the gestures feel right, whether the belt sits where a hand expects it, whether the haptics are too strong, how real hand tracking behaves when a pinch is half-recognised, or how the scene performs on the Quest's GPU. Try those first on the day. Every distance is a named constant at the top of `client/stations.js` (`GRAB`, `GRAB_RACK`, `SOCKET_SNAP`, `WHEEL_PULL`, `CORD_PULL`, `TIRE_FIT`, `PATCH_RANGE`, `BELT_AT`, `WELD_RANGE`, `WELD_DWELL`). If a gesture misbehaves, pointing the right trigger at the thing from within 1.6 m does the same job. If it stutters, the first things to turn down are in `client/world.js`: the terrain segment count (`SEG`), the boulder counts in the three `scatter` calls, and the shadow map size.
 
 ## Science notes for the pitch
 

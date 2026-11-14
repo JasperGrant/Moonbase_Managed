@@ -45,7 +45,7 @@ There are five faults and one event. Each fault has a symptom that mission contr
 
 ### Power faults
 
-Any active power fault drains the **battery**. It falls from 100% to 0% in 45 s. With no power fault it recharges fully in 20 s. At 0% the base blacks out (see "Cascades").
+Any active power fault drains the **battery**. It falls from 100% to 0% in 60 s (45 s in the first draft; lengthened when the switchboard moved indoors). With no power fault it recharges fully in 20 s. At 0% the base blacks out (see "Cascades").
 
 The Scientist sees the battery falling, plus two gauges: **solar input** and **board output**. Reading these two gauges is how the team finds the cause.
 
@@ -57,7 +57,7 @@ The Scientist sees the battery falling, plus two gauges: **solar input** and **b
 
 **2. Tripped switchboard.** Solar input is fine but board output is low.
 
-- Where: a switchboard box on the habitat's outer wall. Three cables have popped out and hang loose. Red lamp on the box.
+- Where: a switchboard box inside the habitat, on the west wall of the hall, reached through the airlock (first drafted on the outer wall; moved when the hall was built). Three cables have popped out and hang loose. Red lamp on the box, and the hall drops to its red backup lights.
 - Tool: none, just hands.
 - Fix: grab each cable plug and push it into the right socket. Cables are coloured, sockets are marked with shapes (triangle, circle, square, diamond). Only the Scientist sees the wiring diagram, which is a picture of coloured lines running to shapes. The pairing is random each time. A wrong socket sparks, spits the plug out and costs 4 oxygen. Fixed when all three are seated.
 
