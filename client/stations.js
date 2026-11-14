@@ -1,178 +1,362 @@
-// The four minigame panels the astronaut works at. Each one only draws what the server
-// says is physically there, and reports clicks back with act(issueId, action).
-// To add a minigame: add a builder here, its data in server/game.js, its rule in shared/rules.js.
-import { ISSUES } from '/shared/config.js';
+// The astronaut's hands: the tools, the belt, and every repair.
+//
+// There are two ways to do each thing, and both end in the same message to the server:
+//   - physical (VR): grab a tool off the belt and bring it to the work. Sweep the brush over the
+//     dust, hold the welder on the crack, push a plug into a socket, pull the wheel off its hub.
+//   - pointing (mouse, or a VR trigger at arm's length): click the thing. This is the fallback
+//     that lets the game be tested, and played, without a headset.
+// The server decides what counted (server/game.js). Nothing here changes the game by itself.
+import { FAULTS } from '/shared/config.js';
+import { fits } from '/shared/rules.js';
+import { drawTool } from '/shared/icons.js';
 
-const WIRE_HEX = { red: 0xd63b3b, blue: 0x3b6fd6, yellow: 0xe8c93a, white: 0xf2f2f2 };
-const ROCK_HEX = { grey: 0x8d8d8d, red: 0xb5462f, yellow: 0xd9b84a, black: 0x1c1c1c, green: 0x3f9b52 };
+const GRAB = 0.24;          // metres: how close a hand must be to grab something
+const BELT_R = 0.3;         // metres from the body to a belt slot
+const BELT_SLOT = { gen: -1.3, brush: -0.65, patch: 0, welder: 0.65, tire: 1.3 }; // radians round the waist, left to right
+const BELT_SCALE = { brush: 0.8, patch: 1, welder: 0.8, tire: 0.36, gen: 0.42 };
+const RACK_TURN = { tire: Math.PI / 2 }; // the tire hangs flat against the back of the rack
+const WELD_DWELL = 0.4;     // seconds the tip must stay on one point of the crack
+const WELD_RANGE = 0.12;
 
-export function buildPanels(THREE, world, act, sfx = () => {}) {
-  const hits = [];       // every clickable mesh
-  const panels = {};
-  const flying = [];     // rocks in flight
+export function buildFixtures(THREE, world, { rig, camera, send, sfx = () => {} }) {
+  const F = world.fixtures;
+  const V = () => new THREE.Vector3();
+  const a = V(), b = V(), c = V();
+  let st = { belt: [], locker: [], scene: null, suit: false };
+  const clock = () => performance.now() / 1000; // not the frame time: a click can land between two slow frames
+  const hits = [];           // every mesh that can be pointed at
+  const held = [null, null]; // what each hand has hold of
+  const sent = new Map();    // repairs already reported, so one sweep does not send a cell fifty times
+  const once = (key, fn, every = 1) => { const t = clock(); if ((sent.get(key) || -9) + every > t) return false; sent.set(key, t); fn(); return true; };
+  let refusedAt = -9, selectedPlug = -1, plugCooldown = 0;
 
-  const boardMat = new THREE.MeshStandardMaterial({ color: 0x2b3138, roughness: 0.55, metalness: 0.4 });
-  const ghost = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false });
+  const ghost = new THREE.MeshBasicMaterial({ visible: false }); // never drawn, but the raycaster still finds it
+  const mat = (color, o = {}) => new THREE.MeshStandardMaterial({ color, roughness: 0.6, metalness: 0.2, ...o });
+  const add = (parent, geo, material, x = 0, y = 0, z = 0) => { const m = new THREE.Mesh(geo, material); m.position.set(x, y, z); parent.add(m); return m; };
+  // A mesh you can point at. `hold` means it keeps working while the trigger or mouse stays down.
+  const target = (mesh, enabled, click, hold = false) => { Object.assign(mesh.userData, { enabled, click, hold }); hits.push(mesh); return mesh; };
 
-  // A small screen you can draw text on. It only redraws when `key` changes.
-  function makeScreen(w, h, pw, ph) {
-    const canvas = document.createElement('canvas');
-    canvas.width = pw; canvas.height = ph;
-    const ctx = canvas.getContext('2d');
-    const tex = new THREE.CanvasTexture(canvas);
-    tex.colorSpace = THREE.SRGBColorSpace;
-    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshBasicMaterial({ map: tex, toneMapped: false }));
-    let last = null;
-    return { mesh, draw(key, fn) { if (key === last) return; last = key; ctx.fillStyle = '#041008'; ctx.fillRect(0, 0, pw, ph); fn(ctx, pw, ph); tex.needsUpdate = true; } };
-  }
-  function lines(ctx, W, rows) { // rows: [text, size, colour]
-    ctx.textAlign = 'center'; ctx.textBaseline = 'top';
-    let y = 12;
-    for (const [text, size, colour] of rows) { ctx.font = `bold ${size}px monospace`; ctx.fillStyle = colour || '#58e08a'; ctx.fillText(text, W / 2, y); y += size + 10; }
-  }
-  function clickable(mesh, enabled, click) { mesh.userData = { enabled, click }; hits.push(mesh); return mesh; }
-
-  function makeButton(label, w, h, colour = '#39424c') {
-    const c = document.createElement('canvas'); c.width = 128; c.height = Math.round(128 * h / w);
-    const g = c.getContext('2d');
-    g.fillStyle = colour; g.fillRect(0, 0, c.width, c.height);
-    g.strokeStyle = '#0b0d10'; g.lineWidth = 6; g.strokeRect(0, 0, c.width, c.height);
-    g.fillStyle = '#fff'; g.font = `bold ${Math.round(c.height * 0.55)}px monospace`; g.textAlign = 'center'; g.textBaseline = 'middle';
-    g.fillText(label, c.width / 2, c.height / 2 + 2);
-    const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace;
-    return new THREE.Mesh(new THREE.BoxGeometry(w, h, 0.04), new THREE.MeshBasicMaterial({ map: tex, toneMapped: false }));
-  }
-
-  // Common backboard with a screen on top. The work area is below the screen.
-  function board(key) {
-    const g = new THREE.Group();
-    world.stations[key].add(g);
-    const back = new THREE.Mesh(new THREE.BoxGeometry(1.4, 1.3, 0.08), boardMat);
-    back.position.set(0, 1.3, 0); back.castShadow = true; g.add(back);
-    for (const x of [-0.6, 0.6]) { const leg = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.7, 0.06), boardMat); leg.position.set(x, 0.35, 0); g.add(leg); }
-    const screen = makeScreen(1.25, 0.42, 640, 216);
-    screen.mesh.position.set(0, 1.7, 0.045); g.add(screen.mesh);
-    const p = { g, screen, issue: null };
-    panels[key] = p;
-    return p;
-  }
-  const idle = (p, name) => p.screen.draw('idle', (c, W) => lines(c, W, [[name, 34, '#7d909c'], ['NOMINAL', 64, '#58e08a']]));
-  const secs = is => Math.ceil(is.left);
-
-  // ---- Wires: fuel-ox valve purge ----
+  // ---------- the five tools. Each is modelled in the hand: local -z points away from you. ----------
+  const tools = {};
+  const orange = 0xe8742a, steel = 0x9aa0a8, dark = 0x23272c;
   {
-    const p = board('wires');
-    const wires = [], pads = [];
-    for (let i = 0; i < 5; i++) {
-      const w = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.022, 0.5, 8), new THREE.MeshBasicMaterial({ color: 0xffffff, toneMapped: false }));
-      w.position.z = 0.07; p.g.add(w); wires.push(w);
-      const pad = clickable(new THREE.Mesh(new THREE.BoxGeometry(0.17, 0.56, 0.08), ghost), () => !!p.issue && i < p.issue.colors.length && !p.issue.cut.includes(i),
-        () => act(p.issue.id, { cut: i }));
-      pad.position.z = 0.08; p.g.add(pad); pads.push(pad);
+    const g = new THREE.Group();                                   // brush
+    add(g, new THREE.CylinderGeometry(0.018, 0.018, 0.24, 8), mat(orange), 0, 0, -0.08).rotation.x = Math.PI / 2;
+    add(g, new THREE.BoxGeometry(0.2, 0.035, 0.05), mat(dark), 0, 0, -0.22);
+    add(g, new THREE.BoxGeometry(0.19, 0.03, 0.07), mat(0xe9dfc4, { roughness: 1 }), 0, 0, -0.28);
+    g.userData = { tip: new THREE.Vector3(0, 0, -0.3), hit: [0.26, 0.12, 0.44, -0.12] };
+    tools.brush = g;
+  }
+  {
+    const g = new THREE.Group();                                   // patch kit
+    add(g, new THREE.BoxGeometry(0.15, 0.15, 0.02), mat(orange), 0, 0, -0.06);
+    add(g, new THREE.BoxGeometry(0.1, 0.03, 0.024), mat(0xffffff), 0, 0, -0.06);
+    add(g, new THREE.BoxGeometry(0.03, 0.1, 0.024), mat(0xffffff), 0, 0, -0.06);
+    g.userData = { tip: new THREE.Vector3(0, 0, -0.07), hit: [0.2, 0.2, 0.12, -0.06] };
+    tools.patch = g;
+  }
+  {
+    const g = new THREE.Group();                                   // welder
+    add(g, new THREE.BoxGeometry(0.045, 0.14, 0.05), mat(dark), 0, -0.06, 0);
+    add(g, new THREE.CylinderGeometry(0.03, 0.03, 0.26, 10), mat(orange), 0, 0.02, -0.1).rotation.x = Math.PI / 2;
+    add(g, new THREE.ConeGeometry(0.025, 0.08, 10), mat(steel, { metalness: 0.9 }), 0, 0.02, -0.27).rotation.x = -Math.PI / 2;
+    const spark = add(g, new THREE.SphereGeometry(0.035, 8, 6), new THREE.MeshBasicMaterial({ color: 0xfff2c0, toneMapped: false }), 0, 0.02, -0.32);
+    spark.visible = false; // no light of its own: every extra light costs the Quest on every pixel
+    g.userData = { tip: new THREE.Vector3(0, 0.02, -0.32), hit: [0.12, 0.24, 0.4, -0.12], spark };
+    tools.welder = g;
+  }
+  {
+    const g = new THREE.Group();                                   // space tire: the rover's wheel, new
+    add(g, new THREE.TorusGeometry(0.32, 0.09, 10, 24), mat(dark, { roughness: 0.9 })).rotation.y = Math.PI / 2;
+    for (let i = 0; i < 6; i++) {
+      const sp = add(g, new THREE.CylinderGeometry(0.012, 0.012, 0.6, 6), mat(steel, { metalness: 0.9 }));
+      sp.rotation.x = i * Math.PI / 6;
     }
-    p.sync = is => {
-      p.issue = is;
-      if (!is) { wires.forEach(w => (w.visible = false)); return idle(p, 'FUEL DEPOT'); }
-      const n = is.colors.length;
-      wires.forEach((w, i) => {
-        w.visible = i < n; if (!w.visible) return;
-        const x = (i - (n - 1) / 2) * 0.22, cut = is.cut.includes(i);
-        w.material.color.setHex(WIRE_HEX[is.colors[i]]);
-        w.scale.y = cut ? 0.3 : 1;
-        w.position.set(x, cut ? 1.33 : 1.15, 0.07);
-        pads[i].position.set(x, 1.15, 0.08);
-      });
-      p.screen.draw(`${is.id}|${secs(is)}`, (c, W) => lines(c, W, [[ISSUES.wires.title.toUpperCase(), 34, '#ffb84a'], [`S/N ${is.serial}`, 60, '#fff'], [`PULL ONE WIRE   ${secs(is)} s`, 34, '#ff5c5c']]));
-    };
+    add(g, new THREE.TorusGeometry(0.32, 0.02, 6, 24), mat(orange)).rotation.y = Math.PI / 2;
+    g.userData = { tip: new THREE.Vector3(0, 0, 0), hit: [0.3, 0.86, 0.86, 0] };
+    tools.tire = g;
+  }
+  {
+    const g = new THREE.Group();                                   // backup generator, with its pull cord
+    add(g, new THREE.BoxGeometry(0.42, 0.3, 0.3), mat(0xd8a62c, { metalness: 0.5 }));
+    add(g, new THREE.BoxGeometry(0.46, 0.04, 0.34), mat(dark), 0, -0.17, 0);
+    add(g, new THREE.CylinderGeometry(0.05, 0.05, 0.06, 10), mat(dark), -0.1, 0.18, 0);
+    add(g, new THREE.TorusGeometry(0.05, 0.014, 6, 14), mat(0xd23a2a), 0.12, 0.2, 0);
+    g.userData = { tip: new THREE.Vector3(0, 0, 0), hit: [0.5, 0.45, 0.4, 0] };
+    tools.gen = g;
+  }
+  const beltGroup = new THREE.Group();
+  rig.add(beltGroup);
+  const ghostEdge = new THREE.LineBasicMaterial({ color: 0x58e08a });
+  for (const id in tools) {
+    const g = tools[id], [w, h, d, z] = g.userData.hit;
+    g.userData.id = id;
+    // One invisible box per tool to point at: on the rack it takes the tool, on the belt it is used by
+    // the generator only (pointing at it pulls the cord).
+    const box = add(g, new THREE.BoxGeometry(w, h, d), ghost, 0, 0, z);
+    target(box, () => st.locker.includes(id) || (id === 'gen' && st.belt.includes('gen')),
+      () => { if (st.locker.includes(id)) take(id); else pullCord(); });
+    // And an outline in its place on the rack while it is on the belt: point at it to put the tool back.
+    const slot = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(w, h, d)), ghostEdge);
+    slot.position.copy(F.lockerSlots[id]); slot.position.z += z;
+    slot.rotation.y = RACK_TURN[id] || 0;
+    F.locker.add(slot);
+    const back = add(F.locker, new THREE.BoxGeometry(w, h, d), ghost, slot.position.x, slot.position.y, slot.position.z);
+    back.rotation.y = slot.rotation.y;
+    target(back, () => st.belt.includes(id), () => stow(id));
+    g.userData.slot = slot;
   }
 
-  // ---- Frequency: comms dish calibration ----
-  {
-    const p = board('freq');
-    [['-10', -10, -0.48], ['-1', -1, -0.16], ['+1', 1, 0.16], ['+10', 10, 0.48]].forEach(([label, d, x]) => {
-      const b = clickable(makeButton(label, 0.26, 0.2), () => !!p.issue, () => act(p.issue.id, { d }));
-      b.position.set(x, 1.28, 0.06); p.g.add(b);
-    });
-    const lock = clickable(makeButton('LOCK', 0.6, 0.22, '#8a2b2b'), () => !!p.issue, () => act(p.issue.id, { lock: true }));
-    lock.position.set(0, 0.96, 0.06); p.g.add(lock);
-    p.sync = (is, t) => {
-      p.issue = is;
-      if (!is) return idle(p, 'COMMS DISH');
-      // No number on purpose: the astronaut sees a wave, the Technician sees the channel.
-      p.screen.draw(`${is.id}|${is.wave}|${Math.floor(t * 8)}`, (c, W, H) => {
-        lines(c, W, [[`${ISSUES.freq.title.toUpperCase()}   ${secs(is)} s`, 30, '#ffb84a']]);
-        c.strokeStyle = '#58e08a'; c.lineWidth = 4; c.beginPath();
-        for (let x = 0; x <= W; x += 4) { const y = H * 0.62 + Math.sin(x / W * (2 + is.wave / 5) * Math.PI * 2 + t * 6) * H * 0.26; x ? c.lineTo(x, y) : c.moveTo(x, y); }
-        c.stroke();
-      });
-    };
+  function take(id) {
+    if (!st.locker.includes(id)) return;
+    if (!fits(st.belt, id)) { refusedAt = clock(); sfx('refuse'); return; } // too heavy: it stays on the rack
+    sfx('click');
+    send({ take: id });
+  }
+  function stow(id) { sfx('click'); send({ stow: id }); }
+  function pullCord() { if (st.belt.includes('gen')) once('gen', () => send({ gen: true }), 2); }
+  const need = type => { const t = FAULTS[type].tool; return !t || st.belt.includes(t); };
+
+  // ---------- things to point at on the fixtures themselves ----------
+  F.dustCells.forEach((cell, i) => target(cell, () => !!st.scene?.dust?.[i], () => brushCell(i), true));
+  function brushCell(i) {
+    if (!need('dust') || !st.scene?.dust?.[i]) return;
+    once('dust' + i, () => { send({ fix: 'dust', cell: i }); once('brushSfx', () => sfx('brush'), 0.09); });
   }
 
-  // ---- Patch: airlock software fault ----
-  {
-    const p = board('patch');
-    '123456789'.split('').concat('0').forEach((digit, i) => {
-      const col = digit === '0' ? 1 : i % 3, row = digit === '0' ? 3 : Math.floor(i / 3);
-      const b = clickable(makeButton(digit, 0.17, 0.17), () => !!p.issue && p.issue.stage === 1, () => act(p.issue.id, { key: digit }));
-      b.position.set((col - 1) * 0.2, 1.36 - row * 0.2, 0.06); p.g.add(b);
-    });
-    p.sync = is => {
-      p.issue = is;
-      if (!is) return idle(p, 'AIRLOCK TERMINAL');
-      const entry = (is.entered + '___').slice(0, 3).split('').join(' ');
-      p.screen.draw(`${is.id}|${is.stage}|${is.entered}|${secs(is)}`, (c, W) => lines(c, W, [
-        [`FAULT CODE   ${secs(is)} s`, 30, '#ffb84a'], [is.err.split('').join(' '), 72, '#fff'],
-        [is.stage === 0 ? 'READ CODE TO MISSION OPS' : `ENTER KEY:  ${entry}`, 34, is.stage === 0 ? '#ff5c5c' : '#58e08a']]));
-    };
+  const plugLoose = i => !!st.scene?.board && !st.scene.board[i].seated;
+  F.plugs.forEach((plug, i) => {
+    const box = add(plug, new THREE.BoxGeometry(0.13, 0.13, 0.2), ghost);
+    target(box, () => plugLoose(i), () => { selectedPlug = selectedPlug === i ? -1 : i; sfx('click'); });
+  });
+  F.sockets.forEach((p, j) => {
+    const disc = add(F.board, new THREE.BoxGeometry(0.16, 0.16, 0.06), ghost, p.x, p.y, p.z - 0.02);
+    target(disc, () => selectedPlug >= 0 && plugLoose(selectedPlug), () => { tryPlug(selectedPlug, j); selectedPlug = -1; });
+  });
+  function tryPlug(cable, socket) {
+    if (!plugLoose(cable) || st.scene.board.some(x => x.seated && x.socket === socket)) return;
+    sfx('click');
+    send({ fix: 'board', cable, socket });
   }
 
-  // ---- Drill: clear the hopper ----
-  {
-    const p = board('drill');
-    const tray = new THREE.Mesh(new THREE.BoxGeometry(1.3, 0.06, 0.5), boardMat);
-    tray.position.set(0, 1.0, 0.28); p.g.add(tray);
-    const rocks = [];
-    for (let i = 0; i < 5; i++) {
-      const r = clickable(new THREE.Mesh(new THREE.IcosahedronGeometry(0.1, 0), new THREE.MeshStandardMaterial({ roughness: 1, flatShading: true })),
-        () => !!p.issue && !p.issue.rocks[i].gone && !r.userData.fly, () => act(p.issue.id, { rock: i }));
-      r.userData.home = new THREE.Vector3((i - 2) * 0.24, 1.13, 0.28);
-      p.g.add(r); rocks.push(r);
+  const wheelHit = add(F.wheel, new THREE.SphereGeometry(0.45, 8, 6), ghost);
+  target(wheelHit, () => st.scene?.wheel === 1, () => pullWheel());
+  const hubHit = add(F.hub, new THREE.SphereGeometry(0.3, 8, 6), ghost);
+  target(hubHit, () => st.scene?.wheel === 2, () => fitTire());
+  function pullWheel() { once('pull', () => { sfx('click'); send({ fix: 'wheel', pull: true }); }); }
+  function fitTire() { if (need('wheel')) once('fit', () => { sfx('click'); send({ fix: 'wheel', fit: true }); }); }
+
+  const weldHits = F.crackPts.map((p, i) => {
+    const m = add(world.fixtures.crack, new THREE.SphereGeometry(0.09, 8, 6), ghost);
+    return target(m, () => !!st.scene?.hull && !st.scene.hull.welded[i], () => weldPoint(i), true);
+  });
+  function weldPoint(i) {
+    if (!need('hull') || !st.scene?.hull || st.scene.hull.welded[i]) return;
+    once('weld' + i, () => { send({ fix: 'hull', point: i }); sfx('weld'); });
+  }
+  function patchSuit() { if (st.suit && st.belt.includes('patch')) once('patch', () => { sfx('click'); send({ fix: 'suit' }); }); }
+
+  // ---------- the suit leak: a pulsing spot on your forearm ----------
+  const spot = new THREE.Mesh(new THREE.SphereGeometry(0.035, 12, 8), new THREE.MeshBasicMaterial({ color: 0xff2a2a, toneMapped: false }));
+  spot.visible = false;
+  const spotHit = add(spot, new THREE.SphereGeometry(0.1, 8, 6), ghost);
+  target(spotHit, () => st.suit && spot.visible, () => patchSuit());
+
+  // ---------- "you need this tool": its outline floats over a fixture you walked up to without it ----------
+  const hints = {};
+  for (const [type, f] of Object.entries(FAULTS)) {
+    if (!f.tool || type === 'suit') continue;
+    const cv = document.createElement('canvas'); cv.width = cv.height = 128;
+    const g = cv.getContext('2d');
+    g.fillStyle = 'rgba(8,12,14,0.8)'; g.beginPath(); g.arc(64, 64, 62, 0, 7); g.fill();
+    g.strokeStyle = '#ffb84a'; g.lineWidth = 5; g.beginPath(); g.arc(64, 64, 59, 0, 7); g.stroke();
+    drawTool(g, f.tool, 64, 64, 84, '#ffb84a');
+    const tex = new THREE.CanvasTexture(cv); tex.colorSpace = THREE.SRGBColorSpace;
+    const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthTest: false, toneMapped: false }));
+    s.scale.setScalar(0.42); s.visible = false; s.renderOrder = 9;
+    world.rover.parent.add(s);
+    hints[type] = s;
+  }
+
+  // ---------- helpers for the physical path ----------
+  const worldPos = (obj, out) => obj.getWorldPosition(out);
+  const lockerPos = () => { F.locker.getWorldPosition(a); a.y = 1.2; return a; };
+  const atLocker = p => p.distanceTo(lockerPos()) < 1.3;
+  const headXZ = V();
+
+  // What could this hand grab right now? Nearest thing wins.
+  function nearest(p) {
+    let best = null, bestD = Infinity;
+    const offer = (d, limit, what) => { if (d < limit && d < bestD) { bestD = d; best = what; } };
+    for (const id in tools) {
+      const g = tools[id], big = id === 'tire' || id === 'gen';
+      if (st.locker.includes(id)) offer(worldPos(g, b).distanceTo(p), big ? 0.5 : GRAB + 0.06, { kind: 'rack', id });
+      else if (st.belt.includes(id) && !held.some(h => h?.id === id)) offer(worldPos(g, b).distanceTo(p), GRAB, id === 'gen' ? { kind: 'cord', start: p.clone() } : { kind: 'tool', id });
     }
-    let shownId = null;
-    p.sync = is => {
-      p.issue = is;
-      if (!is) { rocks.forEach(r => { if (!r.userData.fly) r.visible = false; }); shownId = null; return idle(p, 'DRILL RIG'); }
-      rocks.forEach((r, i) => {
-        const rock = is.rocks[i];
-        if (shownId !== is.id) { r.userData.fly = null; r.position.copy(r.userData.home); r.rotation.set(i, i * 2, 0); r.material.color.setHex(ROCK_HEX[rock.color]); r.visible = !rock.gone; }
-        else if (rock.gone && r.visible && !r.userData.fly) { // just pulled: toss it, slowly, in 1/6 g
-          r.userData.fly = { v: new THREE.Vector3((Math.random() - 0.5) * 1.5, 2.2, 1 + Math.random()), age: 0 };
-          flying.push(r);
+    F.plugs.forEach((plug, i) => { if (plugLoose(i)) offer(worldPos(plug, b).distanceTo(p), 0.16, { kind: 'plug', i }); });
+    if (st.scene?.wheel === 1) offer(worldPos(F.wheel, b).distanceTo(p), 0.5, { kind: 'wheel', start: p.clone() });
+    return best;
+  }
+
+  const api = {
+    tools,
+    get refusedAt() { return refusedAt; },
+    // Meshes that can be pointed at right now.
+    targets: () => hits.filter(m => m.userData.enabled()),
+    click(mesh) { mesh.userData.click(); },
+
+    // Desktop keys for the two things you cannot point at.
+    patchSuit, pullCord,
+
+    // A hand closed (grip button, or a pinch with bare hands) at world point p. True if it got something.
+    grab(i, p) {
+      const what = nearest(p);
+      if (!what) return false;
+      if (what.kind === 'rack') { take(what.id); return true; }
+      held[i] = what;
+      if (what.kind === 'plug') { F.plugs[what.i].userData.held = true; selectedPlug = -1; }
+      if (what.kind === 'wheel') F.wheel.userData.held = true;
+      sfx('click');
+      return true;
+    },
+    // The hand opened. A tool let go at the locker goes back on the rack; anywhere else it returns to the belt.
+    release(i, p) {
+      const h = held[i];
+      held[i] = null;
+      if (!h) return;
+      if (h.kind === 'tool' && atLocker(p)) stow(h.id);
+      if (h.kind === 'plug') F.plugs[h.i].userData.held = false;
+      if (h.kind === 'wheel') F.wheel.userData.held = false;
+    },
+    holding: i => held[i],
+
+    // The server's latest word on what exists.
+    sync(s) {
+      st = s;
+      held.forEach((h, i) => { // you cannot hold what is no longer on the belt, or work what is already fixed
+        if (h?.kind === 'tool' && !s.belt.includes(h.id)) held[i] = null;
+        if (h?.kind === 'plug' && !plugLoose(h.i)) { F.plugs[h.i].userData.held = false; held[i] = null; }
+        if (h?.kind === 'wheel' && s.scene?.wheel !== 1) { F.wheel.userData.held = false; held[i] = null; }
+        if (h?.kind === 'cord' && !s.belt.includes('gen')) held[i] = null;
+      });
+      if (selectedPlug >= 0 && !plugLoose(selectedPlug)) selectedPlug = -1;
+    },
+
+    // Every frame. hands: [{ obj, point, side }] for the two controllers (obj is where a held tool is
+    // drawn, point is where the fingers are); empty on a laptop.
+    update(dt, now, hands, vr) {
+
+      // The belt rides at the waist and turns with the body, lazily, so it stays put while you look around.
+      camera.getWorldPosition(headXZ);
+      rig.worldToLocal(a.copy(headXZ));
+      beltGroup.position.set(a.x, Math.max(0.35, a.y - 0.62), a.z);
+      const yaw = new THREE.Euler().setFromQuaternion(camera.quaternion, 'YXZ').y;
+      let dy = yaw - beltGroup.rotation.y; dy = Math.atan2(Math.sin(dy), Math.cos(dy));
+      if (Math.abs(dy) > 0.6) beltGroup.rotation.y += dy - Math.sign(dy) * 0.6;
+
+      // Put each tool where it is: on the rack, on the belt, or in a hand.
+      for (const id in tools) {
+        const g = tools[id];
+        const hand = held.findIndex(h => h?.kind === 'tool' && h.id === id);
+        const onRack = st.locker.includes(id), onBelt = st.belt.includes(id);
+        g.visible = onRack || onBelt;
+        g.userData.slot.visible = onBelt;
+        if (!g.visible) { if (g.parent) g.parent.remove(g); continue; }
+        const parent = onRack ? F.locker : hand >= 0 ? hands[hand].obj : beltGroup;
+        if (g.parent !== parent) parent.add(g);
+        if (onRack) { g.position.copy(F.lockerSlots[id]); g.rotation.set(0, RACK_TURN[id] || 0, 0); g.scale.setScalar(1); }
+        else if (hand >= 0) { g.position.set(0, 0, 0); g.rotation.set(0, 0, 0); g.scale.setScalar(id === 'tire' ? 0.8 : 1); }
+        else {
+          const t = BELT_SLOT[id];
+          g.position.set(Math.sin(t) * BELT_R, 0, -Math.cos(t) * BELT_R);
+          g.rotation.set(id === 'tire' || id === 'gen' ? 0 : -Math.PI / 2, -t, 0);
+          g.scale.setScalar(BELT_SCALE[id]);
+        }
+      }
+      const welder = tools.welder.userData;
+      let welding = false;
+
+      // What each hand is doing with what it holds.
+      hands.forEach((hand, i) => {
+        const h = held[i], p = hand.point;
+        if (!h) return;
+        if (h.kind === 'cord') {
+          if (p.distanceTo(h.start) > 0.4) { pullCord(); held[i] = null; }
+        } else if (h.kind === 'plug') {
+          const plug = F.plugs[h.i];
+          F.board.worldToLocal(plug.position.copy(p));
+          const j = F.sockets.findIndex(s => s.distanceTo(plug.position) < 0.09);
+          // One try per push: after a spark the plug drops, and the hand has to come back for it.
+          if (j >= 0 && clock() >= plugCooldown) { plugCooldown = clock() + 0.6; tryPlug(h.i, j); plug.userData.held = false; held[i] = null; }
+        } else if (h.kind === 'wheel') {
+          world.rover.worldToLocal(F.wheel.position.copy(p));
+          if (p.distanceTo(h.start) > 0.3) { pullWheel(); F.wheel.userData.held = false; held[i] = null; }
+        } else if (h.kind === 'tool') {
+          const g = tools[h.id];
+          g.updateWorldMatrix(true, false);
+          const tip = g.localToWorld(b.copy(g.userData.tip));
+          if (h.id === 'brush' && st.scene?.dust) {
+            F.dustCells.forEach((cell, n) => {
+              if (!st.scene.dust[n]) return;
+              cell.worldToLocal(c.copy(tip));
+              const { width, height } = cell.geometry.parameters;
+              if (Math.abs(c.x) < width / 2 + 0.05 && Math.abs(c.y) < height / 2 + 0.05 && Math.abs(c.z) < 0.2) brushCell(n);
+            });
+          }
+          if (h.id === 'welder' && st.scene?.hull) {
+            // The torch lights by itself when the tip is on the crack. Stay on a point until it beads.
+            weldHits.forEach((m, n) => {
+              if (st.scene.hull.welded[n]) { m.userData.dwell = 0; return; }
+              if (tip.distanceTo(F.crackPts[n]) < WELD_RANGE) {
+                welding = true;
+                m.userData.dwell = (m.userData.dwell || 0) + dt;
+                if (m.userData.dwell >= WELD_DWELL) weldPoint(n);
+              } else m.userData.dwell = Math.max(0, (m.userData.dwell || 0) - dt * 2);
+            });
+          }
+          if (h.id === 'patch' && st.suit && spot.visible && tip.distanceTo(worldPos(spot, c)) < 0.13) patchSuit();
+          if (h.id === 'tire' && st.scene?.wheel === 2 && p.distanceTo(worldPos(F.hub, c)) < 0.32) fitTire();
         }
       });
-      shownId = is.id;
-      const left = is.rocks.filter(r => !r.gone).length - 1;
-      p.screen.draw(`${is.id}|${left}|${secs(is)}`, (c, W) => lines(c, W, [[`${ISSUES.drill.title.toUpperCase()}   ${secs(is)} s`, 30, '#ffb84a'], ['CLEAR THE HOPPER', 52, '#fff'], [`${left} TO REMOVE. KEEP THE CORE SAMPLE`, 28, '#ff5c5c']]));
-    };
-  }
+      welder.spark.visible = welding;
+      if (welding) { welder.spark.scale.setScalar(0.8 + Math.random() * 1.6); once('weldSfx', () => sfx('weld'), 0.12); }
 
-  return {
-    // Meshes that can be clicked right now.
-    targets: () => hits.filter(m => m.userData.enabled()),
-    click(mesh) { sfx('click'); mesh.userData.click(); },
-    // Push the server's view of each station onto its panel.
-    sync(issues, time) {
-      for (const key in panels) panels[key].sync(issues.find(i => i.type === key) || null, time);
-    },
-    update(dt) {
-      for (let i = flying.length - 1; i >= 0; i--) {
-        const r = flying[i], f = r.userData.fly;
-        if (!f) { flying.splice(i, 1); continue; }
-        f.age += dt; f.v.y -= 1.62 * dt;
-        r.position.addScaledVector(f.v, dt);
-        r.rotation.x += dt * 2; r.rotation.z += dt * 1.3;
-        if (f.age > 4) { r.visible = false; r.userData.fly = null; flying.splice(i, 1); }
+      // Crack hit targets follow the crack to its current spot.
+      weldHits.forEach((m, n) => m.position.copy(F.crackPts[n]));
+
+      // A plug chosen by pointing swells until you point at a socket.
+      F.plugs.forEach((plug, n) => plug.scale.setScalar(n === selectedPlug ? 1.5 : 1));
+
+      // The suit-leak spot sits on the forearm of the hand that is not holding the patch kit.
+      // On a laptop it sits low in the view and F patches it.
+      const pulse = 0.8 + Math.sin(now * 9) * 0.3;
+      spot.visible = st.suit;
+      if (st.suit) {
+        const patchHand = held.findIndex(h => h?.kind === 'tool' && h.id === 'patch');
+        const arm = vr ? hands.find((h, n) => n !== patchHand && (patchHand >= 0 || h.side === 'left')) || hands.find((_, n) => n !== patchHand) : null;
+        const parent = arm ? arm.obj : camera;
+        if (spot.parent !== parent) parent.add(spot);
+        if (arm) spot.position.set(0, 0.03, 0.14); else spot.position.set(-0.22, -0.2, -0.5);
+        spot.scale.setScalar(pulse);
       }
+
+      // Tool outlines over fixtures that need a tool you are not carrying.
+      const show = (type, on, pos) => {
+        const s = hints[type];
+        s.visible = on && !need(type) && Math.hypot(pos.x - headXZ.x, pos.z - headXZ.z) < 3;
+        if (s.visible) s.position.set(pos.x, pos.y + Math.sin(now * 2) * 0.03, pos.z);
+      };
+      if (st.scene) {
+        const near = F.dustCells.reduce((best, cell, n) => {
+          if (n % 6 !== 1) return best; // the top middle cell of each panel
+          const d = worldPos(cell, c).distanceTo(headXZ);
+          return d < best.d ? { d, p: c.clone() } : best;
+        }, { d: Infinity, p: null });
+        show('dust', !!st.scene.dust && !!near.p, near.p ? near.p.setY(2.35) : a);
+        show('hull', !!st.scene.hull, a.copy(F.crack.userData.centre).addScaledVector(F.crack.userData.normal, 0.25).setY(2.1));
+        show('wheel', st.scene.wheel > 0, worldPos(F.hub, a).setY(1.5));
+      } else for (const k in hints) hints[k].visible = false;
     },
   };
+  return api;
 }

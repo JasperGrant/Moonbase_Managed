@@ -40,6 +40,23 @@ export class Radio {
     this.hiss = c.createGain(); this.hiss.gain.value = 0;
     src.connect(bp).connect(this.hiss).connect(c.destination);
     src.start();
+    this.noise = noise;
+
+    // Leaking air. Two copies of the same hiss: one locked to the head (the suit), one at a place
+    // in the world (the hull crack), so the astronaut can tell them apart by turning their head.
+    const hiss = () => {
+      const n = c.createBufferSource(); n.buffer = noise; n.loop = true;
+      const f = c.createBiquadFilter(); f.type = 'highpass'; f.frequency.value = 2400;
+      const g = c.createGain(); g.gain.value = 0;
+      n.connect(f).connect(g); n.start();
+      return g;
+    };
+    this.suitHiss = hiss();
+    this.suitHiss.connect(c.destination);
+    this.hullHiss = hiss();
+    this.panner = c.createPanner();
+    Object.assign(this.panner, { panningModel: 'HRTF', distanceModel: 'inverse', refDistance: 0.6, rolloffFactor: 1.6, maxDistance: 80 });
+    this.hullHiss.connect(this.panner).connect(c.destination);
     this.ready = true;
 
     try {
@@ -99,12 +116,57 @@ export class Radio {
     o.start(t); o.stop(t + dur + 0.02);
   }
 
-  // Game sounds, made from tones so there are no audio files to load.
+  // A burst of filtered noise: brushing, sparks, impacts.
+  burst(dur, vol, type, freq, at = 0) {
+    if (!this.ready) return;
+    const c = this.ctx, n = c.createBufferSource(), f = c.createBiquadFilter(), g = c.createGain();
+    n.buffer = this.noise; n.loop = true;
+    f.type = type; f.frequency.value = freq;
+    const t = c.currentTime + at;
+    g.gain.setValueAtTime(vol, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+    n.connect(f).connect(g).connect(c.destination);
+    n.start(t, Math.random()); n.stop(t + dur + 0.02);
+  }
+
+  // Where the astronaut's ears are. Call every frame with plain {x, y, z} objects.
+  listen(pos, fwd) {
+    if (!this.ready) return;
+    const l = this.ctx.listener;
+    if (l.positionX) {
+      l.positionX.value = pos.x; l.positionY.value = pos.y; l.positionZ.value = pos.z;
+      l.forwardX.value = fwd.x; l.forwardY.value = fwd.y; l.forwardZ.value = fwd.z;
+      l.upX.value = 0; l.upY.value = 1; l.upZ.value = 0;
+    } else { l.setPosition(pos.x, pos.y, pos.z); l.setOrientation(fwd.x, fwd.y, fwd.z, 0, 1, 0); }
+  }
+
+  // The sound of a leak. suit: true or false. hull: the crack's position, or null.
+  leak(suit, hull) {
+    if (!this.ready) return;
+    const t = this.ctx.currentTime;
+    this.suitHiss.gain.setTargetAtTime(suit ? 0.09 : 0, t, 0.1);
+    this.hullHiss.gain.setTargetAtTime(hull ? 1.0 : 0, t, 0.1);
+    if (hull) {
+      const p = this.panner;
+      if (p.positionX) { p.positionX.value = hull.x; p.positionY.value = hull.y; p.positionZ.value = hull.z; }
+      else p.setPosition(hull.x, hull.y, hull.z);
+    }
+  }
+
+  // Game sounds, made from tones and noise so there are no audio files to load.
   sfx(kind) {
     if (kind === 'click') this.tone(900, 0.04, 0.06, 'square');
-    if (kind === 'spawn') { this.tone(880, 0.15, 0.1, 'square'); this.tone(660, 0.15, 0.1, 'square', 0.18); this.tone(880, 0.15, 0.1, 'square', 0.36); }
+    if (kind === 'alarm') { this.tone(880, 0.15, 0.1, 'square'); this.tone(660, 0.15, 0.1, 'square', 0.18); this.tone(880, 0.15, 0.1, 'square', 0.36); }
     if (kind === 'solve') { this.tone(660, 0.1, 0.1); this.tone(880, 0.1, 0.1, 'sine', 0.1); this.tone(1320, 0.2, 0.1, 'sine', 0.2); }
-    if (kind === 'mistake' || kind === 'miss') { this.tone(160, 0.35, 0.14, 'sawtooth'); }
+    if (kind === 'mistake') { this.burst(0.25, 0.3, 'highpass', 1800); this.tone(160, 0.3, 0.12, 'sawtooth'); }   // a spark
+    if (kind === 'refuse') { this.tone(140, 0.12, 0.14, 'square'); this.tone(140, 0.12, 0.14, 'square', 0.16); }  // too heavy
+    if (kind === 'brush') this.burst(0.12, 0.1, 'bandpass', 3200);
+    if (kind === 'weld') { this.burst(0.14, 0.12, 'highpass', 3000); this.tone(110, 0.14, 0.05, 'sawtooth'); }
+    if (kind === 'impact') this.burst(0.5, 0.35, 'lowpass', 220);
+    if (kind === 'hit') { this.burst(0.8, 0.8, 'lowpass', 300); this.tone(90, 0.5, 0.2, 'sawtooth'); }
+    if (kind === 'blackout') { this.tone(440, 0.25, 0.12, 'sawtooth'); this.tone(220, 0.3, 0.12, 'sawtooth', 0.25); this.tone(110, 0.5, 0.12, 'sawtooth', 0.55); }
+    if (kind === 'power') { this.tone(220, 0.15, 0.1); this.tone(440, 0.15, 0.1, 'sine', 0.15); this.tone(880, 0.3, 0.1, 'sine', 0.3); }
+    if (kind === 'gen') { for (let i = 0; i < 6; i++) this.tone(55 + i * 4, 0.16, 0.16, 'sawtooth', i * 0.14); }
     if (kind === 'end') { this.tone(523, 0.2, 0.1); this.tone(659, 0.2, 0.1, 'sine', 0.2); this.tone(784, 0.4, 0.1, 'sine', 0.4); }
   }
 }

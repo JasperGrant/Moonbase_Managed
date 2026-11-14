@@ -21,13 +21,14 @@ export function startRoverCam(canvas, getState) {
       camera.aspect = w / h;
       camera.updateProjectionMatrix();
     }
+    // Nothing arrives during a blackout (no rover, no scene), and there is nothing to draw while the tab is hidden.
     const s = getState();
-    if (s) {
-      world.moveRover(s.rover);
-      world.update(ms / 1000, s.issues.map(i => i.type));
-      world.avatar.visible = !!s.astro && s.crew.includes('astronaut');
-      if (s.astro) { world.avatar.position.set(s.astro.x, 0, s.astro.z); world.avatar.rotation.y = s.astro.ry; }
-    }
-    if (w && h) renderer.render(scene, camera);
+    if (!w || !h || !s || !s.rover) return;
+    world.moveRover(s.rover);
+    world.update(ms / 1000);
+    if (s.scene) world.apply(s.scene, ms / 1000);
+    world.avatar.visible = !!s.astro && s.crew.includes('astronaut');
+    if (s.astro) { world.avatar.position.set(s.astro.x, 0, s.astro.z); world.avatar.rotation.y = s.astro.ry; world.avatar.scale.y = Math.min(1, s.astro.h / 1.65); }
+    renderer.render(scene, camera);
   });
 }

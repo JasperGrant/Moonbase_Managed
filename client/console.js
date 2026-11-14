@@ -1,10 +1,12 @@
 // Mission control. One page serves all three consoles:
 //   /ops | /tech | /sci | /control   ("control" is the 2-player mode, all three consoles)
 // The server only sends each role what it is allowed to know, so the panels just draw what arrives.
+// Everything here is a picture: gauges, a map, a camera, lamps. Nobody is told in words what broke.
 import { connect } from '/net.js';
 import { Radio } from '/voice.js';
-import { CFG, VEHICLES, GEAR, STATIONS, ISSUES, ROLES, bearing } from '/shared/config.js';
-import { MANUAL } from '/shared/rules.js';
+import { CFG, TOOLS, PLACES, MODES, ROLES, SOCKET_SHAPES } from '/shared/config.js';
+import { beltWeight } from '/shared/rules.js';
+import { drawTool, drawShape } from '/shared/icons.js';
 import { seatTaken } from '/seat.js';
 import { createLobby } from '/lobby.js';
 
@@ -16,11 +18,13 @@ const has = r => role === r || role === 'all';
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const clock = s => `${Math.floor(Math.max(0, s) / 60)}:${String(Math.floor(Math.max(0, s) % 60)).padStart(2, '0')}`;
+const C = { bg: '#05080a', line: '#243240', ink: '#d6e6e0', dim: '#7d909c', green: '#58e08a', amber: '#ffb84a', red: '#ff5c5c', blue: '#6fb6ff' };
+const CABLE = { red: '#e0453a', blue: '#3f7fe8', yellow: '#f0cf3a', green: '#45c463' };
 
 const BRIEF = {
-  ops: '<b>You are the only voice the astronaut hears.</b> Hold SPACE to talk. Your voice takes 1.3 s to reach the Moon, and the reply takes 1.3 s to come back. Pass on what the Technician (where) and the Scientist (how) tell you, and type fault codes into the uplink terminal.',
-  tech: '<b>You know WHERE.</b> The astronaut has no map. Tell Mission Ops which station is in alarm and how to get there. Drive the rover with the arrow keys so the astronaut can follow its lights.',
-  sci: '<b>You know HOW.</b> Each alarm shows telemetry only you can see. Combine it with the manual and tell Mission Ops exactly what the astronaut must do.',
+  ops: '<b>You are the only voice the astronaut hears.</b> Hold SPACE to talk; it takes 1.3 s to reach the Moon. You see what is on their belt and what is left in the locker. Decide what they carry and what gets fixed first.',
+  tech: '<b>You know WHERE and WHEN.</b> The radar map and the rover camera. The radar is on the rover. Arrow keys drive.',
+  sci: '<b>You know WHAT is wrong.</b> Two screens of gauges: POWER and AIR. Read them and work out the cause.',
 };
 
 const net = connect(role);
@@ -45,58 +49,66 @@ const lobby = createLobby($('lobbyView'), {
     if (r !== firstMine) return null;
     const b = document.createElement('button');
     b.className = 'lb-plan-btn'; b.type = 'button';
-    b.textContent = has('ops') ? 'Briefing and mission plan' : 'Briefing';
+    b.textContent = has('ops') ? 'Briefing and mission' : 'Briefing';
     b.onclick = () => { $('planSheet').hidden = false; };
     return b;
   },
 });
 
+const tabs = (id, names) => `<div class="tabs" data-tabs="${id}">${names.map((n, i) => `<button type="button" class="${i ? '' : 'on'}" data-tab="${i}">${n}</button>`).join('')}</div>`;
 $('run').innerHTML = [
   has('ops') && `<div class="panel"><h3>Mission Ops</h3>
     <button id="ptt">HOLD SPACE TO TALK TO THE ASTRONAUT</button>
-    <h2>Alarms</h2><div id="opsAlarms"></div>
-    <h2>Uplink terminal</h2><div id="term"></div>
-    <div class="termrow"><input id="termIn" maxlength="12" placeholder="CODE" autocomplete="off" spellcheck="false"><button id="termGo">Upload</button></div>
-    <p class="hint">Type the 4-character fault code the astronaut reads out, then Enter. Round trip is 2.6 s.</p></div>`,
+    <h2>Belt</h2><canvas id="beltCv" class="pic" width="560" height="170"></canvas>
+    <h2>Locker</h2><canvas id="lockerCv" class="pic" width="560" height="150"></canvas></div>`,
   has('tech') && `<div class="panel"><h3>Technician</h3>
-    <canvas id="map" width="460" height="460"></canvas>
-    <h2 style="margin-top:1em">Alarm locations</h2><div id="techAlarms"></div>
-    <canvas id="cam"></canvas>
-    <p class="hint" id="camHint">Rover camera. Arrow keys drive; commands take 1.3 s to arrive.</p></div>`,
+    ${tabs('tech', ['RADAR', 'ROVER CAM'])}
+    <div data-pane="tech0"><canvas id="map" width="460" height="460"></canvas></div>
+    <div data-pane="tech1" hidden><canvas id="cam"></canvas><p class="hint" id="camHint">Arrow keys drive.</p></div></div>`,
   has('sci') && `<div class="panel"><h3>Scientist</h3>
-    <h2>Telemetry</h2><div id="sciAlarms"></div>
-    <h2 style="margin-top:1em">Manual</h2><div class="manual" id="manual">${Object.entries(MANUAL).map(([k, m]) =>
-      `<details data-type="${k}"><summary>${esc(m.title)}</summary><p>${esc(m.ask)}</p><ol>${m.rules.map(r => `<li>${esc(r)}</li>`).join('')}</ol></details>`).join('')}</div></div>`,
-].filter(Boolean).join('');
+    ${tabs('sci', ['POWER', 'AIR'])}
+    <div data-pane="sci0"><canvas id="powerCv" class="pic" width="560" height="560"></canvas></div>
+    <div data-pane="sci1" hidden><canvas id="airCv" class="pic" width="560" height="560"></canvas></div></div>`,
+].filter(Boolean).join('') + '<div id="static" hidden><canvas id="staticCv" width="240" height="135"></canvas></div>';
+
+// Tabs: you have to go and look.
+const tabOn = { tech: 0, sci: 0 };
+$('run').addEventListener('click', e => {
+  const b = e.target.closest('[data-tab]');
+  if (!b) return;
+  const id = b.parentElement.dataset.tabs, n = Number(b.dataset.tab);
+  tabOn[id] = n;
+  for (const x of b.parentElement.children) x.classList.toggle('on', x === b);
+  for (const pane of $('run').querySelectorAll(`[data-pane^="${id}"]`)) pane.hidden = pane.dataset.pane !== id + n;
+  if (state) render();
+});
 
 // ---------- network ----------
 net.onState = s => { state = s; render(); };
 net.onTaken = seatTaken;
 net.onBinary = buf => radio?.receive(buf);
-net.onMsg = m => {
-  if (m.t === 'ptt' && radio) { rx = m.on; radio.rxMarker(m.on); paintPtt(); }
-  if (m.t === 'term') termLine(m.line);
-};
+net.onMsg = m => { if (m.t === 'ptt' && radio) { rx = m.on; radio.rxMarker(m.on); paintPtt(); } };
 setInterval(() => { $('link').textContent = net.open ? '' : 'NO LINK TO SERVER'; }, 500);
 
 // ---------- render ----------
+const TOAST = { alarm: 'ALARM', solve: 'FIXED', mistake: 'SPARK', hit: 'METEOR HIT', power: 'POWER BACK', gen: 'GENERATOR RUNNING' };
 function render() {
   const s = state;
-  $('clock').textContent = clock(s.timeLeft);
-  $('o2').textContent = Math.round(s.oxygen);
+  const dark = s.phase === 'run' && !s.powered; // blackout: static, and nothing else
+  $('clock').textContent = dark ? '-:--' : clock(s.timeLeft ?? CFG.roundSeconds);
+  $('o2').textContent = dark ? '-' : Math.round(s.oxygen ?? CFG.o2Start);
   $('score').textContent = s.score;
   const bar = $('o2bar');
-  bar.style.width = `${Math.min(100, (s.oxygen / s.o2Max) * 100)}%`;
+  bar.style.width = dark ? '0%' : `${Math.min(100, ((s.oxygen ?? CFG.o2Start) / (s.o2Max ?? CFG.o2Start)) * 100)}%`;
   bar.className = s.oxygen < 25 ? 'low' : '';
   $('crew').innerHTML = ['astronaut', 'ops', 'tech', 'sci'].map(r =>
     `<i class="${s.crew.includes(r) || (r !== 'astronaut' && s.crew.includes('all')) ? 'on' : ''}">${ROLES[r]}</i>`).join('');
 
   if (s.ev && s.ev.n !== lastEv) {
     lastEv = s.ev.n;
-    const t = $('toast');
-    t.className = s.ev.kind;
-    t.textContent = s.ev.text + (s.ev.o2 ? `  (${s.ev.o2} oxygen)` : '') + (s.ev.pts ? `  (+${s.ev.pts})` : '');
-    radio?.sfx(s.ev.kind);
+    const k = s.ev.kind, t = $('toast');
+    if (TOAST[k]) { t.className = k; t.textContent = TOAST[k] + (s.ev.pts ? `  +${s.ev.pts}` : ''); }
+    if (k !== 'meteor') radio?.sfx(k);
   }
 
   if (s.phase !== shown) {
@@ -107,85 +119,32 @@ function render() {
     if (s.phase === 'lobby') { $('toast').textContent = ''; $('toast').className = ''; }
   }
   lobby.update(s);
+  $('static').hidden = !dark;
+  if (dark) { $('toast').textContent = ''; if (talking) { talking = false; radio.setTalking(false); paintPtt(); } }
   if (s.phase === 'lobby') renderPlan(s);
-  if (s.phase === 'run') renderRun(s);
+  if (s.phase === 'run' && !dark) renderRun(s);
   if (s.phase === 'results') renderResults(s);
 }
 
 function renderPlan(s) {
-  const key = JSON.stringify([s.loadout, s.crew]);
+  const key = s.mode;
   if (key === planKey) return;
   planKey = key;
-  const { vehicle, gear } = s.loadout;
-  const cap = VEHICLES[vehicle].cap;
-  const used = gear.reduce((m, g) => m + GEAR[g].mass, 0);
   const canEdit = has('ops');
-  $('plan').innerHTML = `<h3>Mission plan</h3>
-    <p class="brief">${canEdit ? 'The standard kit is already loaded. Change it if you like: a bigger lander carries more gear, a faster one leaves more oxygen. Changing the plan does not clear anyone\'s Ready.' : 'Mission Ops sets the plan. The mission starts when all four seats are ready.'}</p>
-    <h2>Lander</h2>
-    <div class="vehicles">${Object.entries(VEHICLES).map(([k, v]) =>
-      `<label class="pick ${k === vehicle ? 'sel' : ''}" data-vehicle="${k}"><b>${v.name}</b><span>${v.blurb}</span></label>`).join('')}</div>
-    <h2>Gear</h2>
-    ${Object.entries(GEAR).map(([k, g]) => {
-      const sel = gear.includes(k), off = !sel && used + g.mass > cap;
-      return `<label class="pick ${sel ? 'sel' : ''} ${off ? 'off' : ''}" data-gear="${k}" style="margin-bottom:6px"><b>${sel ? '[x]' : '[ ]'} ${g.name} <span>(mass ${g.mass})</span></b><span>${g.blurb}</span></label>`;
-    }).join('')}
-    <div class="mass">Mass loaded: ${used} / ${cap} &nbsp;|&nbsp; Suit oxygen at start: ${VEHICLES[vehicle].o2 + (gear.includes('o2') ? 25 : 0)}</div>`;
+  $('plan').innerHTML = `<h3>Mission</h3>
+    <div class="vehicles">${Object.entries(MODES).map(([k, name]) =>
+      `<label class="pick ${k === s.mode ? 'sel' : ''} ${canEdit ? '' : 'off'}" data-mode="${k}"><b>${name}</b><span>${k === 'demo' ? 'The same five things break in the same order. For judges.' : 'Random faults and meteor showers.'}</span></label>`).join('')}</div>
+    <p class="hint">${canEdit ? 'The mission starts when all four seats are ready.' : 'Mission Ops picks the mission. It starts when all four seats are ready.'}</p>`;
 }
-
 $('plan').addEventListener('click', e => {
-  if (!has('ops') || !state) return;
-  const el = e.target.closest('[data-vehicle],[data-gear]');
-  if (!el) return;
-  let { vehicle, gear } = state.loadout;
-  gear = [...gear];
-  if (el.dataset.vehicle) {
-    vehicle = el.dataset.vehicle;
-    while (gear.reduce((m, g) => m + GEAR[g].mass, 0) > VEHICLES[vehicle].cap) gear.pop();
-  } else {
-    const g = el.dataset.gear;
-    if (gear.includes(g)) gear = gear.filter(x => x !== g);
-    else if (!el.classList.contains('off')) gear.push(g);
-  }
-  net.send({ t: 'loadout', vehicle, gear });
+  const el = e.target.closest('[data-mode]');
+  if (el && has('ops')) net.send({ t: 'mode', mode: el.dataset.mode });
 });
 
-function alarmCard(is, body) {
-  const hot = is.left < 15;
-  return `<div class="alarm ${hot ? 'hot' : ''}"><div class="top"><span>${ISSUES[is.type].title}</span><span class="t">${Math.ceil(is.left)} s</span></div>
-    <div class="meter"><i style="width:${(is.left / is.total) * 100}%"></i></div>${body}</div>`;
-}
-const none = '<p class="empty">All systems nominal.</p>';
-
 function renderRun(s) {
-  if (has('ops')) {
-    $('opsAlarms').innerHTML = s.issues.map(is => alarmCard(is,
-      is.type !== 'patch' ? '<div class="where">Ask the Technician where and the Scientist how.</div>'
-        : is.stage === 1 ? `<div class="data">Patch uploaded. Astronaut enters key <b>${esc(is.confirm.split('').join(' '))}</b></div>`
-        : '<div class="data">Needs the fault code from the astronaut\'s screen.</div>')).join('') || none;
-  }
-  if (has('tech')) {
-    $('techAlarms').innerHTML = s.issues.map(is => {
-      const st = STATIONS[is.type];
-      return alarmCard(is, `<div class="where">${st.name}, ${bearing(st.x, st.z)} of the habitat</div>` +
-        (is.type === 'freq' ? `<div class="data">Dish is on channel <b>${is.value}</b></div>` : ''));
-    }).join('') || none;
-    drawMap(s);
-  }
-  if (has('sci')) {
-    $('sciAlarms').innerHTML = s.issues.map(is => alarmCard(is,
-      is.type === 'wires' ? `<div class="data">Tank pressure: <b>${is.pressure}</b></div>`
-        : is.type === 'freq' ? `<div class="data">Target channel: <b>${is.target}</b></div>`
-        : is.type === 'drill' ? `<div class="data">Core sample is the <b>${is.keep.toUpperCase()}</b> rock. It stays.</div>`
-        : '<div class="data">No telemetry needed. Mission Ops uploads the patch.</div>')).join('') || none;
-    const live = s.issues.map(i => i.type);
-    for (const d of $('manual').children) {
-      const on = live.includes(d.dataset.type);
-      if (on && !d.classList.contains('live')) d.open = true;
-      if (!on && d.classList.contains('live')) d.open = false;
-      d.classList.toggle('live', on);
-    }
-  }
+  if (has('ops')) drawKit(s);
+  if (has('tech') && tabOn.tech === 0) drawMap(s);
+  if (has('sci')) { if (tabOn.sci === 0) drawPower(s); else drawAir(s); }
 }
 
 function renderResults(s) {
@@ -196,44 +155,197 @@ function renderResults(s) {
   $('results').innerHTML = `<div class="panel">
     <div class="verdict ${r.won ? 'won' : 'lost'}">${r.won ? 'MISSION COMPLETE' : 'MISSION FAILED'}</div>
     <p>${esc(r.reason)}</p>
-    <p><b>Score ${s.score}</b> &nbsp;|&nbsp; fixed ${r.fixed} &nbsp;|&nbsp; timed out ${r.missed} &nbsp;|&nbsp; mistakes ${r.mistakes}${r.won ? ` &nbsp;|&nbsp; oxygen bonus +${r.bonus}` : ''}</p>
-    <h2>What happened and why</h2>
-    <ul class="log">${(s.log || []).filter(l => l.kind !== 'spawn').map(l =>
+    <p><b>Score ${s.score}</b> &nbsp;|&nbsp; fixed ${r.fixed} &nbsp;|&nbsp; blackouts ${r.blackouts} &nbsp;|&nbsp; meteor hits ${r.hits} &nbsp;|&nbsp; wrong plugs ${r.mistakes}${r.won ? ` &nbsp;|&nbsp; oxygen bonus +${r.bonus}` : ''}</p>
+    <h2>What happened</h2>
+    <ul class="log">${(s.log || []).filter(l => l.kind !== 'start').map(l =>
       `<li class="${l.kind}"><span class="at">${clock(l.at)}</span><span>${esc(l.text)}</span><span class="d">${l.pts ? '+' + l.pts : ''}${l.o2 ? l.o2 + ' O2' : ''}</span></li>`).join('')}</ul>
-    ${has('ops') ? '<button class="big" data-again>Fly again</button> <span class="hint">Everyone goes back to the lobby and readies up again. Your plan stays loaded, so you can change one thing and compare.</span>' : '<p class="hint">Mission Ops can send the crew back to the lobby for another run.</p>'}
+    ${has('ops') ? '<button class="big" data-again>Fly again</button> <span class="hint">Everyone goes back to the lobby and readies up again.</span>' : '<p class="hint">Mission Ops can send the crew back to the lobby for another run.</p>'}
   </div>`;
 }
 $('results').addEventListener('click', e => { if (e.target.closest('[data-again]')) { resultKey = ''; net.send({ t: 'reset' }); } });
 
-// ---------- Technician: map ----------
+// ---------- drawing helpers ----------
+const blinkOn = () => Math.floor(Date.now() / 300) % 2 === 0;
+function label(g, text, x, y, size = 14, color = C.dim, align = 'center') {
+  g.font = `bold ${size}px ui-monospace, Menlo, Consolas, monospace`; g.textAlign = align; g.textBaseline = 'middle'; g.fillStyle = color; g.fillText(text, x, y);
+}
+// A half-circle dial from 0 to max, with the low end marked red.
+function dial(g, x, y, r, value, max, name, { redBelow = 0, redAbove = Infinity, unit = '' } = {}) {
+  const ang = v => Math.PI + Math.max(0, Math.min(1, v / max)) * Math.PI;
+  g.lineWidth = r * 0.16; g.lineCap = 'butt';
+  g.strokeStyle = C.line; g.beginPath(); g.arc(x, y, r, Math.PI, 2 * Math.PI); g.stroke();
+  g.strokeStyle = '#5a1f1f';
+  if (redBelow > 0) { g.beginPath(); g.arc(x, y, r, Math.PI, ang(redBelow)); g.stroke(); }
+  if (redAbove < max) { g.beginPath(); g.arc(x, y, r, ang(redAbove), 2 * Math.PI); g.stroke(); }
+  const bad = value < redBelow || value > redAbove;
+  const a = ang(value);
+  g.strokeStyle = bad ? C.red : C.green; g.lineWidth = 5; g.lineCap = 'round';
+  g.beginPath(); g.moveTo(x, y); g.lineTo(x + Math.cos(a) * r * 0.92, y + Math.sin(a) * r * 0.92); g.stroke();
+  g.fillStyle = C.ink; g.beginPath(); g.arc(x, y, 7, 0, 7); g.fill();
+  label(g, name, x, y + 26, 16, C.dim);
+  label(g, `${Math.round(value)}${unit}`, x, y - r * 0.42, 24, bad ? C.red : C.ink);
+}
+
+// ---------- Mission Ops: the belt and the locker ----------
+function drawKit(s) {
+  {
+    const cv = $('beltCv'), g = cv.getContext('2d'), W = cv.width, H = cv.height;
+    g.fillStyle = C.bg; g.fillRect(0, 0, W, H);
+    const used = beltWeight(s.belt), u = 110, gap = 12, x0 = (W - (CFG.beltCapacity * (u + gap) - gap)) / 2, y0 = 16;
+    for (let i = 0; i < CFG.beltCapacity; i++) {
+      g.strokeStyle = i < used ? C.green : C.line; g.lineWidth = 3;
+      g.strokeRect(x0 + i * (u + gap), y0, u, u);
+      if (i < used) { g.fillStyle = 'rgba(88,224,138,0.12)'; g.fillRect(x0 + i * (u + gap), y0, u, u); }
+    }
+    let slot = 0;
+    for (const t of s.belt) { // a heavy tool is drawn across the boxes it fills
+      const w = TOOLS[t].weight, span = w * (u + gap) - gap;
+      drawTool(g, t, x0 + slot * (u + gap) + span / 2, y0 + u / 2, u - 24, C.ink);
+      slot += w;
+    }
+    label(g, `${used} / ${CFG.beltCapacity}`, W / 2, H - 16, 18, used >= CFG.beltCapacity ? C.amber : C.dim);
+  }
+  {
+    const cv = $('lockerCv'), g = cv.getContext('2d'), W = cv.width, H = cv.height;
+    g.fillStyle = C.bg; g.fillRect(0, 0, W, H);
+    const ids = Object.keys(TOOLS), cell = W / ids.length;
+    ids.forEach((t, i) => {
+      const here = s.locker.includes(t), cx = cell * i + cell / 2;
+      g.globalAlpha = here ? 1 : 0.16;
+      drawTool(g, t, cx, 56, 78, C.ink);
+      g.globalAlpha = here ? 1 : 0.3;
+      for (let k = 0; k < TOOLS[t].weight; k++) { // one pip per weight unit
+        g.fillStyle = C.amber; g.fillRect(cx - TOOLS[t].weight * 9 + k * 18 + 2, 118, 14, 14);
+      }
+      g.globalAlpha = 1;
+    });
+  }
+}
+
+// ---------- Technician: the radar map ----------
+function noise(g, W, H, alpha = 1) {
+  const img = g.createImageData(W, H), d = img.data;
+  for (let i = 0; i < d.length; i += 4) { const v = Math.random() * 190; d[i] = d[i + 1] = d[i + 2] = v; d[i + 3] = 255 * alpha; }
+  g.putImageData(img, 0, 0);
+}
 function drawMap(s) {
   const cv = $('map'), g = cv.getContext('2d'), W = cv.width, k = W / (2 * (CFG.bounds + 2));
   const X = x => W / 2 + x * k, Y = z => W / 2 + z * k; // north (-z) is up
-  const blink = Math.floor(Date.now() / 300) % 2 === 0;
-  g.fillStyle = '#05080a'; g.fillRect(0, 0, W, W);
+  if (!s.radar) { // the radar is on the rover, and the rover is stuck
+    noise(g, W, W);
+    g.fillStyle = 'rgba(5,8,10,0.75)'; g.fillRect(W / 2 - 120, W / 2 - 30, 240, 60);
+    label(g, 'NO RADAR', W / 2, W / 2, 30, C.red);
+    return;
+  }
+  g.fillStyle = C.bg; g.fillRect(0, 0, W, W);
   g.strokeStyle = '#16222b'; g.lineWidth = 1;
   for (let m = -20; m <= 20; m += 5) { g.beginPath(); g.moveTo(X(m), 0); g.lineTo(X(m), W); g.moveTo(0, Y(m)); g.lineTo(W, Y(m)); g.stroke(); }
   g.strokeStyle = '#2c4150'; g.beginPath(); g.arc(X(0), Y(0), CFG.bounds * k, 0, 7); g.stroke();
-  g.font = '12px ui-monospace, monospace'; g.textAlign = 'center';
-  g.fillStyle = '#7d909c'; g.fillText('N', W / 2, 14); g.fillText('5 m grid', W - 34, W - 8);
+  label(g, 'N', W / 2, 12, 12);
+  // The base: habitat, canopy, and the places the astronaut works.
+  const cn = PLACES.canopy;
+  g.fillStyle = '#3a4a2a'; g.fillRect(X(cn.x0), Y(cn.z0), (cn.x1 - cn.x0) * k, (cn.z1 - cn.z0) * k);
   g.fillStyle = '#c9d6dc'; g.beginPath(); g.arc(X(0), Y(0), CFG.habRadius * k, 0, 7); g.fill();
-  g.fillStyle = '#05080a'; g.fillText('HAB', X(0), Y(0) + 4);
-  const live = s.issues.map(i => i.type);
-  for (const [key, st] of Object.entries(STATIONS)) {
-    const on = live.includes(key);
-    if (on && blink) { g.strokeStyle = '#ff5c5c'; g.lineWidth = 3; g.beginPath(); g.arc(X(st.x), Y(st.z), 16, 0, 7); g.stroke(); }
-    g.fillStyle = on ? '#ff5c5c' : '#58e08a'; g.fillRect(X(st.x) - 6, Y(st.z) - 6, 12, 12);
-    g.fillStyle = on ? '#ffb84a' : '#7d909c'; g.fillText(st.name, X(st.x), Y(st.z) - 12);
-  }
-  const arrow = (x, z, ry, color, label) => {
-    g.save(); g.translate(X(x), Y(z)); g.fillStyle = color; g.fillText(label, 0, 22);
+  label(g, 'HAB', X(0), Y(0), 12, C.bg);
+  label(g, 'COVER', X(0), Y(cn.z1) + 9, 10, '#9db07a');
+  const mark = (p, name, w = 10, h = 10) => { g.fillStyle = C.green; g.fillRect(X(p.x) - w / 2, Y(p.z) - h / 2, w, h); if (name) label(g, name, X(p.x), Y(p.z) - h / 2 - 9, 11); };
+  mark(PLACES.locker, 'LOCKER');
+  mark(PLACES.board, 'BOARD');
+  PLACES.panels.forEach((p, i) => mark(p, i === 0 ? 'SOLAR' : '', 6, 22));
+  for (const p of [PLACES.depot, PLACES.dish, PLACES.drill]) { g.fillStyle = '#31424d'; g.fillRect(X(p.x) - 4, Y(p.z) - 4, 8, 8); }
+
+  const arrow = (x, z, ry, color, name) => {
+    g.save(); g.translate(X(x), Y(z)); label(g, name, 0, 22, 12, color);
     g.rotate(Math.atan2(Math.sin(ry), -Math.cos(ry))); // heading (sin ry, cos ry) in x,z -> screen
-    g.beginPath(); g.moveTo(0, -10); g.lineTo(7, 8); g.lineTo(-7, 8); g.closePath(); g.fill(); g.restore();
+    g.fillStyle = color; g.beginPath(); g.moveTo(0, -10); g.lineTo(7, 8); g.lineTo(-7, 8); g.closePath(); g.fill(); g.restore();
   };
-  arrow(s.rover.x, s.rover.z, s.rover.ry, '#ffb84a', 'ROVER');
-  if (s.astro && s.loadout.gear.includes('beacon')) arrow(s.astro.x, s.astro.z, s.astro.ry, '#6fb6ff', 'ASTRONAUT');
-  else { g.fillStyle = '#7d909c'; g.textAlign = 'left'; g.fillText('No suit beacon: astronaut not tracked', 8, W - 8); }
+  arrow(s.rover.x, s.rover.z, s.rover.ry, C.amber, 'ROVER');
+  if (s.astro && s.crew.includes('astronaut')) arrow(s.astro.x, s.astro.z, s.astro.ry, C.blue, 'ASTRONAUT');
+
+  // Meteors: blips closing on the base, a ring that shrinks to nothing at the first impact, and seconds to go.
+  if (s.meteor) {
+    const m = s.meteor, f = m.eta / CFG.meteorWarnSeconds, hot = blinkOn();
+    if (!m.falling) {
+      g.strokeStyle = C.red; g.lineWidth = 3;
+      g.beginPath(); g.arc(X(0), Y(0), Math.max(4, f * (W / 2 - 8)), 0, 7); g.stroke();
+      for (let i = 0; i < 9; i++) {
+        const a = i * 2.4 + 0.5, r = (0.25 + f * 0.75) * (W / 2 - 14) * (0.8 + (i % 3) * 0.1);
+        g.fillStyle = C.red; g.beginPath(); g.arc(W / 2 + Math.cos(a) * r, W / 2 + Math.sin(a) * r, 5, 0, 7); g.fill();
+      }
+      g.fillStyle = 'rgba(5,8,10,0.8)'; g.fillRect(W - 96, 8, 88, 62);
+      label(g, String(Math.ceil(m.eta)), W - 52, 40, 44, C.red);
+    } else {
+      g.strokeStyle = hot ? C.red : '#5a1f1f'; g.lineWidth = 10; g.strokeRect(5, 5, W - 10, W - 10);
+      for (let i = 0; i < 14; i++) { g.fillStyle = C.red; g.beginPath(); g.arc(Math.random() * W, Math.random() * W, 4, 0, 7); g.fill(); }
+    }
+  }
 }
+
+// ---------- Scientist: POWER ----------
+function drawPower(s) {
+  const cv = $('powerCv'), g = cv.getContext('2d'), W = cv.width, H = cv.height, p = s.power;
+  g.fillStyle = C.bg; g.fillRect(0, 0, W, H);
+  // The battery: how long until the lights go out.
+  const bx = 60, by = 30, bw = W - 150, bh = 110, low = p.battery < 30;
+  g.strokeStyle = C.ink; g.lineWidth = 5; g.strokeRect(bx, by, bw, bh);
+  g.fillStyle = C.ink; g.fillRect(bx + bw + 4, by + 30, 16, bh - 60);
+  g.fillStyle = low ? (blinkOn() ? C.red : '#5a1f1f') : p.battery < 60 ? C.amber : C.green;
+  g.fillRect(bx + 8, by + 8, (bw - 16) * p.battery / 100, bh - 16);
+  label(g, `${Math.round(p.battery)}%`, bx + bw / 2, by + bh / 2, 46, p.battery > 55 && !low ? '#05130a' : C.ink);
+  label(g, 'BATTERY', bx + bw / 2, by + bh + 22, 16);
+  // Where the power is lost: coming in from the sun, or going out through the board.
+  dial(g, W * 0.27, 320, 105, p.solar, 100, 'SOLAR IN', { redBelow: 60, unit: '%' });
+  dial(g, W * 0.73, 320, 105, p.board, 100, 'BOARD OUT', { redBelow: 60, unit: '%' });
+  g.strokeStyle = C.line; g.lineWidth = 3; g.beginPath(); g.moveTo(W * 0.27 + 120, 300); g.lineTo(W * 0.73 - 120, 300); g.stroke();
+  g.fillStyle = C.line; g.beginPath(); g.moveTo(W * 0.73 - 120, 290); g.lineTo(W * 0.73 - 104, 300); g.lineTo(W * 0.73 - 120, 310); g.fill();
+  // The wiring diagram: each loose cable and the socket it belongs in.
+  if (s.wiring) {
+    g.strokeStyle = C.line; g.lineWidth = 2; g.strokeRect(20, 380, W - 40, H - 400);
+    const n = s.wiring.length, row = (H - 420) / Math.max(1, n);
+    s.wiring.forEach((w, i) => {
+      const y = 392 + row * i + row / 2, col = CABLE[w.color];
+      g.fillStyle = col; g.fillRect(70, y - 13, 60, 26); g.fillRect(130, y - 7, 16, 14);    // the plug
+      g.strokeStyle = col; g.lineWidth = 6; g.beginPath(); g.moveTo(152, y); g.lineTo(W - 190, y); g.stroke();
+      g.fillStyle = col; g.beginPath(); g.moveTo(W - 190, y - 12); g.lineTo(W - 166, y); g.lineTo(W - 190, y + 12); g.fill();
+      drawShape(g, SOCKET_SHAPES[w.socket], W - 110, y, 44, C.ink);
+    });
+  }
+}
+
+// ---------- Scientist: AIR ----------
+function drawAir(s) {
+  const cv = $('airCv'), g = cv.getContext('2d'), W = cv.width, H = cv.height;
+  g.fillStyle = C.bg; g.fillRect(0, 0, W, H);
+  // Oxygen left.
+  const frac = Math.max(0, Math.min(1, s.oxygen / s.o2Max)), low = s.oxygen < 25;
+  g.strokeStyle = C.ink; g.lineWidth = 5; g.strokeRect(60, 30, W - 120, 90);
+  g.fillStyle = low ? C.red : C.green; g.fillRect(68, 38, (W - 136) * frac, 74);
+  label(g, String(Math.round(s.oxygen)), W / 2, 75, 44, frac > 0.55 ? '#05130a' : C.ink);
+  label(g, 'OXYGEN', W / 2, 142, 16);
+  // How fast it is going.
+  dial(g, W * 0.3, 360, 120, s.drain, CFG.leakMultiplier * 2 - 0.5, 'DRAIN', { redAbove: 1.6, unit: 'x' });
+  // The leak lamp. It does not say where.
+  const on = s.leak, lit = on && blinkOn(), lx = W * 0.74, ly = 310;
+  g.fillStyle = lit ? C.red : on ? '#5a1f1f' : '#141c22';
+  g.beginPath(); g.arc(lx, ly, 78, 0, 7); g.fill();
+  g.strokeStyle = on ? C.red : C.line; g.lineWidth = 5; g.beginPath(); g.arc(lx, ly, 78, 0, 7); g.stroke();
+  // Air hissing out of a hole.
+  g.strokeStyle = on ? '#fff' : C.line; g.lineWidth = 5; g.lineCap = 'round';
+  g.beginPath(); g.arc(lx - 34, ly, 10, 0, 7); g.stroke();
+  for (const a of [-0.5, 0, 0.5]) { g.beginPath(); g.moveTo(lx - 14 + Math.cos(a) * 6, ly + Math.sin(a) * 6); g.lineTo(lx - 14 + Math.cos(a) * 50, ly + Math.sin(a) * 50); g.stroke(); }
+  label(g, 'LEAK', lx, ly + 106, 18, on ? C.red : C.dim);
+}
+
+// ---------- blackout: static, and a dead battery ----------
+setInterval(() => {
+  if ($('static').hidden) return;
+  const cv = $('staticCv'), g = cv.getContext('2d'), W = cv.width, H = cv.height;
+  noise(g, W, H);
+  g.fillStyle = 'rgba(5,8,10,0.82)'; g.fillRect(W / 2 - 44, H / 2 - 26, 88, 52);
+  g.strokeStyle = C.red; g.lineWidth = 3; g.strokeRect(W / 2 - 30, H / 2 - 14, 54, 28);
+  g.fillStyle = C.red; g.fillRect(W / 2 + 26, H / 2 - 6, 5, 12);
+  if (blinkOn()) g.fillRect(W / 2 - 26, H / 2 - 10, 5, 20); // one last sliver
+}, 90);
 
 // ---------- Technician: rover ----------
 if (has('tech')) {
@@ -249,17 +361,11 @@ if (has('tech')) {
   import('/rovercam.js').then(m => m.startRoverCam($('cam'), () => state)).catch(err => {
     console.warn(err);
     $('cam').hidden = true;
-    $('camHint').textContent = 'Rover camera unavailable (run "npm install" so three.js is present). Arrow keys still drive the rover; watch the map.';
+    $('camHint').textContent = 'Rover camera unavailable. Arrow keys still drive.';
   });
 }
 
-// ---------- Mission Ops: radio and terminal ----------
-function termLine(text, mine) {
-  const t = $('term'); if (!t) return;
-  const d = document.createElement('div');
-  d.textContent = text; if (mine) d.className = 'me';
-  t.appendChild(d); t.scrollTop = t.scrollHeight;
-}
+// ---------- Mission Ops: radio ----------
 function paintPtt() {
   const b = $('ptt'); if (!b) return;
   b.className = talking ? 'tx' : rx ? 'rx' : '';
@@ -280,7 +386,8 @@ if (has('ops')) {
     want = on;
     if (on && !radio.ready) await enable();
     if (want !== on) return; // key was released while the mic prompt was open
-    if (on && !radio.micOk) { termLine('NO MICROPHONE. Open this page on localhost or over HTTPS and allow the mic.'); return; }
+    if (on && state && state.phase === 'run' && !state.powered) return; // no power, no radio
+    if (on && !radio.micOk) { $('toast').className = 'mistake'; $('toast').textContent = 'NO MICROPHONE: open this page on localhost or over HTTPS and allow the mic.'; return; }
     talking = on && radio.micOk; radio.setTalking(talking); paintPtt();
   };
   addEventListener('keydown', e => { if (e.code === 'Space') { e.preventDefault(); if (!e.repeat) talk(true); } });
@@ -288,17 +395,6 @@ if (has('ops')) {
   const b = $('ptt');
   b.addEventListener('pointerdown', () => talk(true));
   for (const ev of ['pointerup', 'pointerleave', 'pointercancel']) b.addEventListener(ev, () => { if (talking) talk(false); });
-
-  termLine('UPLINK READY.');
-  const upload = () => {
-    const inp = $('termIn'), code = inp.value.trim();
-    if (!code) return;
-    termLine('> PATCH ' + code.toUpperCase(), true);
-    net.send({ t: 'patch', code });
-    inp.value = '';
-  };
-  $('termGo').onclick = upload;
-  $('termIn').addEventListener('keydown', e => { if (e.key === 'Enter') upload(); });
 }
 
 // For debugging from the browser console.

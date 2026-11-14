@@ -107,7 +107,7 @@ This is the strategy. When faults overlap, the order of repair matters.
 | Rover wheel | No map, no astronaut position, no meteor warning |
 | No meteor warning | The astronaut is caught in the open |
 | Caught in the open | 20 oxygen lost and a suit leak starts |
-| Any leak | Oxygen drains three times faster |
+| Any leak | Oxygen drains three times faster (hull and suit together: five times) |
 
 So the right order is usually power first (it has the shortest fuse and silences everyone), then the rover (it is the early warning), then leaks. But a suit leak with low oxygen can jump the queue. The team should have to argue about it.
 

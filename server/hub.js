@@ -55,6 +55,9 @@ export class Hub {
     if (!this.allReady()) this.countdown = null;
   }
 
+  // True while the base is blacked out: no radio, no commands.
+  silent() { return this.game.phase === 'run' && !this.game.powered; }
+
   // The delay only applies while a mission is running, so the lobby stays snappy.
   lag() { return this.game.phase === 'run' ? CFG.delayMs : 0; }
   later(ms, fn) { if (ms > 0) setTimeout(fn, ms); else fn(); }
@@ -69,8 +72,9 @@ export class Hub {
     if (!ws.role && isBinary) return;
 
     // Binary frames are radio audio. Astronaut <-> Mission Ops only, always delayed.
+    // A blackout kills the radio in both directions.
     if (isBinary) {
-      if (data.byteLength > 64000) return;
+      if (data.byteLength > 64000 || this.silent()) return;
       const to = ws.role === 'astronaut' ? ['ops', 'all'] : isControl(ws.role) ? ['astronaut'] : [];
       for (const c of this.live()) if (c !== ws && to.includes(c.role)) setTimeout(() => { if (c.open) c.send(data); }, CFG.delayMs);
       return;
@@ -96,26 +100,25 @@ export class Hub {
     }
 
     if (ws.role === 'astronaut') {
-      if (m.t === 'pose' && [m.x, m.z, m.ry].every(Number.isFinite)) game.astro = { x: m.x, z: m.z, ry: m.ry };
-      else if (m.t === 'act') game.act(m.id, m.a);
-      else if (m.t === 'ptt') this.sendTo(['ops', 'all'], { t: 'ptt', from: 'astronaut', on: !!m.on }, CFG.delayMs);
+      // h is the head height in metres: crouching is how you take cover beside the rover.
+      if (m.t === 'pose' && [m.x, m.z, m.ry].every(Number.isFinite)) game.astro = { x: m.x, z: m.z, ry: m.ry, h: Number.isFinite(m.h) ? m.h : 1.65 };
+      else if (m.t === 'do') game.act(m.a);
+      else if (m.t === 'ptt' && (!m.on || !this.silent())) this.sendTo(['ops', 'all'], { t: 'ptt', from: 'astronaut', on: !!m.on }, CFG.delayMs);
       return;
     }
 
     // Everything below comes from Earth, so it reaches the Moon one light-delay later.
+    // Nothing from Earth gets through a blackout except a released talk key and starting over.
+    if (this.silent() && m.t !== 'reset' && !(m.t === 'ptt' && !m.on)) return;
     if (m.t === 'rover' && (ws.role === 'tech' || ws.role === 'all')) {
       const throttle = Math.max(-1, Math.min(1, Number(m.throttle) || 0));
       const steer = Math.max(-1, Math.min(1, Number(m.steer) || 0));
       this.later(this.lag(), () => { if (game.phase === 'run') Object.assign(game.rover, { throttle, steer }); });
     } else if (isControl(ws.role)) {
-      if (m.t === 'loadout') game.setLoadout(m.vehicle, m.gear);
+      if (m.t === 'mode') game.setMode(m.mode);
       else if (m.t === 'start' && !this.requireFullCrew) game.start(); // normally the crew starts it by readying up
       else if (m.t === 'reset') { game.reset(); this.ready.clear(); this.countdown = null; }
       else if (m.t === 'ptt') this.sendTo(['astronaut'], { t: 'ptt', from: 'ops', on: !!m.on }, CFG.delayMs);
-      else if (m.t === 'patch') {
-        const ms = this.lag();
-        this.later(ms, () => this.sendTo(['ops', 'all'], { t: 'term', line: game.patch(m.code) }, ms));
-      }
     }
   }
 
