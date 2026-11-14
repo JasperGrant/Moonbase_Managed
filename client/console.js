@@ -3,7 +3,7 @@
 // The server only sends each role what it is allowed to know, so the panels just draw what arrives.
 import { connect } from '/net.js';
 import { Radio } from '/voice.js';
-import { CFG, VEHICLES, GEAR, STATIONS, ISSUES, ROLES, bearing } from '/shared/config.js';
+import { CFG, VEHICLES, GEAR, STATIONS, INDOOR, ISSUES, ROLES, bearing } from '/shared/config.js';
 import { MANUAL } from '/shared/rules.js';
 import { seatTaken } from '/seat.js';
 import { createLobby } from '/lobby.js';
@@ -166,6 +166,8 @@ function renderRun(s) {
   }
   if (has('tech')) {
     $('techAlarms').innerHTML = s.issues.map(is => {
+      if (INDOOR[is.type]) return alarmCard(is, `<div class="where">${INDOOR[is.type].name}, ${INDOOR[is.type].where}</div>` +
+        (is.type === 'power' ? `<div class="data">Short on circuit <b>${is.fault + 1}</b>. Breaker ${is.fault + 1} must stay OFF</div>` : ''));
       const st = STATIONS[is.type];
       return alarmCard(is, `<div class="where">${st.name}, ${bearing(st.x, st.z)} of the habitat</div>` +
         (is.type === 'freq' ? `<div class="data">Dish is on channel <b>${is.value}</b></div>` : ''));
@@ -176,6 +178,7 @@ function renderRun(s) {
     $('sciAlarms').innerHTML = s.issues.map(is => alarmCard(is,
       is.type === 'wires' ? `<div class="data">Tank pressure: <b>${is.pressure}</b></div>`
         : is.type === 'freq' ? `<div class="data">Target channel: <b>${is.target}</b></div>`
+        : is.type === 'power' ? `<div class="data">Battery charge: <b>${is.battery}%</b></div>`
         : is.type === 'drill' ? `<div class="data">Core sample is the <b>${is.keep.toUpperCase()}</b> rock. It stays.</div>`
         : '<div class="data">No telemetry needed. Mission Ops uploads the patch.</div>')).join('') || none;
     const live = s.issues.map(i => i.type);
@@ -219,6 +222,10 @@ function drawMap(s) {
   g.fillStyle = '#c9d6dc'; g.beginPath(); g.arc(X(0), Y(0), CFG.habRadius * k, 0, 7); g.fill();
   g.fillStyle = '#05080a'; g.fillText('HAB', X(0), Y(0) + 4);
   const live = s.issues.map(i => i.type);
+  if (live.some(t => INDOOR[t])) { // an alarm inside the habitat: ring the habitat itself
+    if (blink) { g.strokeStyle = '#ff5c5c'; g.lineWidth = 3; g.beginPath(); g.arc(X(0), Y(0), CFG.habRadius * k + 6, 0, 7); g.stroke(); }
+    g.fillStyle = '#ffb84a'; g.fillText('INSIDE', X(0), Y(0) - CFG.habRadius * k - 12);
+  }
   for (const [key, st] of Object.entries(STATIONS)) {
     const on = live.includes(key);
     if (on && blink) { g.strokeStyle = '#ff5c5c'; g.lineWidth = 3; g.beginPath(); g.arc(X(st.x), Y(st.z), 16, 0, 7); g.stroke(); }

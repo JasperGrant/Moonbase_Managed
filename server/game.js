@@ -1,6 +1,6 @@
 // All game rules. No sockets in here, so it can be tested with plain Node (npm test).
 import { CFG, VEHICLES, GEAR, ISSUES } from '../client/shared/config.js';
-import { solveWires, WIRE_COLORS, ROCK_COLORS, CODE_CHARS } from '../client/shared/rules.js';
+import { solveWires, breakerOrder, WIRE_COLORS, ROCK_COLORS, CODE_CHARS } from '../client/shared/rules.js';
 
 const TYPES = Object.keys(ISSUES);
 
@@ -119,6 +119,14 @@ export class Game {
       const confirm = String(this.int(0, 999)).padStart(3, '0');
       return { err, confirm, stage: 0, entered: '' };
     }
+    if (type === 'power') {
+      const all = Array.from({ length: CFG.power.breakers }, (_, i) => i).sort(() => this.rng() - 0.5);
+      const tripped = all.slice(0, 3).sort((a, b) => a - b);
+      const fault = this.pick(tripped);
+      let battery = this.int(15, 85);
+      if (battery === 50) battery = 49; // keep clear of the rule's edge so nobody argues about it
+      return { tripped, fault, battery, reset: [], order: breakerOrder({ tripped, fault, battery }) };
+    }
     // drill
     const colors = [...ROCK_COLORS].sort(() => this.rng() - 0.5);
     const keep = this.int(0, colors.length - 1);
@@ -146,6 +154,13 @@ export class Game {
         if (d.entered === d.confirm) this.solve(is);
         else { d.entered = ''; this.mistake('Wrong key entered at the airlock.'); }
       }
+    } else if (is.type === 'power') {
+      if (!Number.isInteger(a.breaker) || a.breaker < 0 || a.breaker >= CFG.power.breakers || d.reset.includes(a.breaker)) return;
+      if (a.breaker === d.fault) return this.mistake('The shorted breaker was reset and tripped again.');
+      if (!d.tripped.includes(a.breaker)) return this.mistake('A healthy breaker was switched off by mistake.');
+      if (a.breaker !== d.order[d.reset.length]) return this.mistake('Breakers reset in the wrong order.');
+      d.reset.push(a.breaker);
+      if (d.reset.length === d.order.length) this.solve(is);
     } else if (is.type === 'drill') {
       const rock = d.rocks[a.rock];
       if (!rock || rock.gone) return;
@@ -223,6 +238,7 @@ export class Game {
         if (is.type === 'freq') o.wave = d.value;
         if (is.type === 'patch') Object.assign(o, { err: d.err, stage: d.stage, entered: d.entered });
         if (is.type === 'drill') o.rocks = d.rocks.map(r => ({ color: r.color, gone: r.gone }));
+        if (is.type === 'power') Object.assign(o, { tripped: d.tripped, reset: d.reset });
         return o;
       }
       if (role === 'ops' || all) {
@@ -230,11 +246,13 @@ export class Game {
       }
       if (role === 'tech' || all) {
         if (is.type === 'freq') o.value = d.value;
+        if (is.type === 'power') o.fault = d.fault;
       }
       if (role === 'sci' || all) {
         if (is.type === 'wires') o.pressure = d.pressure;
         if (is.type === 'freq') o.target = d.target;
         if (is.type === 'drill') o.keep = d.rocks.find(r => r.keep).color;
+        if (is.type === 'power') o.battery = d.battery;
       }
       return o;
     });

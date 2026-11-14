@@ -92,6 +92,28 @@ try {
   }, issueId);
   if (result !== 'cut' && result !== 'solved') problems.push('astronaut: ' + result);
 
+  // Through the airlock: the hatch pad is in reach from the foot of the steps, the fade moves the
+  // astronaut into the hall, the breaker panel is mounted there, and the outage lighting runs.
+  const indoors = await astro.evaluate(async () => {
+    const mb = window.moonbase, wait = ms => new Promise(r => setTimeout(r, ms));
+    mb.rig.position.set(0, 0, 5.2); mb.rig.rotation.y = 0; mb.camera.rotation.x = -0.1; mb.rig.updateMatrixWorld(true);
+    if (!mb.useHatch()) return 'pointing at the airlock hatch from the steps did nothing';
+    for (let i = 0; i < 100 && mb.where() !== 'in'; i++) await wait(100);
+    if (mb.where() !== 'in') return 'the fade never moved the astronaut inside';
+    if (!mb.interior.group.visible || mb.world.rover.visible) return 'inside, but the wrong place is being drawn';
+    if (!mb.world.stations.power.children.length) return 'no breaker panel on the interior wall';
+    mb.outage(true);
+    for (let i = 0; i < 900 && mb.interior.phase !== 'backup'; i++) await wait(100);
+    if (mb.interior.phase !== 'backup') return 'backup lights never came on, stuck in ' + mb.interior.phase;
+    mb.outage(false);
+    for (let i = 0; i < 900 && mb.interior.phase !== 'main'; i++) await wait(100);
+    if (mb.interior.phase !== 'main') return 'roof lights never came back, stuck in ' + mb.interior.phase;
+    return 'ok';
+  });
+  if (indoors !== 'ok') problems.push('astronaut: ' + indoors);
+  await shot(astro, 'astronaut-interior');
+  await astro.evaluate(() => window.moonbase.place('out'));
+
   // Screenshots last, and one page at a time: the two WebGL pages fight for the CPU in software rendering.
   await shot(astro, 'astronaut-fuel-depot');
   await astro.evaluate(() => { const mb = window.moonbase; mb.rig.position.set(0, 0, 7); mb.rig.rotation.y = 0; mb.camera.rotation.x = 0; });

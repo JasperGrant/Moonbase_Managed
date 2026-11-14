@@ -22,6 +22,9 @@ export const CFG = {
   // The lobby: every role is picked and ready, then a short countdown starts the mission.
   // requireFullCrew: false lets one developer ready up alone (or run the server with SOLO=1).
   lobby: { requireFullCrew: true, countdownSeconds: 3 },
+  // Power outage inside the habitat: the roof lights die, the room is dark for darkMs, then the red
+  // backup lights ramp up over rampMs. Once fixed, the roof lights re-strike one row every restrikeMs.
+  power: { darkMs: 1500, rampMs: 400, restrikeMs: 120, breakers: 6 },
 };
 
 // The four roles that must be filled before a mission starts. "all" (2-player mode) covers the last three.
@@ -56,7 +59,12 @@ export const ISSUES = {
   freq:  { title: 'Comms dish off frequency' },
   patch: { title: 'Airlock software fault' },
   drill: { title: 'Drill jammed' },
+  power: { title: 'Main power bus tripped' },
 };
+
+// The one alarm that is fixed indoors. It has no outdoor station: the breaker panel is on the west
+// wall of the habitat interior (client/interior.js), reached through the airlock hatch.
+export const INDOOR = { power: { name: 'Breaker panel', where: 'inside the habitat, through the airlock' } };
 
 export const ROLES = {
   astronaut: 'Astronaut',

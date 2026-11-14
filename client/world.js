@@ -395,6 +395,8 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
     const flood = new THREE.SpotLight(0xffd9a8, 25, 12, 0.7, 0.6, 1.2);
     flood.position.set(0, 2.4, 3.35); flood.target.position.set(0, 0, 6);
     hab.add(flood, flood.target);
+    hab.userData.flood = flood;
+    hab.userData.windows = [];
     // Steps, radiators, mast with a dish, two lit windows, a conduit around the base
     mesh(new THREE.BoxGeometry(1.4, 0.18, 0.5), grey, 0, 0.09, 3.5, hab);
     mesh(new THREE.BoxGeometry(1.4, 0.18, 0.5), grey, 0, 0.27, 3.15, hab);
@@ -405,6 +407,7 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
     for (const a of [1.1, -1.1]) { // two lit windows with frames
       const f = mesh(new THREE.BoxGeometry(0.8, 0.5, 0.06), dark, Math.sin(a) * 2.5, 2.0, Math.cos(a) * 2.5, hab); f.lookAt(new THREE.Vector3(Math.sin(a) * 6, 2.0, Math.cos(a) * 6));
       const w = mesh(new THREE.BoxGeometry(0.64, 0.34, 0.05), new THREE.MeshBasicMaterial({ color: 0xffbf6a, toneMapped: false }), Math.sin(a) * 2.52, 2.0, Math.cos(a) * 2.52, hab); w.lookAt(new THREE.Vector3(Math.sin(a) * 6, 2.0, Math.cos(a) * 6));
+      hab.userData.windows.push(w.material);
     }
     mesh(new THREE.TorusGeometry(2.72, 0.04, 8, 48), dark, 0, 0.55, 0, hab).rotation.x = Math.PI / 2;
     for (let i = 0; i < 4; i++) { // legs with footpads, the module sits on them
@@ -577,6 +580,11 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
       for (const key in alarms) alarms[key].material.color.setHex(live.includes(key) ? (blink ? 0xff2a2a : 0x4a0b0b) : 0x1c3a22);
       rover.userData.beacon.material.color.setHex(Math.floor(time * 2) % 2 ? 0xffb030 : 0x4a3008);
       earth.userData.clouds.rotation.y = time * 0.004;
+      // A power outage shows from outside: the floodlight and the lit windows go dark, then dim red.
+      const outage = live.includes('power');
+      hab.userData.flood.intensity = outage ? 0 : 25;
+      warmGlow.color.setHex(outage ? 0x3a0c06 : 0xffc46b);
+      for (const m of hab.userData.windows) m.color.setHex(outage ? 0x5a1008 : 0xffbf6a);
     },
     // Ease the rover toward the server's position.
     moveRover(r, k = 0.2) {
