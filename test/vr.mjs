@@ -850,7 +850,10 @@ try {
 
   // A loss, and Mission Ops sends the crew back to the lobby first: the astronaut is not moved, and the
   // cuff keeps its cross until they press EXIT.
+  // Controllers for this one: bare hands have nothing to buzz.
+  await P(async () => { window.fakeXR.kind('left', 'controller'); window.fakeXR.kind('right', 'controller'); await window.vr.fr(8); });
   r = await endInside(false);
+  await P(async () => { window.fakeXR.kind('left', 'hand'); window.fakeXR.kind('right', 'hand'); await window.vr.fr(8); });
   check(r.debrief && r.face && r.status === 'lost' && r.where === 'in', 'debrief: a lost mission should put a cross on the cuff: ' + JSON.stringify(r));
   check(r.played.includes('lost') && !r.played.includes('won'), 'debrief: no "lost" sting when the mission failed: ' + JSON.stringify(r.played));
   check(r.haptics.some(h => h.ms >= 500), 'debrief: a lost mission should give a long pull on the hands: ' + JSON.stringify(r.haptics));
