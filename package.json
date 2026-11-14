@@ -12,6 +12,9 @@
     "smoke:shots": "SMOKE_SHOTS=1 node test/smoke.mjs",
     "vr": "node test/vr.mjs",
     "vr:shots": "VR_SHOTS=1 node test/vr.mjs",
+    "assets": "node test/assets.mjs",
+    "assets:shots": "ASSET_SHOTS=1 node test/assets.mjs",
+    "bake": "node scripts/bake-assets.mjs",
     "dev:cf": "wrangler dev",
     "deploy": "wrangler deploy",
     "vendor": "node scripts/vendor-three.mjs"

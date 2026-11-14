@@ -12,6 +12,10 @@ We are lowering visual fidelity on purpose. A flat-shaded, well-coloured, well-l
 
 **Don't:** neon green (`#58e08a`), hot red (`#ff5c5c`, `#ff2a2a`), electric blue (`#6fb6ff`), pure `#000` backgrounds, pure `#fff` text or glows, gradients as decoration, glows with big blur radii, rounded SaaS cards, Inter, Roboto or system UI fonts.
 
+## Models first
+
+We have real NASA models: an Apollo Lunar Module, a Viking lander, a tall comms dish, a pressure helmet, EVA tools, a crew lock bag, a suit, a Mission Control room, and real flight-deck panel photos. Use them wherever they fit, in preference to hand-built shapes; [ASSETS.md](ASSETS.md) assigns each one a place. A model is not finished when it loads: its materials get the treatment in "3D materials" below (period palette, rough paint, warm foil, no bright modern plastics or logos), so a 2010s NASA model sits in the same 1960s world as a hand-built console.
+
 ## Palette
 
 Use these names in code. CSS gets them as custom properties in `client/style.css`; canvas and three.js code get them from one shared module (the restyle spec adds `client/shared/palette.js`). Hex values are sRGB.
@@ -97,6 +101,8 @@ Canvas textures in three.js must wait for the font before they draw: `await docu
 | Bakelite knobs, handles | `bakelite`, `#4a3426` | 0.45 | 0 | None needed, small |
 | Canvas, webbing, suit fabric | `enamel`, `#7c7766` | 0.9 | 0 | Weave texture (`arm.js` already has one) |
 | Lamp lenses | the lamp's off or on value | n/a | n/a | `MeshBasicMaterial`, `toneMapped: false` when on |
+
+Restyling a loaded model: walk its meshes once after `loadModel`, match each material by name or by its current colour, and set colour, roughness and metalness from this table. Multiply real texture detail toward the palette rather than throwing it away. Do it once per model id, not per clone.
 
 ## Light
 

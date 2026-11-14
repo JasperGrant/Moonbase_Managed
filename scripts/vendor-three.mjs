@@ -8,7 +8,11 @@ import { fileURLToPath } from 'node:url';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const from = path.join(ROOT, 'node_modules', 'three');
 const to = path.join(ROOT, 'client', 'vendor', 'three');
-for (const f of ['build/three.module.js', 'build/three.core.js', 'examples/jsm/webxr/VRButton.js']) {
+for (const f of [
+  'build/three.module.js', 'build/three.core.js', 'examples/jsm/webxr/VRButton.js',
+  // client/assets/models/*.glb: GLTFLoader with the meshopt decoder (the bake uses EXT_meshopt_compression, not Draco)
+  'examples/jsm/loaders/GLTFLoader.js', 'examples/jsm/utils/BufferGeometryUtils.js', 'examples/jsm/libs/meshopt_decoder.module.js',
+]) {
   mkdirSync(path.dirname(path.join(to, f)), { recursive: true });
   cpSync(path.join(from, f), path.join(to, f));
 }
