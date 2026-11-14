@@ -112,6 +112,6 @@ Restyling a loaded model: walk its meshes once after `loadModel`, match each mat
 | Habitat inside (`interior.js`) | Ceiling strips as warm incandescent `#ffe2b0` (about 3000 K) | Hemisphere sky `#e8dcc4`, ground `#6e675a` | A faint `FogExp2(0x2a2620, 0.02)` for depth. Backup lighting is a deep oxide red (`#b8402a`), dimmer than now. |
 | Work lights and headlamps | `#ffe2b0` | | Spots, not floods. |
 
-## Lobby
+## Lobby (the loading screen)
 
-The lobby scenes already do the right thing: grey while a seat is empty, colour when it is taken. Keep that. The colour they come to life in is this palette: no `#9dffb8` CRT glow, no `#6fb6ff` welding arc wash, no green neon "ready" bar with a 24 px glow.
+Do not restyle it. The lobby on every page (its scenes, pictures, colours and type) stays as it is; the period look starts once the mission does.

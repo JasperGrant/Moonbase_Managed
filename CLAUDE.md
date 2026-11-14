@@ -40,6 +40,8 @@ Moonbase looks like a 1960s space program, not a 2020s sci-fi game. Grey-green c
 
 ## Working in this repo
 
+- **The loading screen (the lobby) is off limits** for restyling: `client/lobby.js`, `client/lobby/*.svg`, the lobby section of `style.css`, the astronaut page's gate. Keep its look and its graphics.
+
 - `client/assets/`: baked models and photos; `client/shared/assets.js` lists them. Never commit an unbaked `.glb`, an STL, a TIF or a texture over 2048 px.
 - `client/`: the pages. `world.js` is the Moon outside, `interior.js` the habitat, `stations.js` tools and repair sites, `arm.js` the astronaut's arms and wrist cuff, `console.js` and `style.css` Mission Control, `lobby.js` and `client/lobby/*.svg` the lobby scenes.
 - `server/` and `worker/`: the same `server/hub.js` runs on a laptop and on Cloudflare. Game rules live in `server/game.js` and `client/shared/`.

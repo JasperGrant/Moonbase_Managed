@@ -50,9 +50,14 @@ Sizes are the baked box, width (x) × height (y) × depth (z), in metres. "Repla
 | --- | --- | --- | --- | --- | --- |
 | `helmet` | 0.4 × 0.39 × 0.4 | 14k | On the workbench island at (-1.45, 0.96, -4.4) | `interior.js` 211-214, the two spheres | Gold-tinted visor (`foil-gold`, roughness 0.12, metalness 1). The dome is a little faceted after simplification; fine at bench distance. |
 | `aces-suit` | 0.82 × 1.85 × 0.51 | 10k | An empty pressure suit standing at the suit station by the airlock, or in the crew-quarters corridor | new | Its orange is already close to period international orange: keep it, roughen it to 0.85. Shuttle-era, so keep it out of the hero view. |
-| `glove` | 0.3 × 0.16 × 0.17 | 0.8k | A spare glove on the bench beside the helmet | new | **Not for the player's hands**: those are built in `arm.js` and `stations.js` because they bend with hand tracking. |
 | `crew-lock-bag` | 0.5 × 0.55 × 0.19 | 0.5k | Hanging on the wall by the airlock inside; a second one at the tool locker outside (`PLACES.locker`) | new | The bag the tools travel in. |
 | `sample-canister`, `cable-clip` | small | 3.3k, 2.6k | Bench clutter: canisters in a row, clips holding the hanging cables | the random debris boxes at `interior.js` 218 can shrink | 3D-printed ISS parts. Grey `#8b887d`, rough. |
+
+### The astronaut's hands (`client/arm.js`, `client/stations.js`)
+
+| Model | Size | Tris | Goes | Replaces | Notes |
+| --- | --- | --- | --- | --- | --- |
+| `glove` | 0.3 × 0.16 × 0.17 | 0.8k | **The astronaut's hand**: on the end of the arm that carries the wrist gauges, and on each controller | `arm.js` 112-137 (the `glove` group of spheres and capsules) and the box gloves in `stations.js` 211-220 | Scaled to a suited hand (0.24 m wrist to fingertip), its cuff just past the wrist disconnect ring. Right hand is the left mirrored (`scale.x = -1`). The tracked-hand joints (`astronaut.js` 379) stay: the model cannot bend its fingers. Also one spare glove on the habitat bench. |
 
 ### Tools (`client/stations.js` and the bench)
 
@@ -69,7 +74,7 @@ The game's own tools (brush, patch kit, space tire, backup generator) have no mo
 
 | Model | Size | Tris | Goes | Notes |
 | --- | --- | --- | --- | --- |
-| `mission-control-room` | 14.5 × 5.89 × 24.6 | 11k | The Mission Ops lobby scene, and as a backdrop | The room (a cutaway: rows of consoles, the wall screens, the ceiling). The bake already painted its 45 materials in the palette (the source had them all black). The laptop pages are 2D canvases, so render it to a picture rather than running a WebGL scene beside four consoles: add a small script that loads it with `loadModel`, frames the console rows from the back of the room, and saves a 1600 px WebP to `client/assets/textures/mission-control-room.webp`. Use that picture in `client/lobby/ops.svg` (as an `<image>` under the existing figure) and, very faint, behind the Mission Control header. |
+| `mission-control-room` | 14.5 × 5.89 × 24.6 | 11k | A faint backdrop behind the Mission Control consoles (never in the lobby) | The room (a cutaway: rows of consoles, the wall screens, the ceiling). The bake already painted its 45 materials in the palette (the source had them all black). The laptop pages are 2D canvases, so render it to a picture rather than running a WebGL scene beside four consoles: add a small script that loads it with `loadModel`, frames the console rows from the back of the room, and saves a 1600 px WebP to `client/assets/textures/mission-control-room.webp`. Use that picture, very faint, behind the console grid (`#run`). The lobby keeps its own pictures. |
 
 ## Where each photo goes
 
@@ -78,7 +83,7 @@ The game's own tools (brush, patch kit, space tire, backup generator) have no mo
 | `flight-deck-panel-a.webp` | A circuit-breaker panel: rows of breakers with yellow and red collars | The face of the switchboard box (`world.js` 599-604, the 1.1 × 0.8 m box the astronaut's page hangs on the habitat's west-wall `mount`), around the socket plate | Real Shuttle hardware that looks the part. Multiply by `#e8dcc4` to warm it. Do not paint the game's sockets, plugs or lamp into it: those stay 3D so they can light up and be grabbed. |
 | `flight-deck-panel-c.webp` | Breaker panel "R14" | The wall surround around the switchboard inside the habitat (`interior.js` 234-239, at `ROOM.panel`), as a larger panel the board sits in | Same treatment. Interior materials are Lambert on purpose (the hall has its own three lights); a `map` works on Lambert too. |
 | `flight-deck-panel-b.webp` | Toggle switches over four rows of breakers | Non-interactive wall panels in the habitat, next to the life-support and habitat-power displays (`interior.js` 282-297) | Decoration that says "control room". Two or three crops at most; do not tile it. |
-| `lunar-far-side.webp` | An orbital photo of cratered terrain with hard shadows | A "site survey" print pinned on the habitat wall; a mounted print on the Technician's console (a cream `dial` card with the photo inset); the backdrop of the astronaut lobby panel | **Not a ground texture**: its shadows are baked in and its scale is kilometres. The terrain keeps its LOLA heightmap. |
+| `lunar-far-side.webp` | An orbital photo of cratered terrain with hard shadows | A "site survey" print pinned on the habitat wall; a mounted print on the Technician's console (a cream `dial` card with the photo inset) | **Not a ground texture**: its shadows are baked in and its scale is kilometres. The terrain keeps its LOLA heightmap. |
 
 ## Not used
 

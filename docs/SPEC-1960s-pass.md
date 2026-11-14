@@ -1,6 +1,6 @@
 # Spec: the 1960s visual pass
 
-Status: proposed, not started. Audited against `main` at `d42b548` (lobby and habitat interior merged).
+Status: being carried out on this branch. Audited against `main` at `d42b548`, re-checked after merging `db05bea` (the cuff on your own arm, the admin console).
 
 ## Goal
 
@@ -23,7 +23,7 @@ Do them in this order; each one is a mergeable PR on its own.
 1. **Palette module, fonts, and Mission Control CSS** (laptop pages, quickest visible win).
 2. **Mission Control instruments** (`console.js` canvases: dials, battery, oxygen, radar, wiring, blackout).
 3. **The astronaut's world** (`world.js`, `interior.js`, `stations.js`, `astronaut.js`, `arm.js`): materials, lamps, lights, in-world screens.
-4. **Lobby** (`style.css` lobby section, `lobby.js` effects, `client/lobby/*.svg`).
+4. **Lobby: not touched.** The loading screen keeps its look and its graphics (see phase 4).
 5. **NASA models and photos** (`client/assets/`, placed per [ASSETS.md](ASSETS.md)). Can run in parallel with phases 1 and 2, since it touches the 3D files; do it before or together with phase 3 so phase 3 restyles models rather than hand-built shapes that are about to go.
 
 Still out of scope: bevelling the hand-built shapes that no model replaces (the brush, patch kit, tire, generator, the terrain props), and the "game juice" audit.
@@ -182,12 +182,11 @@ Lines 8-9: same tone-mapping change as `astronaut.js`. Optional: a phosphor-tint
 
 ---
 
-## Phase 4: the lobby
+## Phase 4: the lobby (not touched)
 
-### `client/style.css` lobby section (lines 98-170)
+Sevan's call: **the loading screen stays exactly as it is.** That covers the lobby on every page (`client/lobby.js`, `client/lobby/*.svg`, the lobby section of `style.css`, the astronaut page's gate, the briefing sheet that opens over it) and its pictures. The restyle in phases 1-3 is scoped so none of it reaches the lobby: the old CSS variables stay in `:root` for the lobby, and the new look applies only to the Mission Control header, toast, consoles and results.
 
-| Line | Now | Replace with |
-| --- | --- | --- |
+--- | --- | --- |
 | 98 | `.lobby` background `#000` | `--bg` |
 | 109 | `.lb-panel.yours` inset amber 3 px | Keep, with the new amber |
 | 110 | `.lb-panel.ready::before` 8 px neon-green bar with `0 0 24px` glow | A row of lamps along the bottom edge, or a 4 px `--green` bar with no glow |
@@ -225,27 +224,29 @@ Each scene has a handful of saturated accents that bypass the grayscale-to-colou
 Everything is baked and committed under `client/assets/`, with the manifest and loader in `client/shared/assets.js` and the placement in [ASSETS.md](ASSETS.md). This phase places them. Each step below is one small PR; do them in this order, because each is worth more than the next.
 
 1. **Load and restyle helper.** In `client/shared/assets.js` or a new `client/shared/restyle.js`, a function that takes a loaded model and a material map (material name or colour to palette entry, roughness, metalness) and applies it once per model id. Turn on `castShadow` / `receiveShadow` per ASSETS.md.
-2. **The welder becomes the pistol-grip tool** (`stations.js` 73-80): the spark on the bit's tip, belt and rack scale to 1, grab offsets checked in `npm run vr`.
-3. **The Apollo LM replaces the horizon lander** (`world.js` 765-778), flag kept.
-4. **The comms dish** (`world.js` 553-572) and the **turntable mount** on the habitat roof (`world.js` 477).
-5. **The habitat bench:** helmet replaces the two spheres (`interior.js` 211-214), spare glove beside it, crew lock bag on the wall, ACES suit at the suit station, printed tools in a tray, canisters and cable clips.
-6. **The breaker-panel photos** on the switchboard face and its wall surround; the toggle-panel photo on the walls by the habitat displays.
-7. **The tool rack shadow board** at the locker: wrench, ratchet, hammer, grease gun over painted outlines, with tethers.
-8. **Rover-camera astronaut** (`world.js` 791-800): the `astronaut` model replaces the capsules.
-9. **Mission Control room** rendered to a still for the Mission Ops lobby scene and the header backdrop.
-10. **Scenery:** Viking lander, depot cargo (spectrograph crate, cradle, GRACE), and last the crashed LADEE.
-11. **The habitat exterior** (`hab-module`), only if time allows: it changes the silhouette the whole outdoor game is built around, so check the airlock, the canopy and `CFG.habRadius` with the team first.
+2. **The astronaut glove replaces the hand models.** The cuff arm's hand in `client/arm.js` (the `glove` group built from spheres and capsules, the hand at the end of the arm that carries the wrist gauges) and the box gloves on each controller in `client/stations.js` become the `glove` model, life-size, wrist at the disconnect ring. The tracked-hand joints stay as they are: a static model cannot follow tracked fingers.
+3. **The welder becomes the pistol-grip tool** (`stations.js` 73-80): the spark on the bit's tip, belt and rack scale to 1, grab offsets checked in `npm run vr`.
+4. **The Apollo LM replaces the horizon lander** (`world.js` 765-778), flag kept.
+5. **The comms dish** (`world.js` 553-572) and the **turntable mount** on the habitat roof (`world.js` 477).
+6. **The habitat bench:** helmet replaces the two spheres (`interior.js` 211-214), spare glove beside it, crew lock bag on the wall, ACES suit at the suit station, printed tools in a tray, canisters and cable clips.
+7. **The breaker-panel photos** on the switchboard face and its wall surround; the toggle-panel photo on the walls by the habitat displays.
+8. **The tool rack shadow board** at the locker: wrench, ratchet, hammer, grease gun over painted outlines, with tethers.
+9. **Rover-camera astronaut** (`world.js` 791-800): the `astronaut` model replaces the capsules.
+10. **Mission Control room** rendered to a still, used faintly behind the Mission Control consoles (not in the lobby).
+11. **Scenery:** Viking lander, depot cargo (spectrograph crate, cradle, GRACE), and last the crashed LADEE.
+12. **The habitat exterior** (`hab-module`), only if time allows: it changes the silhouette the whole outdoor game is built around, so check the airlock, the canopy and `CFG.habRadius` with the team first.
 
-For each step: `npm run assets`, `npm test`, `npm run vr:shots` (and `smoke:shots` for 9), look at the pictures, and say in the PR what the frame looks like in the headset if anyone tried it.
+For each step: `npm run assets`, `npm test`, `npm run vr:shots` (and `smoke:shots` for 10), look at the pictures, and say in the PR what the frame looks like in the headset if anyone tried it.
 
 ---
 
 ## Done means
 
-- No hex value from the "Don't" list in DESIGN.md left in `client/` outside `client/vendor/` (`grep -rnE "58e08a|ff5c5c|6fb6ff|ffb84a|ff2a2a|ff3b3b|ff3b30|4da3ff|4dff8c|9dffb8" client --exclude-dir=vendor` returns nothing).
+- No hex value from the "Don't" list in DESIGN.md left in `client/` outside `client/vendor/` and the lobby (`grep -rnE "58e08a|ff5c5c|6fb6ff|ffb84a|ff2a2a|ff3b3b|ff3b30|4da3ff" client --exclude-dir=vendor --exclude-dir=lobby --exclude=lobby.js` shows only the `:root` variables the lobby keeps).
 - All colours come from `client/shared/palette.js` or the CSS custom properties.
 - Michroma and Courier Prime load from `client/fonts/` with no network; no `ui-monospace` or system fonts left.
 - `npm test`, `npm run smoke` and `npm run vr` still pass.
-- Before and after screenshots of Mission Control, the lobby, the Moon outside, the habitat (main power and backup) and the wrist cuff are in the PR, and the images in `docs/` are refreshed.
+- The lobby looks exactly as it did before.
+- Before and after screenshots of Mission Control, the Moon outside, the habitat (main power and backup) and the wrist cuff are in the PR, and the images in `docs/` are refreshed.
 - The phase 5 models are in the scenes they are listed for in ASSETS.md, restyled to the palette, and `npm run assets` passes.
 - Someone has looked at it in the Quest: the wrist cuff, the board lamps and the READY board still read at arm's length.
