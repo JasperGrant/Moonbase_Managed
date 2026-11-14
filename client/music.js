@@ -32,6 +32,7 @@ class Music {
     this.ducks = new Set();
     this.playing = false;
     this.last = performance.now();
+    this.retried = 0;
     if (typeof Audio === 'undefined') return;
     this.load();
   }
@@ -41,21 +42,36 @@ class Music {
   async load() {
     let url = SRC;
     try { const r = await fetch(SRC); if (r.ok) url = URL.createObjectURL(await r.blob()); } catch {}
+    try { await this.open(url); }
+    catch {
+      // The downloaded copy would not play (a server that labels it wrongly, say): try the file by its address.
+      try { await this.open(SRC); } catch (e) { console.warn('music: the theme could not be loaded', e); return; }
+    }
+    const a = this.players[0];
+    this.length = a.duration;
+    a.currentTime = this.where();
+    this.start();
+    setInterval(() => this.step(), 50);
+  }
+
+  // Two players on the same source; resolves when the first knows how long the song is.
+  open(src) {
     this.players = [0, 1].map(() => {
       const a = new Audio();
       a.preload = 'auto';
-      a.src = url;
+      a.src = src;
       a.volume = 0;
       // If a hidden tab's timer is too slow to start the next player in time, the end of the song starts it.
       a.addEventListener('ended', () => { if (a === this.players[this.cur]) this.handOver(); });
       return a;
     });
     const a = this.players[0];
-    await new Promise(res => { if (a.readyState >= 1) res(); else a.addEventListener('loadedmetadata', res, { once: true }); });
-    this.length = a.duration;
-    a.currentTime = this.where();
-    this.start();
-    setInterval(() => this.step(), 50);
+    return new Promise((res, rej) => {
+      if (a.readyState >= 1) return res();
+      const timer = setTimeout(() => rej(new Error('timed out')), 15000);
+      a.addEventListener('loadedmetadata', () => { clearTimeout(timer); res(); }, { once: true });
+      a.addEventListener('error', () => { clearTimeout(timer); rej(a.error || new Error('error')); }, { once: true });
+    });
   }
 
   // Where the song is right now, by the clock.
@@ -72,12 +88,20 @@ class Music {
     const go = () => {
       this.waiting = false;
       for (const k of KINDS) removeEventListener(k, go, true);
-      const a = this.players[this.cur];
-      a.currentTime = this.where(); // it has been "playing" all along: catch up
-      this.start();
+      this.unlock();
     };
-    const KINDS = ['pointerdown', 'keydown', 'touchstart', 'click'];
+    // Every kind of input a browser counts as the person having touched the page.
+    const KINDS = ['pointerdown', 'pointerup', 'mousedown', 'keydown', 'keyup', 'touchstart', 'touchend', 'click'];
     for (const k of KINDS) addEventListener(k, go, true);
+  }
+
+  // Try to start now. Pages call this at a moment the browser counts as the person's own action, such as
+  // entering VR or pulling a trigger, which the page's click and key listeners cannot see.
+  unlock() {
+    if (this.playing || !this.length) return;
+    const a = this.players[this.cur];
+    a.currentTime = this.where(); // it has been "playing" all along: catch up
+    this.start();
   }
 
   // The next player picks the song up from the top (or wherever the clock says, if it has drifted).
@@ -96,6 +120,8 @@ class Music {
     this.gain += (want - this.gain) * (1 - Math.exp(-dt * 3 / SMOOTH));
     if (!this.playing || !this.length) return;
     const a = this.players[this.cur], b = this.players[1 - this.cur], end = this.length;
+    // Something paused it (a browser saving power, a call, the headset coming off): start it again, in step.
+    if (a.paused && now - this.retried > 2000) { this.retried = now; a.currentTime = this.where(); a.play().catch(() => {}); }
     // Time to start the next one: the last FADE seconds of this one overlap its start.
     if (a.currentTime >= end - FADE && b.paused) this.handOver();
     // An equal-power crossfade: the one that is ending fades out, the one that is starting fades in.

@@ -132,6 +132,54 @@ try {
   });
   check(radioDuck.on && !radioDuck.off, 'the radio should duck the theme while the other side talks: ' + JSON.stringify(radioDuck));
 
+  step('something pauses it: it starts again');
+  const resumed = await home.evaluate(async () => {
+    const { music } = await import('/music.js');
+    music.players[music.cur].pause();
+    const was = music.status.playing;
+    for (let i = 0; i < 60 && !music.status.playing; i++) await new Promise(r => setTimeout(r, 100));
+    return { was, now: music.status.playing, at: music.status.at, len: music.length };
+  });
+  check(!resumed.was && resumed.now, 'after the browser paused it, the theme should start again within a few seconds: ' + JSON.stringify(resumed));
+  check(near(resumed.at, clockPos(resumed.len), 8, resumed.len), 'and it should come back in step with the clock: ' + JSON.stringify(resumed));
+
+  step('the downloaded copy will not play: it falls back to the file itself');
+  {
+    const p = await ctx.newPage();
+    p.on('pageerror', e => problems.push('fallback page: ' + e.message));
+    // A server that sends the theme as something no player can read, but only when it is fetched, not when it is
+    // used as an audio source: the page gets a blob that will not play.
+    await p.route('**/assets/audio/theme.m4a', async route => {
+      const h = route.request().headers();
+      if (h['sec-fetch-dest'] === 'empty') return route.fulfill({ status: 200, contentType: 'audio/mp4', body: Buffer.from('this is not audio') });
+      return route.continue();
+    });
+    await p.goto(BASE + '/admin');
+    s = await until(p, s => s.length > 0, 20);
+    check(s.length > 100, 'with a broken download the theme should still load from the file itself: ' + JSON.stringify(s));
+    await p.keyboard.press('Shift');
+    s = await until(p, s => s.playing, 6);
+    check(s.playing, 'and play: ' + JSON.stringify(s));
+    await p.close();
+  }
+
+  step('unlock() starts it from a moment the page cannot see (VR input)');
+  {
+    const p = await open('/ops');
+    await until(p, s => s.length > 0);
+    check(!(await status(p)).playing, 'it should still be waiting for the first input');
+    // No click or key press reaches the page: only the page's own code asks, as the astronaut page does when
+    // a VR session starts. The stand-in browser rule counts only real input, so use one real key press first
+    // to stand for the headset's own gesture, then check unlock() is what gets it going.
+    await p.evaluate(async () => { (await import('/music.js')).music.unlock(); });
+    await p.waitForTimeout(500);
+    const refused = (await status(p)).playing;
+    await p.keyboard.press('Shift');
+    s = await until(p, s => s.playing, 6);
+    check(s.playing, 'unlock() and a real input together should have it playing: ' + JSON.stringify({ refused, ...s }));
+    await p.close();
+  }
+
   step('the astronaut page and the admin console play it too');
   for (const url of ['/astronaut', '/admin']) {
     const p = await open(url);

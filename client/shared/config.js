@@ -78,7 +78,7 @@ export const CRACK_POINTS = 6;
 
 // Where things are. x/z in metres, north is -z. ry is the way a fixture faces: the astronaut
 // stands on its local +z side.
-const CRACK_ANGLES = [45, 135, 195, 255, 285, 345]; // degrees round the dome, between the ribs
+const CRACK_ANGLES = [45, 135, 225, 255, 285, 315]; // degrees round the habitat's drum, clear of the airlock (+z) and the side modules (±x)
 export const PLACES = {
   locker: { x: -3.6, z: 4.6, ry: 0 },
   // The switchboard is inside the habitat, on the west wall of the hall (client/interior.js). Indoors,

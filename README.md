@@ -195,6 +195,8 @@ The theme (`client/assets/audio/theme.m4a`, 1:47) plays on every page, all the t
 - **The loop is a crossfade.** The song ends at full volume and starts with a quiet intro, so the last 3 seconds fade out while the start fades in on a second player, with no dip.
 - **It makes room for the game.** Full in the lobby and on the results, about half as loud during a mission so the alarms, the leak hiss and the radio come through, and down to a third of that while anyone is on the radio, in either direction.
 
+- **It keeps itself going.** If the browser pauses it (a power-saving tab, a call, the headset coming off) it starts again within a couple of seconds, in step with the clock. If the downloaded copy will not play it falls back to the file by its address, and logs a warning in the browser console if neither works. In the headset it also starts when a VR session begins and on a trigger pull or pinch, which the page's click and key listeners never see.
+
 The levels are at the top of `client/music.js`. It plays through an ordinary audio element, not through the radio's Web Audio graph, which runs at 16 kHz and would make it sound like a telephone.
 
 ## Where things are
