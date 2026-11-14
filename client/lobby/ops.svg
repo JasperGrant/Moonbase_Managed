@@ -1,0 +1,124 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 1800" preserveAspectRatio="xMidYMid slice">
+  <!-- Mission Ops: the flight director hunched over his console in a 1960s control room, cigarette in hand.
+       An unnamed flight director in the Apollo-era style: white vest, crew cut, headset. -->
+  <defs>
+    <linearGradient id="room" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#070605"/><stop offset=".45" stop-color="#15100b"/><stop offset="1" stop-color="#050403"/>
+    </linearGradient>
+    <radialGradient id="crt" cx=".5" cy=".5" r=".6">
+      <stop offset="0" stop-color="#9dffb8"/><stop offset=".55" stop-color="#2fd06a"/><stop offset="1" stop-color="#0a3a1c"/>
+    </radialGradient>
+    <radialGradient id="crtSmall" cx=".5" cy=".5" r=".7">
+      <stop offset="0" stop-color="#5df08f"/><stop offset="1" stop-color="#0b2e17"/>
+    </radialGradient>
+    <radialGradient id="faceGlow" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(560 900) scale(380)">
+      <stop offset="0" stop-color="#4dff8c" stop-opacity=".32"/><stop offset="1" stop-color="#4dff8c" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="vest" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#b9b4a6"/><stop offset=".6" stop-color="#efece2"/><stop offset="1" stop-color="#d8f2df"/>
+    </linearGradient>
+    <linearGradient id="skin" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#8a5c3e"/><stop offset=".7" stop-color="#c99872"/><stop offset="1" stop-color="#bfe0b9"/>
+    </linearGradient>
+    <linearGradient id="desk" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#5a4a36"/><stop offset="1" stop-color="#2a2016"/>
+    </linearGradient>
+    <linearGradient id="consoleFront" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#3b3e3a"/><stop offset="1" stop-color="#0d0e0d"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="900" height="1800" fill="url(#room)"/>
+
+  <!-- the big wall display: a trajectory plot -->
+  <rect x="90" y="300" width="720" height="300" fill="#0b1a10" stroke="#1d3424" stroke-width="4"/>
+  <g stroke="#2a6b42" stroke-width="2" fill="none" opacity=".8">
+    <path d="M90 450 h720 M450 300 v300" opacity=".5"/>
+    <path d="M120 560 Q300 330 450 450 T780 330" stroke="#5fe39a" stroke-width="3"/>
+    <circle cx="210" cy="470" r="34"/><circle cx="700" cy="380" r="16"/>
+  </g>
+  <circle cx="560" cy="430" r="6" fill="#ffb84a"/>
+
+  <!-- back rows of consoles, each with a green screen -->
+  <g>
+    <rect x="0" y="720" width="900" height="70" fill="#1d1a16"/>
+    <g fill="url(#crtSmall)">
+      <rect x="40" y="672" width="64" height="48" rx="6"/><rect x="150" y="672" width="64" height="48" rx="6"/><rect x="260" y="672" width="64" height="48" rx="6"/>
+      <rect x="580" y="672" width="64" height="48" rx="6"/><rect x="690" y="672" width="64" height="48" rx="6"/><rect x="800" y="672" width="64" height="48" rx="6"/>
+    </g>
+    <rect x="0" y="790" width="900" height="16" fill="#0c0b09"/>
+    <g fill="#e6dccb" opacity=".25">
+      <circle cx="120" cy="650" r="16"/><circle cx="300" cy="652" r="15"/><circle cx="720" cy="648" r="16"/>
+    </g>
+  </g>
+
+  <!-- the director's console: a big CRT on the right, facing him -->
+  <path d="M540 820 L800 790 L820 1150 L560 1160Z" fill="#2c2f2b"/>
+  <path d="M570 850 L780 826 L792 1100 L586 1110Z" fill="#101410"/>
+  <path d="M584 866 L768 846 L778 1086 L598 1094Z" fill="url(#crt)"/>
+  <g stroke="#0a3a1c" stroke-width="3" opacity=".8">
+    <path d="M604 900 L752 886 M606 940 L700 932 M608 980 L758 966 M610 1020 L690 1013 M612 1060 L740 1050"/>
+  </g>
+  <rect x="640" y="1150" width="110" height="20" fill="#1a1c19"/>
+
+  <!-- green light from the screen spilling onto him -->
+  <rect width="900" height="1800" fill="url(#faceGlow)"/>
+
+  <!-- the flight director, side view, leaning toward the screen -->
+  <g>
+    <!-- chair back -->
+    <path d="M150 960 Q130 1100 160 1260 L210 1260 Q190 1110 214 970Z" fill="#1b1612"/>
+    <!-- back and shirt -->
+    <path d="M220 960 Q236 880 330 860 L420 880 Q470 930 476 1010 L470 1180 L230 1180 Q206 1080 220 960Z" fill="#cfd8de"/>
+    <!-- the white vest -->
+    <path d="M236 970 Q250 900 330 884 L408 898 Q446 950 450 1020 L446 1180 L250 1180 Q226 1080 236 970Z" fill="url(#vest)"/>
+    <path d="M430 930 L452 1180" stroke="#9a9588" stroke-width="3"/>
+    <circle cx="444" cy="1020" r="4" fill="#7b766a"/><circle cx="447" cy="1070" r="4" fill="#7b766a"/><circle cx="449" cy="1120" r="4" fill="#7b766a"/>
+    <!-- tie -->
+    <path d="M440 900 L456 912 L472 1010 L458 1030 L448 1006Z" fill="#1d2433"/>
+    <!-- neck -->
+    <path d="M396 840 L430 836 L444 900 L404 904Z" fill="url(#skin)"/>
+    <!-- head, tilted forward -->
+    <path d="M370 760 Q372 696 432 688 Q498 684 508 748 Q514 776 508 790 L520 806 L508 812 Q510 836 496 846 Q470 856 446 850 L420 852 Q378 840 370 790Z" fill="url(#skin)"/>
+    <!-- crew cut -->
+    <path d="M372 762 Q370 700 430 688 Q490 682 506 730 L498 732 Q470 712 430 716 Q394 722 384 770Z" fill="#2a1d14"/>
+    <path d="M372 740 h132" stroke="#3a2a1d" stroke-width="2" opacity=".6"/>
+    <!-- ear and headset -->
+    <ellipse cx="418" cy="776" rx="13" ry="20" fill="#b07f5c"/>
+    <path d="M396 704 Q424 670 456 690" stroke="#111" stroke-width="7" fill="none"/>
+    <path d="M412 700 Q408 740 418 760" stroke="#111" stroke-width="6" fill="none"/>
+    <rect x="404" y="758" width="28" height="36" rx="10" fill="#151515"/>
+    <path d="M432 784 Q470 822 498 828" stroke="#151515" stroke-width="5" fill="none"/>
+    <circle cx="500" cy="828" r="6" fill="#151515"/>
+    <!-- brow and eye, lit green from the screen -->
+    <path d="M478 752 q14 -6 24 2" stroke="#2a1d14" stroke-width="5" fill="none"/>
+    <path d="M482 766 q8 -4 16 0" stroke="#1a120c" stroke-width="4" fill="none"/>
+    <!-- the arm on the desk, hand up at his mouth with the cigarette -->
+    <path d="M300 940 Q330 1060 420 1130 L470 1110 Q420 1040 380 940Z" fill="#cfd8de"/>
+    <path d="M430 1120 Q470 1060 480 960 L452 950 Q438 1040 404 1104Z" fill="#c4a07e"/>
+    <path d="M462 960 q20 -30 34 -40 q10 -4 12 8 q-6 20 -22 40z" fill="#c99872"/>
+    <rect x="490" y="900" width="44" height="7" rx="3" fill="#f2efe6" transform="rotate(-18 490 900)"/>
+    <circle cx="532" cy="887" r="4.5" fill="#ff7a2a"/>
+  </g>
+
+  <!-- the desk and what is on it -->
+  <path d="M0 1170 L900 1150 L900 1210 L0 1232Z" fill="url(#desk)"/>
+  <!-- ashtray with a stub -->
+  <ellipse cx="300" cy="1172" rx="44" ry="11" fill="#7a7c80"/><ellipse cx="300" cy="1170" rx="32" ry="7" fill="#2a2b2d"/>
+  <rect x="290" y="1162" width="26" height="5" rx="2" fill="#d9d3c4" transform="rotate(8 290 1162)"/>
+  <!-- coffee cup -->
+  <path d="M150 1120 h52 l-6 52 h-40z" fill="#e9e4d6"/><ellipse cx="176" cy="1120" rx="26" ry="6" fill="#3b2414"/>
+  <path d="M202 1132 q20 2 14 22 q-6 10 -18 6" stroke="#e9e4d6" stroke-width="6" fill="none"/>
+  <!-- console front with rows of push buttons -->
+  <path d="M0 1232 L900 1210 L900 1800 L0 1800Z" fill="url(#consoleFront)"/>
+  <g>
+    <g fill="#58e08a"><rect x="80" y="1270" width="24" height="16" rx="2"/><rect x="200" y="1268" width="24" height="16" rx="2"/><rect x="560" y="1262" width="24" height="16" rx="2"/></g>
+    <g fill="#ffb84a"><rect x="120" y="1270" width="24" height="16" rx="2"/><rect x="600" y="1262" width="24" height="16" rx="2"/><rect x="680" y="1260" width="24" height="16" rx="2"/></g>
+    <g fill="#ff5c5c"><rect x="160" y="1269" width="24" height="16" rx="2"/><rect x="720" y="1260" width="24" height="16" rx="2"/></g>
+    <g fill="#3a3d39"><rect x="240" y="1268" width="24" height="16" rx="2"/><rect x="280" y="1267" width="24" height="16" rx="2"/><rect x="640" y="1261" width="24" height="16" rx="2"/><rect x="760" y="1259" width="24" height="16" rx="2"/></g>
+    <g fill="#2a2c29"><rect x="80" y="1310" width="300" height="40" rx="4"/><rect x="540" y="1300" width="280" height="40" rx="4"/></g>
+  </g>
+
+  <rect width="900" height="270" fill="#000" opacity=".45"/>
+  <rect y="1440" width="900" height="360" fill="#000" opacity=".4"/>
+</svg>

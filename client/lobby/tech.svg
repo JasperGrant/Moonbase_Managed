@@ -1,0 +1,118 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 1800" preserveAspectRatio="xMidYMid slice">
+  <!-- The Technician: welding on the VIPER rover in a dark workshop. The arc is the only real light. -->
+  <defs>
+    <linearGradient id="wall" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#05070a"/><stop offset=".6" stop-color="#10151c"/><stop offset="1" stop-color="#07090c"/>
+    </linearGradient>
+    <linearGradient id="floor" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1c232c"/><stop offset="1" stop-color="#040506"/>
+    </linearGradient>
+    <radialGradient id="arcLight" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(300 1095) scale(520)">
+      <stop offset="0" stop-color="#bfe3ff" stop-opacity=".45"/><stop offset=".4" stop-color="#5aa8ff" stop-opacity=".12"/><stop offset="1" stop-color="#5aa8ff" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="body" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#e4ecf5"/><stop offset=".4" stop-color="#aab4c0"/><stop offset="1" stop-color="#5d6672"/>
+    </linearGradient>
+    <linearGradient id="foil" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ffe19a"/><stop offset=".5" stop-color="#c8902c"/><stop offset="1" stop-color="#6a4410"/>
+    </linearGradient>
+    <linearGradient id="solar" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#2a4a8a"/><stop offset="1" stop-color="#0d1a36"/>
+    </linearGradient>
+    <linearGradient id="coverall" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#1d2630"/><stop offset=".8" stop-color="#3a4d63"/><stop offset="1" stop-color="#9fc8ee"/>
+    </linearGradient>
+    <pattern id="peg" width="40" height="40" patternUnits="userSpaceOnUse"><circle cx="20" cy="20" r="3" fill="#1a222c"/></pattern>
+  </defs>
+
+  <rect width="900" height="1800" fill="url(#wall)"/>
+  <rect x="40" y="320" width="820" height="520" fill="url(#peg)" opacity=".9"/>
+  <!-- tools hanging on the pegboard -->
+  <g fill="#222c38">
+    <path d="M110 400 h14 v150 h-14z M100 400 h34 v20 h-34z"/>
+    <path d="M190 390 l20 0 l6 120 q-16 20 -32 0z"/>
+    <circle cx="290" cy="430" r="34" fill="none" stroke="#222c38" stroke-width="10"/>
+    <path d="M620 380 h18 v170 h-18z"/><path d="M700 400 q30 -10 40 30 l-14 130 h-14 l-6 -120 q-6 -20 -20 -20z"/>
+    <rect x="770" y="420" width="50" height="90" rx="6"/>
+  </g>
+  <!-- a hanging work light, switched off -->
+  <path d="M450 0 V230" stroke="#1a1f26" stroke-width="4"/>
+  <path d="M410 230 h80 l20 40 h-120z" fill="#1a1f26"/>
+  <!-- a NASA-ish banner, too dark to read -->
+  <rect x="330" y="300" width="240" height="44" fill="#121820"/>
+
+  <!-- floor -->
+  <path d="M0 1230 L900 1230 L900 1800 L0 1800Z" fill="url(#floor)"/>
+  <g stroke="#262f3a" stroke-width="2" opacity=".7"><path d="M0 1300 H900 M0 1400 H900 M150 1230 L40 1800 M450 1230 V1800 M750 1230 L860 1800"/></g>
+
+  <!-- everything in the work area, scaled in a little so it stays inside the crop -->
+  <g transform="translate(450 1100) scale(.86) translate(-410 -1100)">
+  <!-- VIPER: far-side wheels -->
+  <g fill="#14181e">
+    <circle cx="390" cy="1218" r="62"/><circle cx="690" cy="1218" r="62"/>
+  </g>
+  <!-- rocker suspension -->
+  <path d="M330 1250 L420 1130 L560 1130 L640 1250" stroke="#3a424d" stroke-width="16" fill="none" stroke-linejoin="round"/>
+  <!-- body -->
+  <path d="M250 980 L720 980 L740 1170 L232 1170Z" fill="url(#body)"/>
+  <path d="M262 1000 L470 1000 L476 1150 L250 1150Z" fill="url(#foil)" opacity=".9"/>
+  <g stroke="#6a4410" stroke-width="2" opacity=".5"><path d="M270 1030 l190 -6 M268 1070 l200 4 M258 1110 l210 -6"/></g>
+  <rect x="500" y="1010" width="200" height="120" rx="6" fill="#7d8794"/>
+  <g fill="#cfd6df"><rect x="520" y="1030" width="70" height="12"/><rect x="520" y="1052" width="50" height="12"/><circle cx="660" cy="1070" r="24" fill="#2b313a"/><circle cx="660" cy="1070" r="12" fill="#f5f7fa"/></g>
+  <!-- headlights -->
+  <circle cx="722" cy="1010" r="10" fill="#fff6d0"/><circle cx="722" cy="1040" r="10" fill="#fff6d0"/>
+  <!-- solar panel on top, tilted -->
+  <path d="M232 980 L520 900 L540 920 L250 1000Z" fill="url(#solar)"/>
+  <g stroke="#6a8ccf" stroke-width="1.5" opacity=".5"><path d="M290 966 L536 896 M270 980 L520 912 M330 952 L346 972 M390 936 L406 956 M450 918 L466 940"/></g>
+  <!-- the mast and its camera head -->
+  <rect x="600" y="660" width="18" height="320" fill="#a8b2bf"/>
+  <rect x="612" y="660" width="6" height="320" fill="#5d6672"/>
+  <rect x="556" y="600" width="110" height="64" rx="8" fill="#dfe6ee"/>
+  <rect x="556" y="636" width="110" height="28" rx="4" fill="#9aa4b1"/>
+  <circle cx="586" cy="628" r="15" fill="#1a1f26"/><circle cx="586" cy="628" r="7" fill="#4aa0ff"/>
+  <circle cx="636" cy="628" r="15" fill="#1a1f26"/><circle cx="636" cy="628" r="7" fill="#4aa0ff"/>
+  <rect x="640" y="700" width="40" height="10" fill="#a8b2bf"/><rect x="676" y="680" width="8" height="50" fill="#dfe6ee"/>
+  <!-- near-side wheels, with treads -->
+  <g>
+    <circle cx="330" cy="1240" r="72" fill="#232a33"/><circle cx="330" cy="1240" r="72" fill="none" stroke="#3c4550" stroke-width="12" stroke-dasharray="10 9"/>
+    <circle cx="330" cy="1240" r="30" fill="#5d6672"/><circle cx="330" cy="1240" r="10" fill="#aab4c0"/>
+    <circle cx="640" cy="1240" r="72" fill="#232a33"/><circle cx="640" cy="1240" r="72" fill="none" stroke="#3c4550" stroke-width="12" stroke-dasharray="10 9"/>
+    <circle cx="640" cy="1240" r="30" fill="#5d6672"/><circle cx="640" cy="1240" r="10" fill="#aab4c0"/>
+  </g>
+
+  <!-- the technician, kneeling at the rover's flank, mask down -->
+  <g>
+    <!-- leg kneeling -->
+    <path d="M110 1180 Q100 1250 130 1300 L230 1300 L240 1270 L170 1262 L176 1190Z" fill="#1d2630"/>
+    <path d="M130 1296 h110 v16 h-120z" fill="#0e1318"/>
+    <!-- torso leaning toward the arc -->
+    <path d="M110 1000 Q120 940 180 930 L230 940 Q262 990 256 1060 L240 1190 L110 1196 Q96 1100 110 1000Z" fill="url(#coverall)"/>
+    <!-- arm reaching out with the torch -->
+    <path d="M200 980 Q240 1010 270 1066 L284 1092 L264 1104 L236 1070 Q210 1036 188 1010Z" fill="#2c3a4a"/>
+    <path d="M262 1084 q14 -10 26 0 q6 12 -6 22 q-16 6 -24 -6z" fill="#3b2a1a"/>
+    <!-- the torch -->
+    <path d="M276 1094 L300 1095" stroke="#9aa4b1" stroke-width="6" stroke-linecap="round"/>
+    <!-- second arm steadying on the rover -->
+    <path d="M150 990 Q150 1080 214 1130 L246 1120 Q200 1070 190 1000Z" fill="#26323f"/>
+    <path d="M232 1112 q16 -8 26 4 q2 14 -14 18 q-14 0 -12 -22z" fill="#3b2a1a"/>
+    <!-- head in the welding mask -->
+    <path d="M140 860 Q140 800 200 796 Q252 800 256 860 L258 930 Q230 950 180 946 L140 920Z" fill="#2a2f36"/>
+    <path d="M214 850 h42 v40 h-42z" fill="#0b2a1c"/>
+    <path d="M214 850 h42 v40 h-42z" fill="#58e08a" opacity=".25"/>
+    <path d="M150 820 Q200 780 250 820" stroke="#4a5058" stroke-width="8" fill="none"/>
+  </g>
+
+  <!-- the welding cable snaking off to the machine -->
+  <path d="M188 1030 Q120 1140 160 1330 Q190 1460 90 1560" stroke="#111" stroke-width="10" fill="none"/>
+  <!-- toolbox and a wrench on the floor -->
+  <rect x="720" y="1300" width="140" height="76" rx="6" fill="#7a1a14"/><rect x="740" y="1286" width="100" height="16" rx="4" fill="#5a120e"/>
+  <path d="M520 1350 l120 -20" stroke="#5d6672" stroke-width="12" stroke-linecap="round"/>
+
+  <!-- the arc lights everything near it -->
+  <rect width="900" height="1800" fill="url(#arcLight)"/>
+  <circle cx="300" cy="1095" r="9" fill="#ffffff"/>
+  </g>
+
+  <rect width="900" height="270" fill="#000" opacity=".4"/>
+  <rect y="1440" width="900" height="360" fill="#000" opacity=".3"/>
+</svg>

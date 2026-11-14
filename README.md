@@ -9,7 +9,7 @@ A co-op fix-it game. One astronaut is on the Moon in VR. Mission control is on l
 
 Two players? One person opens "Mission Control", which shows all three consoles.
 
-One person per seat: the landing page greys out seats that are taken, and the server turns away a second person who opens a taken seat's URL.
+The lobby is four scenes side by side: the astronaut on the Moon, the flight director at his console, the Scientist at a lamp-lit desk, and the Technician welding on the VIPER rover. A scene is grey while its seat is open and comes to life, in colour, with its own motion and its own background sound, when someone takes the seat. One person per seat: the server turns away a second person who opens a taken seat's URL.
 
 ## Run it
 
@@ -18,7 +18,9 @@ npm install
 npm start
 ```
 
-Open `http://localhost:3000` and pick a seat. Mission Ops presses **Start mission** (the standard kit is already loaded, which is the judging mode). A round is 2:30.
+Open `http://localhost:3000` and click a scene to take that seat. Everyone presses **Ready**; the astronaut readies up inside the headset, on the READY board in front of them. When all four roles are held and ready, a 3-second countdown starts the mission. Mission Ops can change the lander and gear from the briefing button in their panel (the standard kit is already loaded, which is the judging mode). A round is 2:30.
+
+Testing alone? `SOLO=1 npm start` lets any crew that is all ready start the mission, without the other seats.
 
 Each seat has its own URL, so you can hand them out directly:
 
@@ -62,6 +64,7 @@ If the venue Wi-Fi blocks devices from seeing each other, use a phone hotspot.
 | --- | --- | --- | --- |
 | Radio to Mission Ops, and wrist gauges | hold left trigger | hold your left hand up to your helmet | hold Tab |
 | Use a panel | point right hand, pull trigger (within 3 m) | point right hand, pinch and let go | click |
+| Go in or out of the habitat | point at the airlock hatch, pull trigger | point at the hatch, pinch and let go | click the hatch |
 | Move | left stick | point right hand at the ground, pinch and let go to teleport (up to 8 m) | WASD |
 | Turn | right stick | pinch left hand, drag it sideways (30° per 10 cm) | mouse |
 | Hop | A | | Space |
@@ -92,7 +95,7 @@ The arm being up is itself the sign that your radio is keyed, and the display ba
 
 Mission Ops holds **Space** to talk. The Technician drives the rover with the **arrow keys**.
 
-## The four alarms
+## The five alarms
 
 | Alarm | Astronaut sees | Mission control has |
 | --- | --- | --- |
@@ -100,6 +103,19 @@ Mission Ops holds **Space** to talk. The Technician drives the rover with the **
 | Comms dish off frequency | a wave, and +/- buttons, no number | Technician: current channel. Scientist: target channel |
 | Airlock software fault | a 4-character fault code, a keypad | Mission Ops: types the code, gets a 3-digit key back |
 | Drill jammed | five rocks | Scientist: which colour is the core sample that must stay |
+| Main power bus tripped | six numbered breakers inside the habitat, three with a red lamp | Technician: which circuit has a short and must stay off. Scientist: battery charge and the rule for the reset order |
+
+## Inside the habitat
+
+The airlock hatch on the dome is a door. Point at it and select, and after a short fade you are standing in the hall inside: workbench island, suit lockers, a ceiling gantry trailing cables, life support in the far corner, and the breaker panel on the west wall. It is 12 m by 7 m, bigger than the dome looks from outside, which nobody can see because only one of the two places is ever drawn.
+
+Eight roof lights keep it lit. When the power alarm goes, they flicker and die, the hall is dark for a second and a half (the helmet lamp comes on by itself), then a relay clunks and six red backup lights come up. From outside, the floodlight and the windows go dark too. Reset the right two breakers in the right order and the roof lights re-strike row by row, starting at the panel. On a laptop, **L** runs the lighting sequence without waiting for the alarm.
+
+![The hall](docs/astronaut-interior.png)
+
+![On backup lights](docs/astronaut-interior-backup.png)
+
+The timings are `CFG.power` in `client/shared/config.js`. The room is `client/interior.js`.
 
 A wrong action costs 8 oxygen. An alarm that times out costs 15. Oxygen at zero ends the mission.
 
@@ -116,12 +132,15 @@ worker/             the same thing on Cloudflare: a Worker for the pages, a Dura
 client/astronaut.*  VR client: movement, pointing, visor zoom
 client/arm.js       the astronaut's left arm and its wrist gauge cluster
 client/stations.js  the four panels the astronaut works at
+client/interior.js  the hall inside the habitat: geometry, the lighting states, where you can walk
 client/world.js     the Moon scene: terrain, sky, Earth, habitat, rover, lander (shared with the rover camera)
 client/console.*    Mission Ops, Technician, Scientist and all-in-one
 client/voice.js     push-to-talk radio with 1960s distortion and Quindar beeps
 ```
 
 Suggested split: A takes `astronaut.js`, `world.js` and the art. B takes `server/`, `worker/` and new minigames. C takes `console.*`. D takes `rules.js`, the manual, audio, pitch and video.
+
+An alarm that is fixed indoors has no entry in `STATIONS`; it is listed in `INDOOR` instead and its panel hangs on a mount that `interior.js` provides (see `power`).
 
 **Adding a minigame** takes three edits: data and checks in `server/game.js` (`makeData`, `act`, `view`), a panel in `client/stations.js`, and a rule in `client/shared/rules.js`. Not built yet from the list: solar array circuits, docking ring maze.
 

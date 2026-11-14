@@ -100,10 +100,15 @@ try {
   const pitch = await astro.evaluate(() => Math.abs(window.moonbase.camera.rotation.x));
   if (pitch > 0.2) problems.push(`astronaut: camera pitched ${pitch.toFixed(2)} rad right after entering (pointer-lock jump)`);
 
-  // Start the round now: the first alarm is always the fuel depot, 4 s in. Wait until one of its
+  // Ready up: the astronaut uses the READY board in front of the spawn point, Mission Control
+  // (2-player mode, so the crew is complete) presses Ready in the lobby. The mission starts itself
+  // after the countdown, and the first alarm is always the fuel depot, 4 s in. Wait until one of its
   // wires is clickable (the panel syncs on the next rendered frame, which lags here).
-  step('starting the mission, waiting for the fuel depot alarm');
-  await ctl.click('button:has-text("Start mission")');
+  step('readying up, waiting for the mission to start and the fuel depot alarm');
+  if (!(await astro.evaluate(() => window.moonbase.useBoard()))) problems.push('astronaut: the READY board was not in front of the spawn point');
+  await ctl.click('[data-ready]');
+  // Watch for the start from the astronaut's page: Mission Control's, with its own 3D scene, can be slow to answer here.
+  await astro.waitForFunction(() => window.moonbase.state()?.phase === 'run', null, { timeout: 60000, polling: 250 });
   // Mission Control's page draws the rover camera, a second 3D scene. In software rendering the two
   // scenes starve each other, so it is closed for now and opened again at the end for its screenshot.
   await ctl.close();
@@ -245,6 +250,29 @@ try {
   await view(astro, 'astronaut-wrist');
   await astro.keyboard.up('Tab');
   await until('wrist gauges: letting go of Tab did not lower the arm', async () => (await armState(astro)).raise === 0);
+
+  step('through the airlock, power outage lighting');
+  // Through the airlock: the hatch pad is in reach from the foot of the steps, the fade moves the
+  // astronaut into the hall, the breaker panel is mounted there, and the outage lighting runs.
+  const indoors = await astro.evaluate(async () => {
+    const mb = window.moonbase, wait = ms => new Promise(r => setTimeout(r, ms));
+    mb.rig.position.set(0, 0, 5.2); mb.rig.rotation.y = 0; mb.camera.rotation.x = -0.1; mb.rig.updateMatrixWorld(true);
+    if (!mb.useHatch()) return 'pointing at the airlock hatch from the steps did nothing';
+    for (let i = 0; i < 100 && mb.where() !== 'in'; i++) await wait(100);
+    if (mb.where() !== 'in') return 'the fade never moved the astronaut inside';
+    if (!mb.interior.group.visible || mb.world.rover.visible) return 'inside, but the wrong place is being drawn';
+    if (!mb.world.stations.power.children.length) return 'no breaker panel on the interior wall';
+    mb.outage(true);
+    for (let i = 0; i < 900 && mb.interior.phase !== 'backup'; i++) await wait(100);
+    if (mb.interior.phase !== 'backup') return 'backup lights never came on, stuck in ' + mb.interior.phase;
+    mb.outage(false);
+    for (let i = 0; i < 900 && mb.interior.phase !== 'main'; i++) await wait(100);
+    if (mb.interior.phase !== 'main') return 'roof lights never came back, stuck in ' + mb.interior.phase;
+    return 'ok';
+  });
+  if (indoors !== 'ok') problems.push('astronaut: ' + indoors);
+  await view(astro, 'astronaut-interior');
+  await astro.evaluate(() => window.moonbase.place('out'));
 
   await view(astro, 'astronaut-fuel-depot');
   await astro.evaluate(() => { const mb = window.moonbase; mb.rig.position.set(0, 0, 7); mb.rig.rotation.y = 0; mb.camera.rotation.x = 0; });

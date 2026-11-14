@@ -14,6 +14,12 @@ export function solveWires({ colors, serial, pressure }) {
   return colors.length - 1;
 }
 
+// Returns the breakers to reset, in order (indices, 0 = breaker 1). The shorted one stays off.
+export function breakerOrder({ tripped, fault, battery }) {
+  const healthy = tripped.filter(i => i !== fault).sort((a, b) => a - b);
+  return battery < 50 ? healthy.reverse() : healthy;
+}
+
 export const MANUAL = {
   wires: {
     title: 'Fuel-ox valve stuck (Fuel depot)',
@@ -49,6 +55,15 @@ export const MANUAL = {
     rules: [
       'Your telemetry shows the colour of the core sample. It must stay.',
       'The astronaut pulls out the other four rocks.',
+    ],
+  },
+  power: {
+    title: 'Main power bus tripped (Breaker panel, inside the habitat)',
+    ask: 'The habitat is on red backup lights. Ask the astronaut which numbered breakers show a red lamp. The Technician sees which circuit has a short.',
+    rules: [
+      'The shorted breaker must stay OFF. Never reset it.',
+      'If your battery reading is BELOW 50%: reset the other tripped breakers from the HIGHEST number to the lowest.',
+      'Otherwise: reset them from the LOWEST number to the highest.',
     ],
   },
 };
