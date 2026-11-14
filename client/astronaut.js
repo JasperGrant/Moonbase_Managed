@@ -63,9 +63,10 @@ function drawHud(now) {
   const s = state;
   let line = now < promptUntil ? prompt : '';
   if (!s) line = 'Connecting to the base...';
-  else if (s.phase === 'lobby') line = 'Waiting for Mission Ops to start. Try the radio: hold ' + (mode === 'vr' ? 'LEFT TRIGGER' : 'T') + ' and say hello.';
+  else if (s.phase === 'lobby') line = 'Waiting for Mission Ops to start. Try the radio: ' + (mode !== 'vr' ? 'hold T' : usingHands() ? 'hold your left hand to your helmet' : 'hold LEFT TRIGGER') + ' and say hello.';
   else if (s.phase === 'results') line = (s.result.won ? 'MISSION COMPLETE' : 'MISSION FAILED') + `   Score ${s.score}.   ${s.result.reason}`;
-  else if (!line && now - runStart < 14) line = mode === 'vr' ? 'Hold LEFT TRIGGER to talk to Mission Ops.  Point + RIGHT TRIGGER to use a panel.' : 'Hold T to talk to Mission Ops.  Click to use a panel.  WASD to walk.';
+  else if (!line && now - runStart < 14) line = mode !== 'vr' ? 'Hold T to talk to Mission Ops.  Click to use a panel.  WASD to walk.'
+    : usingHands() ? 'Left hand to helmet = talk.  Point + pinch = use a panel.  Pinch the ground = teleport.' : 'Hold LEFT TRIGGER to talk to Mission Ops.  Point + RIGHT TRIGGER to use a panel.';
   else if (!line && s.issues.length) line = `${s.issues.length} alarm${s.issues.length > 1 ? 's' : ''} active. Ask Mission Ops where to go.`;
   const radioTxt = talking ? 'TX' : rx ? 'RX' : '';
   const key = [line, radioTxt, s && Math.ceil(s.timeLeft), s && Math.round(s.oxygen)].join('|');
@@ -130,9 +131,8 @@ function lockPointer() { try { renderer.domElement.requestPointerLock()?.catch?.
 const raycaster = new THREE.Raycaster();
 const tmpM = new THREE.Matrix4(), fwd = new THREE.Vector3(), headPos = new THREE.Vector3(), UP = new THREE.Vector3(0, 1, 0);
 
-// Use whatever the hand (or, on desktop, the centre of the screen) is pointing at.
-function use(controller) {
-  if (!state || state.phase !== 'run') return;
+// Point the raycaster where the hand (or, on desktop, the centre of the screen) is pointing.
+function aim(controller) {
   if (controller) {
     tmpM.identity().extractRotation(controller.matrixWorld);
     raycaster.ray.origin.setFromMatrixPosition(controller.matrixWorld);
@@ -141,23 +141,116 @@ function use(controller) {
     raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
   }
   raycaster.far = REACH;
-  const hit = raycaster.intersectObjects(panels.targets(), false)[0];
+}
+function panelInReach(controller) {
+  if (!state || state.phase !== 'run') return null;
+  aim(controller);
+  return raycaster.intersectObjects(panels.targets(), false)[0] || null;
+}
+// Use the panel being pointed at. Returns true if there was one.
+function use(controller) {
+  const hit = panelInReach(controller);
   if (hit) panels.click(hit.object);
+  return !!hit;
 }
 
-// Hand controllers: right hand points and uses, left trigger is push-to-talk.
+// ---------- hands and controllers ----------
+// Controllers: right trigger uses, left trigger talks, sticks walk and turn, A hops.
+// Hand tracking (put the controllers down): point the right hand and pinch to use a panel,
+// pinch at the ground to teleport there, pinch the left hand and drag it sideways to turn,
+// and hold the left hand up to your helmet to talk.
+const TELEPORT_MAX = 8;   // metres per hop
+const TURN_STEP = 0.1;    // metres of left-hand drag per 30-degree snap turn
+const HELMET = 0.22;      // metres from the head that counts as "hand on helmet"
+const ground = new THREE.Plane(UP, 0);
+const hitPoint = new THREE.Vector3(), tmpV = new THREE.Vector3();
+const marker = new THREE.Mesh(new THREE.RingGeometry(0.22, 0.3, 32), new THREE.MeshBasicMaterial({ color: 0x58e08a, transparent: true, opacity: 0.8, side: THREE.DoubleSide, depthWrite: false }));
+marker.rotation.x = -Math.PI / 2; marker.visible = false;
+scene.add(marker);
+
+// Where the hand's ray meets the ground, if that spot can be stood on.
+function groundTarget(controller, out) {
+  aim(controller);
+  const p = raycaster.ray.intersectPlane(ground, out);
+  if (!p || p.distanceTo(raycaster.ray.origin) > TELEPORT_MAX) return null;
+  const d = Math.hypot(p.x, p.z);
+  return d > CFG.bounds - 1 || d < CFG.habRadius + 0.3 ? null : p;
+}
+function teleport(p) {
+  camera.getWorldPosition(headPos);
+  rig.position.x += p.x - headPos.x;
+  rig.position.z += p.z - headPos.z;
+}
+// A hand's sideways offset from the head, in metres, positive to the right.
+function lateral(controller) {
+  controller.getWorldPosition(tmpV).sub(headPos);
+  return tmpV.x * -fwd.z + tmpV.z * fwd.x;
+}
+
+const controllers = [], hands = [];
+const jointGeo = new THREE.SphereGeometry(0.009, 8, 6);
+const jointMat = new THREE.MeshStandardMaterial({ color: 0xe9e7e1, roughness: 0.6 });
+let leftDrag = null, helmetTalk = false; // leftDrag = { x } while the left hand is pinched
+const usingHands = () => controllers.some(c => c.userData.isHand);
+
 for (const i of [0, 1]) {
   const c = renderer.xr.getController(i);
   c.addEventListener('connected', e => {
     c.userData.hand = e.data.handedness;
+    c.userData.isHand = !!e.data.hand;
     if (c.userData.hand !== 'left' && !c.userData.ray) {
       const geo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 0, -REACH)]);
       c.userData.ray = new THREE.Line(geo, new THREE.LineBasicMaterial({ color: 0x58e08a }));
       c.add(c.userData.ray);
     }
   });
-  c.addEventListener('selectstart', () => { if (c.userData.hand !== 'left') use(c); });
+  c.addEventListener('disconnected', () => { c.userData.isHand = false; marker.visible = false; leftDrag = null; });
+  // Trigger on a controller, pinch on a bare hand: both arrive as "select".
+  c.addEventListener('selectstart', () => {
+    if (c.userData.hand === 'left') { if (c.userData.isHand) leftDrag = { x: lateral(c) }; return; }
+    if (use(c)) return;
+    if (c.userData.isHand && groundTarget(c, hitPoint)) teleport(hitPoint);
+  });
+  c.addEventListener('selectend', () => { if (c.userData.hand === 'left') leftDrag = null; });
   rig.add(c);
+  controllers.push(c);
+
+  const h = renderer.xr.getHand(i); // joints appear once the headset starts tracking the hand
+  rig.add(h);
+  hands.push(h);
+}
+
+// Draw each tracked joint as a small white ball: a glove, without loading a model.
+function drawHand(h) {
+  for (const name in h.joints) {
+    const j = h.joints[name];
+    if (!j.userData.ball) { j.userData.ball = new THREE.Mesh(jointGeo, jointMat); j.add(j.userData.ball); }
+    j.userData.ball.scale.setScalar((j.jointRadius || 0.009) / 0.009);
+  }
+}
+
+// Everything hand tracking adds per frame. Sets ptt and the teleport marker.
+function handControls(ptt) {
+  for (let i = 0; i < 2; i++) {
+    const c = controllers[i];
+    if (!c.userData.isHand) continue;
+    drawHand(hands[i]);
+    if (c.userData.hand === 'left') {
+      const tip = hands[i].joints?.['index-finger-tip'];
+      (tip && tip.visible ? tip : c).getWorldPosition(tmpV);
+      helmetTalk = tmpV.distanceTo(headPos) < (helmetTalk ? HELMET + 0.08 : HELMET);
+      if (helmetTalk) ptt = true;
+      if (leftDrag) {
+        const x = lateral(c), dx = x - leftDrag.x;
+        if (Math.abs(dx) > TURN_STEP) { turnRig(-Math.sign(dx) * Math.PI / 6); leftDrag.x = x; }
+      }
+    } else {
+      const p = !panelInReach(c) && groundTarget(c, hitPoint);
+      marker.visible = !!p;
+      if (p) marker.position.set(p.x, 0.02, p.z);
+    }
+  }
+  return ptt;
 }
 
 function turnRig(angle) { // turn on the spot, around where the head is
@@ -170,7 +263,10 @@ let vy = 0, turnArmed = true, lastPose = 0;
 function control(dt, now) {
   let mx = 0, mz = 0, jump = false, ptt = !!keys.t;
   const session = renderer.xr.getSession();
+  camera.getWorldPosition(headPos);
+  camera.getWorldDirection(fwd); fwd.y = 0; fwd.normalize();
   if (session) {
+    ptt = handControls(ptt);
     for (const src of session.inputSources) {
       const gp = src.gamepad;
       if (!gp) continue;
@@ -193,7 +289,6 @@ function control(dt, now) {
   }
 
   const boots = !!state && state.loadout.gear.includes('boots');
-  camera.getWorldDirection(fwd); fwd.y = 0; fwd.normalize();
   const speed = WALK * (boots ? 1.4 : 1) * dt;
   rig.position.x += (-mz * fwd.x + mx * -fwd.z) * speed;
   rig.position.z += (-mz * fwd.z + mx * fwd.x) * speed;
@@ -247,7 +342,7 @@ renderer.setAnimationLoop(() => {
 });
 
 // For debugging from the browser console: moonbase.state(), moonbase.panels.targets() ...
-window.moonbase = { state: () => state, panels, world, radio, rig, camera, net, use: () => use(null) };
+window.moonbase = { state: () => state, panels, world, radio, rig, camera, net, use: () => use(null), teleport, turnRig };
 
 // ---------- start-up screen ----------
 const $ = id => document.getElementById(id);
@@ -257,7 +352,7 @@ $('radioBtn').onclick = async () => {
   $('radioBtn').disabled = true;
   $('step2').hidden = false;
 };
-$('vrSlot').appendChild(VRButton.createButton(renderer));
+$('vrSlot').appendChild(VRButton.createButton(renderer, { optionalFeatures: ['hand-tracking'] }));
 $('deskBtn').onclick = () => { mode = 'desk'; $('gate').hidden = true; $('cross').hidden = false; lockPointer(); };
 renderer.xr.addEventListener('sessionstart', () => { mode = 'vr'; $('gate').hidden = true; });
 renderer.xr.addEventListener('sessionend', () => { mode = null; $('gate').hidden = false; });

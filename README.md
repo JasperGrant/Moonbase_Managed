@@ -56,13 +56,15 @@ If the venue Wi-Fi blocks devices from seeing each other, use a phone hotspot.
 
 ## Controls
 
-| | Headset | Laptop (testing) |
-| --- | --- | --- |
-| Talk to Mission Ops | hold left trigger | hold T |
-| Use a panel | point right hand, pull trigger (within 3 m) | click |
-| Walk | left stick | WASD |
-| Turn | right stick | mouse |
-| Hop | A | Space |
+| | Controllers | Bare hands (hand tracking) | Laptop (testing) |
+| --- | --- | --- | --- |
+| Talk to Mission Ops | hold left trigger | hold your left hand up to your helmet | hold T |
+| Use a panel | point right hand, pull trigger (within 3 m) | point right hand, pinch | click |
+| Move | left stick | point right hand at the ground, pinch to teleport (up to 8 m) | WASD |
+| Turn | right stick | pinch left hand, drag it sideways (30° per 10 cm) | mouse |
+| Hop | A | | Space |
+
+Hand tracking kicks in when you put the controllers down; the Quest switches by itself. Your hands are drawn as white gloves, and a green ring on the ground shows where a pinch will take you.
 
 Mission Ops holds **Space** to talk. The Technician drives the rover with the **arrow keys**.
 
