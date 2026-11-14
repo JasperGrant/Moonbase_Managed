@@ -10,7 +10,7 @@ Sevan's note: *the game feels extremely static.* Make the base something you mov
 2. **You find the tools inside the base.** No rack outside. The tools are scattered round the hall at the start of a mission, and you go in and look for them.
 3. **You walk into the airlock.** No pointing at a hatch and a fade to black. You step into the vestibule, the outer hatch swings shut behind you, the inner one swings open in front of you, and you are in the hall. The teleport to the bigger-inside hall happens while both hatches are shut, so you never see it.
 4. **Every door on the HDU works.** The model has four hatches; each is a working airlock into the hall.
-5. **The porthole is a real window.** What you see through it changes with where your head is, in stereo, like looking through glass.
+5. **The porthole is a real window.** What you see through it changes with where your head is, in stereo, like looking through glass. And a **window in the hall looks out** onto the Moon the same way.
 6. **The awning (the airlock canopy) and the tool stand (the locker rack) are gone.**
 7. **Mission Control readies the astronaut.** The astronaut no longer points at a READY board; Mission Ops calls the astronaut GO from the lobby.
 
@@ -40,11 +40,11 @@ Rendered from each side (model placed as `world.js` places it, `x + 1.5`). Posit
 | `W` | The short module stencilled AIRLOCK, its hatch on the south face | (-3.4, 1.35), +z | Painted, does nothing; `inModule` keeps you off it |
 | `E` | The end of the long module | (7.6, 0), +x | Painted, does nothing; `inModule` keeps you off it |
 
-The round dark windows on the dome and on Segment C are painted too. If those are "the window" Sevan meant rather than the airlock porthole, see phase 4, step 7.
+The round dark windows on the dome and on Segment C are painted too. The one on Segment C, just west of door `S` at about head height, is where the hall's new window looks out (phase 4, step 8).
 
 ## Ground rules
 
-1. **The server still decides.** Physics runs on the astronaut's page only (it is the only page that has hands). The server learns where a tool is when it is taken or comes to rest, and checks what it can (is the tool loose, does it fit on the belt, is the astronaut inside or near it). Nothing physical changes the game by itself, as now.
+1. **The server still decides.** Physics runs on the astronaut's page only (it is the only page that has hands). The server learns where a tool is when it is taken or comes to rest, and checks what it can (is the tool loose, is the hand empty, is the astronaut inside or near it). Nothing physical changes the game by itself, as now.
 2. **The Quest is the budget.** At most 12 moving bodies at once, simple shapes only (boxes, spheres, cylinders: no mesh colliders), the physics of the place you are not in does not run, and every phase is checked in `npm run vr` with the frame time printed.
 3. **No fades, no visor text.** Getting in and out is diegetic: hatches, lamps, a hiss. A black card is allowed only as the fallback if a step below fails on the device.
 4. **Moon gravity everywhere**, inside too: 1.62 m/s². Things fall slowly; that is half the charm.
@@ -57,9 +57,9 @@ Each phase is a mergeable PR. Do them in this order: 0 and 1 are quick and indep
 
 0. **Take out the awning and the tool stand** (and move cover and the tools' home).
 1. **Mission Control readies the astronaut.**
-2. **Physics tools, found in the hall.**
+2. **Physics tools, found in the hall, one at a time.**
 3. **Walk-in airlocks, on all four doors.**
-4. **A real porthole: a stencil portal into the hall.**
+4. **A real porthole into the hall, and a window in the hall that looks out.**
 
 ---
 
@@ -92,7 +92,7 @@ Gameplay check: the meteor warning is 15 s. Without the canopy the solar panels 
 
 ### Where the astronaut starts
 
-**Recommendation: start inside the hall**, at `ROOM.arrive` (room 0, -1.3) facing up the hall, with the tools scattered round you. The first thing a new player does is look for tools and then walk out through an airlock, which teaches both new mechanics before the first fault (dust at 5 s in the demo script, which is outside and slow). `CFG.spawn` becomes `{ inside: true, x: 0, z: -1.3 }`, `astronaut.js` calls `place('in')` (608-622) at start, and the status board from phase 1 stands in the hall in front of the spawn. If the team prefers to start outside, spawn at (0, 6) facing door `S`; nothing else in this spec depends on it.
+**Decided (Sevan): start inside the hall**, at `ROOM.arrive` (room 0, -1.3) facing up the hall, with the tools scattered round you. The first thing a new player does is look for tools and then walk out through an airlock, which teaches both new mechanics before the first fault (dust at 5 s in the demo script, which is outside and slow). `CFG.spawn` becomes `{ inside: true, x: 0, z: -1.3 }`, `astronaut.js` calls `place('in')` (608-622) at start, and the status board from phase 1 stands in the hall in front of the spawn.
 
 ---
 
@@ -103,7 +103,7 @@ The astronaut puts the headset on and waits; Mission Ops checks they are suited 
 ### Server (`server/hub.js`)
 
 - New message from the astronaut's page: `{ t: 'suited', on }`. Sent `true` on the WebXR `sessionstart` and when the desk mode starts (`astronaut.js` 808-810), `false` on `sessionend` (811). The hub keeps `this.suited` (false when the astronaut seat is empty: clear it in `remove()` at 52-56).
-- `ready` (132-137): a `ready` from the astronaut seat is ignored. A `ready` from `ops` or `all` with `for: 'astronaut'` sets or clears `'astronaut'` in `this.ready`, and only while the astronaut seat is held and `this.suited` is true. Their own `ready` (no `for`) works as now.
+- `ready` (132-137): a `ready` from the astronaut seat is ignored. **Only Mission Ops calls the astronaut GO (Sevan's call):** a `ready` from `ops`, or from `all` (the 2-player console, which is Mission Ops too), with `for: 'astronaut'` sets or clears `'astronaut'` in `this.ready`, and only while the astronaut seat is held and `this.suited` is true. Their own `ready` (no `for`) works as now.
 - When `suited` goes false (the astronaut takes the headset off), `'astronaut'` leaves `this.ready` and the countdown stops (as `remove()` does now for a seat that leaves).
 - `seats()` (35) and the broadcast (169-171) carry `suited`.
 - `test/hub.test.js`: the astronaut cannot ready itself; Ops cannot ready an astronaut who is not suited; Ops can ready a suited one; Sci and Tech cannot; taking the headset off un-readies; 2-player `all` can ready the astronaut.
@@ -155,7 +155,7 @@ One module owns both physics worlds. Nothing else imports cannon-es.
 - **Static colliders, surface**: a `Heightfield` sampled from the terrain's `height(x, z)` (the one `world.js` uses for placing props) at 1 m within `CFG.bounds`, one cylinder for the HDU core (r 2.55, h 3.6), two for the side modules (`MODULES` in `astronaut.js` 287), a box per vestibule, a box for each solar panel and the depot crates. The rover is a **kinematic** box moved to the server's rover pose every frame, so a tool on the ground is shoved aside by it.
 - **Hands**: a kinematic sphere (r 0.05) on each hand's grab point, so you can knock a tool off the bench or nudge it along the floor. On a laptop, none.
 - **Contacts**: on `collide` with an impact speed over 0.6 m/s, call back with the place, the speed and the two materials, for the sound and the dust (see "Juice").
-- API: `phys.add(id, shape, mass, place, pose)`, `phys.hold(id, handObject)` (kinematic, follows the hand), `phys.release(id, linVel, angVel)` (dynamic, thrown), `phys.remove(id)` (on the belt: out of the world), `phys.step(dt, where)`, `phys.onRest(cb)`, `phys.onHit(cb)`.
+- API: `phys.add(id, shape, mass, place, pose)`, `phys.hold(id, handObject)` (kinematic, follows the hand), `phys.release(id, linVel, angVel)` (dynamic, thrown), `phys.remove(id)` (used up: the generator after its pull, the fitted tire), `phys.step(dt, where)`, `phys.onRest(cb)`, `phys.onHit(cb)`.
 
 ### The tools as bodies
 
@@ -168,7 +168,7 @@ Each game tool gets a compound collider of two or three primitives and a real ma
 | `welder` | box body + cylinder grip | 3.5 | The NASA pistol-grip tool's own box |
 | `tire` | cylinder | 12 | Rolls. Fun on the regolith. |
 | `gen` | box | 25 | Heavy: it barely moves when knocked |
-| `wrench`, `ratchet`, `hammer`, `grease-gun` | box each | 0.3-1.2 | The NASA tools from the old shadow board. **Decoys**: loose in the hall, you can pick them up and throw them, nothing uses them, they never go on the belt, and they are not in `TOOLS`. They make the search a search. |
+| `wrench`, `ratchet`, `hammer`, `grease-gun` | box each | 0.3-1.2 | The NASA tools from the old shadow board. **Decoys**: loose in the hall, you can pick them up and throw them, nothing uses them, and they are not in `TOOLS`; holding one still fills your hand. They make the search a search. |
 
 ### Where the tools are at the start
 
@@ -177,30 +177,30 @@ Each game tool gets a compound collider of two or three primitives and a real ma
 - The decoys get fixed spots, chosen so a few sit near the real tools.
 - On the page, each tool is dropped from 5 cm above its spot when the mission starts, so it settles naturally.
 
-### Picking up, carrying, dropping
+### Picking up, carrying, dropping: one tool at a time
 
-Rules stay: the belt holds `CFG.beltCapacity` (4) weight units; a tool you carry counts whether it is in a hand or on the belt.
+**Decided (Sevan): the astronaut holds one tool at a time.** The belt goes. You carry a tool in your hand, and to take another you put the first one down (or throw it). That makes every trip into the hall a choice of which one tool to bring, which replaces the belt's weight puzzle (welder + brush + patch kit fill it, the tire or generator means leaving something). The heavy tools stay heavy in physics: the tire rolls, the generator barely moves when knocked, and both swing slowly in the hand.
 
-- **Grab** (`stations.js` `nearest()` 265-279 and `grab()` 290-305): a loose tool within `GRAB_LOOSE` (0.2 m; 0.35 for the tire and generator) of the hand gets the ring. Closing the hand sends `{ take: id }` and makes the body kinematic in the hand (`phys.hold`). If it does not fit (`fits()` false), it is still grabbed but the ring is red, the hand buzzes twice, and the server does not count it: it cannot be put on the belt and drops when let go. (Today it shakes on the rack; on the floor, holding it and feeling it refuse is clearer.)
-- **Belt**: let go of a counted tool with the hand within 0.25 m of its belt slot (`BELT_SLOT`, 27) and it goes on the belt, as now; `phys.remove(id)`.
-- **Drop and throw**: let go anywhere else and it is loose: `phys.release(id, v, w)` with the hand's velocity averaged over the last three frames (clamp 6 m/s) and its angular velocity, and the page sends `{ drop: id }`. It tumbles, lands and settles.
+- **Grab** (`stations.js` `nearest()` 265-279 and `grab()` 290-305): with nothing in either hand, a loose tool within `GRAB_LOOSE` (0.2 m; 0.35 for the tire and generator) of a hand gets the ring. Closing the hand sends `{ take: id }` and makes the body kinematic in that hand (`phys.hold`). If the other hand already holds a tool, the ring is red, closing the hand buzzes twice and nothing happens. The other hand stays free for the work: pulling the wheel, plugs, the generator cord.
+- **Drop and throw**: open the hand and the tool is loose: `phys.release(id, v, w)` with the hand's velocity averaged over the last three frames (clamp 6 m/s) and its angular velocity, and the page sends `{ drop: id }`. It tumbles, lands and settles. To swap tools at a job, put one down, pick the other up.
 - **Rest**: when a dropped tool falls asleep, the page sends `{ rest: id, inside, x, y, z }` (world coordinates outside, room coordinates inside), so the server and Mission Control know where it lies.
-- **Laptop**: a click on a loose tool takes it to the belt (as the rack click does now); **Q** drops the last tool taken, 0.6 m in front, with a small forward push. That keeps `npm run smoke` and desk play working without hands.
-- **Using a tool** (brush, weld, patch, tire, generator cord) is unchanged: it must be in a hand or on the belt.
+- **Laptop**: a click on a loose tool takes it into the hand (dropping whatever was held, where you stand); **Q** drops the held tool 0.6 m in front, with a small forward push. That keeps `npm run smoke` and desk play working without hands.
+- **Using a tool** (brush, weld, patch, fit the tire, pull the generator cord) needs it **in a hand**. The generator is set down at the work and its cord pulled with either hand; the tire is held up to the hub.
+- **Goes with the belt**: `client/shared/config.js` `CFG.beltCapacity`, `TOOLS[].weight` and the comment about the belt puzzle (82-92); `fits()` and `beltWeight()` in `client/shared/rules.js` 4-5; the belt group and slots in `client/stations.js` (24-28, 112-114, 335-364); the belt pips on the cuff (`client/arm.js` 231-241, and `belt`/`capacity` in `drawGauges`, `astronaut.js` 129-131); Mission Ops' belt canvas (`client/console.js` 236-250). The cuff's pips become one lamp and the held tool's icon. The tests that fill the belt (`test/vr.mjs` 160 `kit()`, `test/game.test.js` belt cases) become "holding X".
 
 ### Server (`server/game.js`)
 
-- `this.locker` (list) becomes `this.tools`: `{ [id]: { at: 'belt' | 'loose' | 'gone', inside, x, y, z, area } }`. `belt` stays as the list of carried tools so `fits()`, `has()` and the views keep working.
-- `{ take: id }`: allowed if the tool is `loose`, it fits, and the astronaut is where it is: `inside` and the astronaut is inside, or outside and within `CFG.reach` of its last resting place.
-- `{ drop: id }`: from the belt to `loose`, at the astronaut's position until a `rest` arrives.
+- `this.locker` (list) becomes `this.tools`: `{ [id]: { at: 'hand' | 'loose' | 'gone', inside, x, y, z, area } }`, and `this.belt` (list) becomes `this.held` (one tool id or null). `has(tool)` (69) becomes `this.held === tool`.
+- `{ take: id }`: allowed if the tool is `loose`, nothing else is held, and the astronaut is where it is: `inside` and the astronaut is inside, or outside and within `CFG.reach` of its last resting place.
+- `{ drop: id }`: from the hand to `loose`, at the astronaut's position until a `rest` arrives.
 - `{ rest: id, ... }`: updates a loose tool's place (and its `area`: the nearest tool spot's area inside, `OUTSIDE` plus the nearest named place outside).
 - The generator, once pulled, is `gone` (as now). The fitted tire is `gone`, and a new tire appears loose at the `CORRIDOR` spot after `CFG.tireRestockSeconds` (the cargo end of the hall).
 - `view()` (292-296): the astronaut and Ops get `tools`; drop `locker`.
-- `test/game.test.js`: take refused when it does not fit, refused outside for a tool inside, a drop then a take, the restocked tire appears in the hall.
+- `test/game.test.js`: take refused while another tool is held, refused outside for a tool inside, a drop then a take, the restocked tire appears in the hall.
 
 ### Mission Ops: the TOOL LOG (`client/console.js` 236-270)
 
-The `Locker` canvas becomes **TOOL LOG**: one row per tool, its icon (`drawTool`), a jewel lamp (green = on the belt, amber = loose, off = gone), and the area engraved beside it in Courier Prime capitals (`BELT`, `BENCH`, `UNDER BENCH`, `CORRIDOR`, `OUTSIDE · SOLAR`...). Ops knows roughly where everything is; the astronaut has to look. That is a new reason to talk on the radio ("the welder is under the bench"), which is what the game is about. Update the Ops brief at 27.
+The `Locker` canvas becomes **TOOL LOG**: one row per tool, its icon (`drawTool`), a jewel lamp (green = in the astronaut's hand, amber = loose, off = gone), and the area engraved beside it in Courier Prime capitals (`IN HAND`, `BENCH`, `UNDER BENCH`, `CORRIDOR`, `OUTSIDE · SOLAR`...). Ops knows roughly where everything is; the astronaut has to look. That is a new reason to talk on the radio ("the welder is under the bench"), which is what the game is about. Update the Ops brief at 27.
 
 Optional: the Technician's radar shows tools lying outside as tiny amber phosphor dots, so a tool dropped in the field can be found again.
 
@@ -209,12 +209,12 @@ Optional: the Technician's radar shows tools lying outside as tiny amber phospho
 - **Impact**: a positioned `clank` from `client/ambience.js` (new, short filtered noise burst plus a pitched ring; pitch down with mass, gain up with speed) at the contact point. Inside it is a clank; outside, where there is no air, it is quieter and duller (you hear it through your boots and glove), only for tools within 3 m or in hand.
 - **Outside**: a small dust puff (the `world.js` puff at 698) where a tool lands on the regolith, settling slowly in lunar gravity.
 - **Hands**: a haptic tick when a held tool hits something, a stronger one on a throw release, and the grab ring (stations.js 205, 431) as now.
-- **Picking up**: a soft click and the existing ring flash; the belt slot's lamp on the cuff lights.
+- **Picking up**: a soft click and the existing ring flash; the cuff's tool lamp lights and shows the tool's icon.
 
 ### Budget and checks
 
 - 5 tools + 4 decoys + at most 3 loose damage pieces (see below) = 12 bodies. Count them in `npm run vr` and print the physics step time; it must stay under 1.5 ms on the test machine.
-- `test/vr.mjs`: replace the rack tests (199-212, 408) with: find the brush on its spot, grab it, put it on the belt; drop the welder, it lands and the server logs it loose with the right area; throw the brush, it travels; a tool too heavy for the belt is held with a red ring and refused.
+- `test/vr.mjs`: replace the rack and belt tests (160, 199-212, 408) with: find the brush on its spot and grab it; drop it, it lands and the server logs it loose with the right area; throw it, it travels; with the brush in one hand, the other hand cannot take the welder (red ring).
 
 ### Optional, if time allows
 
@@ -303,7 +303,14 @@ How, in `client/astronaut.js` (replacing `renderPortal`, 549-581) and `client/wo
    - Put it all back: group matrix, visibility, fog, clipping, `autoClear`. Clear the stencil.
 5. **Only when it can be seen.** Skip the pass unless the astronaut is outside, within 10 m of a porthole, the porthole is in the view frustum (bounding sphere test) and faces the head (dot product > 0). Draw at most one porthole per frame: the nearest that passes.
 6. **Warm the shaders.** Toggling the outdoor lights off and the hall lights on, and the clipping plane, are different shader variants. Call `renderer.compile(scene, camera)` once in each state at load, so the first look through the glass does not hitch.
-7. **The other way, and the painted windows (optional).** The hall-side outer hatch has a porthole too: the same pass in reverse would show the Moon from inside the chamber. The surface is heavier to draw than the hall (terrain, rocks, the LM), so only do it while the astronaut stands in a chamber, and only after measuring. The round windows painted on the HDU's dome and Segment C do not line up with anything in the hall; if Sevan meant those, the cheap answer is to make them dark glass with a faint warm glow from inside (emissive, `lamp-white` off value), not portals.
+7. **Painted windows outside.** The round windows painted on the HDU's dome stay paint, but get dark glass over them (`lamp-white` off value, a little gloss) so they read as windows, not stickers. The Segment C one is the outside of the hall's window (step 8).
+8. **A window in the hall that looks out (Sevan's ask).** A round viewport on the hall's south wall, west of the airlock hatch, at room (-2.0, 1.55, 0), 0.35 m across, in a heavy bevelled ring (a `LatheGeometry` collar in `bezel` steel, eight bolt heads, a jewel lamp beside it). Its partner outside is the painted window on Segment C of the core (about (-0.9, 1.55, 2.5) on the model: measure it with the hull raycast as for the doors). The same stencil pass, the other way round:
+   - While the astronaut is in the hall, within 8 m of the window and it is in view, mask the glass, punch the depth, and draw the **surface** with `outdoors` shown and `interior.group` hidden, through the eye's camera moved by the window pair's transform (`outdoorWindow · inverse(hallWindow)`), applied by moving the camera rig for the pass, since the surface is the scene root. Easier: put every outdoor object under one `surface` group at build time (the `outdoors` list in `astronaut.js` 52 already names them) and move that group by the inverse transform for the pass, exactly as the hall group is moved for the porthole.
+   - The surface is heavier to draw than the hall. For the pass, hide the rocks' far instances and the distant scenery models (the LM, the Viking lander, the depot cargo) unless they fall inside the window's narrow view, and keep the shadow map from the main pass (no shadow re-render, as `renderScope` does at 588-590). Print the extra draw calls in `npm run vr`; aim for under 40 per eye.
+   - What you see: the regolith, the solar panels and the rover from about 1.5 m up on the south side of the HDU, the Earth and the stars, in stereo. It moves as you lean. When the rover drives past, you see it.
+   - Juice: none needed for looking, but the glass gets a faint warm reflection of the hall (a cheap fresnel-ish additive overlay, very low alpha) so it reads as glass from an angle.
+   - The fallback is the same off-axis render target as the porthole's, at 512 px, every other frame.
+9. **The hall-side outer hatch porthole** (optional, last): the same pass from inside a hall-side chamber would show the Moon through its outer hatch. Only while standing in a chamber, and only if the window in step 8 is within budget.
 
 ### Cost on the Quest
 
@@ -332,17 +339,18 @@ That gives the right view from each eye at the cost of two extra hall renders an
 - No canopy and no tool rack anywhere: `grep -n "canopy\|locker" client server` finds nothing but history in comments you have removed too.
 - The astronaut starts inside (or at the door, if the team chose that), with five tools and four decoys lying round the hall, different in free play and the same in the demo.
 - Tools fall, roll, stack and can be thrown, at lunar gravity, with a sound, dust outside, and a buzz in the hand.
+- The astronaut holds one tool at a time; there is no belt.
 - Mission Ops sees where each tool was last seen, in words, on the TOOL LOG.
 - All four HDU doors are airlocks you walk into; nothing is pointed at and there is no fade; the moment you change places cannot be seen in the headset.
 - Cover is "inside" (any chamber or the hall) or crouched by the rover; the tests say so.
-- Looking through the porthole while moving your head shows the hall moving behind the glass, in stereo.
+- Looking through the porthole while moving your head shows the hall moving behind the glass, in stereo; and from the hall, the window by the airlock shows the Moon outside the same way.
 - The astronaut cannot ready themselves; Mission Ops calls them GO once they are suited, from the lobby, which looks exactly as before.
 - `npm test`, `npm run smoke`, `npm run vr` pass; `npm run vr:shots` and `npm run smoke:shots` pictures checked against DESIGN.md and the ones in `docs/` refreshed (habitat, airlock, porthole, interior with tools).
 - Frame time in `npm run vr` printed before and after each phase, and someone has walked through a door in the Quest.
 
-## Open questions (with the default this spec assumes)
+## Decisions (Sevan, 14 Nov)
 
-1. **Start inside or outside?** Default: inside, in the hall with the tools. (Phase 0.)
-2. **Who calls the astronaut GO?** Default: Mission Ops, or the all-in-one console in 2-player mode. Any Mission Control seat would also work.
-3. **Can a held tool that does not fit be carried in the hand?** Default: you can hold it but it does not count, cannot go on the belt, and the work it is for is refused. The alternative is the old shake-and-refuse.
-4. **The window**: this spec makes the airlock porthole a real window. If the painted round windows on the dome were meant, see phase 4, step 7.
+1. **Start inside the hall.** (Phase 0.)
+2. **Only Mission Ops calls the astronaut GO** (the 2-player all-in-one console counts as Mission Ops). (Phase 1.)
+3. **One tool at a time**, held in the hand; the belt goes. (Phase 2.)
+4. **The window is the airlock porthole**, and the hall gets a window that looks out. (Phase 4, steps 1-6 and 8.)
