@@ -33,7 +33,7 @@ renderer.xr.setFoveation(1);
 document.body.appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
-const camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.05, 2000);
+const camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.05, 2600);
 camera.rotation.order = 'YXZ';
 camera.position.y = 1.65; // desktop eye height; the headset overrides this
 const rig = new THREE.Group(); // move this to move the player

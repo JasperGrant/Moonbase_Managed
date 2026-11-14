@@ -3,8 +3,20 @@
 // is downloaded, so the page works offline and on Cloudflare as is. Swap in real models here
 // later without touching the game logic.
 import { CFG, STATIONS } from '/shared/config.js';
+import { HORIZON, TERRAIN, SUN_AZ_DEG } from '/shared/horizon.js';
 
-export const SUN_DIR = [-0.912, 0.143, 0.391]; // unit vector toward the sun: low in the sky, as at the lunar south pole
+// The base sits on the Connecting Ridge between Shackleton and de Gerlache craters at the lunar
+// south pole (89.45 S, 222.69 E), an Artemis III candidate region. The ground beyond the pad and
+// the whole skyline come from NASA LRO LOLA topography (see scripts/lola-horizon.py). Scene -z
+// points along the 0 E meridian, toward Earth; +x points toward 90 E.
+//
+// Sun: at the pole the real sun never climbs above about 1.5 degrees. We use 5 degrees, at an
+// azimuth where the real horizon is lowest, so shadows are long but the ground is still readable.
+const SUN_EL = 5 * Math.PI / 180, SUN_AZ = SUN_AZ_DEG * Math.PI / 180;
+export const SUN_DIR = [Math.sin(SUN_AZ) * Math.cos(SUN_EL), Math.sin(SUN_EL), -Math.cos(SUN_AZ) * Math.cos(SUN_EL)];
+// Earth from here hangs at the horizon along 0 E, rising to about 6 degrees at favourable libration.
+const EARTH_EL = 4.5 * Math.PI / 180, EARTH_DIST = 1800, EARTH_R = 46; // 1.5x its true angular size
+export const EARTH_POS = [0, Math.sin(EARTH_EL) * EARTH_DIST, -Math.cos(EARTH_EL) * EARTH_DIST];
 
 // ---------- deterministic noise (every client builds the same Moon) ----------
 function makeNoise(seed) {
@@ -90,6 +102,7 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
   }
 
   // ---------- textures ----------
+  const SFD_B = 1.83, SFD_A = Math.pow(10, -1.1); // lunar equilibrium crater distribution, per km^2 with D in km
   const regolith = canvasTexture(THREE, 512, 512, (d, w, h) => {
     for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
       const n = N.fbm(x / 64, y / 64, 0.5, 5, 8), fine = N.noise3(x / 6, y / 6, 3.1, 86);
@@ -98,13 +111,20 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
       if (sp > 0.62) v += 60; else if (sp < -0.66) v -= 50; // glassy specks and dark grains
       const i = (y * w + x) * 4; d[i] = v + 2; d[i + 1] = v; d[i + 2] = v - 4; d[i + 3] = 255;
     }
-  }, { repeat: 90 });
-  const regolithBump = canvasTexture(THREE, 256, 256, (d, w, h) => {
+  }, { repeat: 200 });
+  const regolithBump = canvasTexture(THREE, 256, 256, (d, w, h) => { // grain, plus centimetre craters (one tile is 2 m)
+    const pits = [];
+    for (let i = 0; i < 14; i++) pits.push({ x: rnd() * w, y: rnd() * h, R: (0.04 * Math.pow(1 - rnd() * (1 - Math.pow(12, -SFD_B)), -1 / SFD_B)) / 2 * (w / 2), f: rnd() });
     for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
-      const v = 128 + N.fbm(x / 12, y / 12, 1.5, 4, 22) * 110;
-      const i = (y * w + x) * 4; d[i] = d[i + 1] = d[i + 2] = v; d[i + 3] = 255;
+      let v = 128 + N.fbm(x / 12, y / 12, 1.5, 4, 22) * 110;
+      for (const p of pits) {
+        let dx = Math.abs(x - p.x), dy = Math.abs(y - p.y); dx = Math.min(dx, w - dx); dy = Math.min(dy, h - dy);
+        const s = Math.hypot(dx, dy) / p.R;
+        if (s < 1) v += (-(1 - s * s) * 0.6 + s * s * s * s * 0.25) * 90 * (0.4 + 0.6 * p.f); else if (s < 2) v += 0.25 * 90 * (0.4 + 0.6 * p.f) * Math.pow(s, -3) * (2 - s);
+      }
+      const i = (y * w + x) * 4; d[i] = d[i + 1] = d[i + 2] = Math.max(0, Math.min(255, v)); d[i + 3] = 255;
     }
-  }, { repeat: 400, srgb: false });
+  }, { repeat: 750, srgb: false });
   const panelTex = canvasTexture(THREE, 512, 512, (d, w, h) => { // white hull panels with seams and rivets
     for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
       let v = 228 + N.fbm(x / 40, y / 40, 2, 3, 13) * 10;
@@ -201,35 +221,59 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
   };
 
   // ---------- terrain ----------
-  // Flat and swept around the base (the play area), craters and boulder fields beyond it, and a
-  // mountain rim on the horizon, kept low toward the sun and Earth so neither is hidden.
-  const craters = [];
-  for (let i = 0; i < 160; i++) {
-    const a = rnd() * Math.PI * 2, r = 20 + rnd() * rnd() * 260;
-    const R = r < 60 ? 2 + rnd() * 7 : 4 + rnd() * rnd() * 40;
-    craters.push({ x: Math.cos(a) * r, z: Math.sin(a) * r, R, depth: R * (0.12 + rnd() * 0.1) });
-  }
+  // Beyond the graded pad the ground is the real LOLA 20 m topography around the site. On top of it,
+  // craters too small for the DEM to see, drawn from the lunar equilibrium crater size-frequency
+  // distribution N(>D) = 10^-1.1 D^-1.83 per km^2 (D in km; Trask 1966, as used by Neukum et al.
+  // 2001 for the saturated small-crater population). Fresh and degraded craters are mixed: depth
+  // 5-18% of diameter, rim 1.5-4%, a parabolic bowl, a raised rim, and ejecta falling off as s^-3.
+  const demAt = (x, z) => { // bilinear read of TERRAIN, metres relative to the site
+    const { step_m: st, half_m: hm, n, height_m: H } = TERRAIN;
+    const u = Math.min(n - 1.001, Math.max(0, (x + hm) / st)), v = Math.min(n - 1.001, Math.max(0, (z + hm) / st));
+    const i = Math.floor(u), j = Math.floor(v), fu = u - i, fv = v - j;
+    return (H[j * n + i] * (1 - fu) + H[j * n + i + 1] * fu) * (1 - fv) + (H[(j + 1) * n + i] * (1 - fu) + H[(j + 1) * n + i + 1] * fu) * fv;
+  };
   const ramp = (v, a, b) => { const k = Math.min(1, Math.max(0, (v - a) / (b - a))); return k * k * (3 - 2 * k); };
+  const sfdCount = (dMin, dMax, areaKm2) => SFD_A * (Math.pow(dMin / 1000, -SFD_B) - Math.pow(dMax / 1000, -SFD_B)) * areaKm2;
+  const sfdDraw = (dMin, dMax) => dMin * Math.pow(1 - rnd() * (1 - Math.pow(dMax / dMin, -SFD_B)), -1 / SFD_B);
+  const FIELD = 760, CELL = 20, NC = Math.ceil(2 * FIELD / CELL);
+  const craterGrid = Array.from({ length: NC * NC }, () => []);
+  const craters = [];
+  function addCraters(rMin, rMax, dMin, dMax) {
+    const count = Math.round(sfdCount(dMin, dMax, Math.PI * (rMax * rMax - rMin * rMin) / 1e6));
+    for (let i = 0; i < count; i++) {
+      const a = rnd() * Math.PI * 2, r = Math.sqrt(rMin * rMin + rnd() * (rMax * rMax - rMin * rMin));
+      const D = sfdDraw(dMin, dMax), fresh = Math.pow(rnd(), 2.2);
+      const c = { x: Math.cos(a) * r, z: Math.sin(a) * r, R: D / 2, depth: D * (0.05 + 0.13 * fresh), rim: D * (0.015 + 0.025 * fresh) };
+      craters.push(c);
+      const reach = c.R * 3;
+      for (let gx = Math.floor((c.x - reach + FIELD) / CELL); gx <= Math.floor((c.x + reach + FIELD) / CELL); gx++)
+        for (let gz = Math.floor((c.z - reach + FIELD) / CELL); gz <= Math.floor((c.z + reach + FIELD) / CELL); gz++)
+          if (gx >= 0 && gz >= 0 && gx < NC && gz < NC) craterGrid[gz * NC + gx].push(c);
+    }
+  }
+  addCraters(0, 130, 3, 100);      // the mesh is fine enough for 3 m craters near the base
+  addCraters(130, 1080, 10, 100);  // further out, 10 m and up; anything over 100 m is already in the DEM
+  const r0 = Math.hypot(CFG.spawn.x, CFG.spawn.z);
+  function craterHeight(x, z, r) {
+    const gx = Math.floor((x + FIELD) / CELL), gz = Math.floor((z + FIELD) / CELL);
+    if (gx < 0 || gz < 0 || gx >= NC || gz >= NC) return 0;
+    let h = 0;
+    for (const c of craterGrid[gz * NC + gx]) {
+      const s = Math.hypot(x - c.x, z - c.z) / c.R;
+      if (s >= 3) continue;
+      if (s < 1) h += -c.depth * (1 - s * s) + c.rim * s * s * s * s;
+      else h += c.rim * Math.pow(s, -3) * Math.min(1, 3 - s);
+    }
+    return h * ramp(r, r0 + 3, r0 + 14); // the pad around the habitat and stations was graded
+  }
   function height(x, z) {
     const r = Math.hypot(x, z);
-    const far = ramp(r, 15, 26);
-    let h = far * (2.4 * N.fbm(x * 0.03, z * 0.03, 0, 4) + 0.9 * N.fbm(x * 0.11, z * 0.11, 1, 3) + 0.9);
-    h += (0.05 + far * 0.25) * N.fbm(x * 0.6, z * 0.6, 2, 3);
-    for (const c of craters) {
-      const d = Math.hypot(x - c.x, z - c.z) / c.R;
-      if (d > 1.7) continue;
-      const bowl = d < 1 ? c.depth * (d * d - 1) : 0;
-      const rim = c.depth * 0.32 * Math.exp(-(((d - 1) / 0.28) ** 2));
-      h += (bowl + rim) * far;
-    }
-    if (r > 95) {
-      const dir = [x / r, z / r];
-      const shade = (1 - 0.85 * Math.max(0, dir[0] * -0.92 + dir[1] * 0.39)) * (1 - 0.7 * Math.max(0, dir[0] * 0.21 + dir[1] * -0.98));
-      h += ramp(r, 95, 230) * shade * (26 * (N.fbm(x * 0.006, z * 0.006, 3, 4) + 0.55) + 7 * Math.abs(N.fbm(x * 0.02, z * 0.02, 4, 3)));
-    }
-    return h;
+    let h = ramp(r, 18, 70) * demAt(x, z);                      // real ground, blended in past the pad
+    h += (0.03 + 0.17 * ramp(r, 15, 40)) * N.fbm(x * 0.6, z * 0.6, 2, 3); // fine undulation
+    return h + craterHeight(x, z, r);
   }
-  const SIZE = 640, SEG = 230;
+  void craters;
+  const SIZE = 1500, SEG = 230;
   const groundGeo = new THREE.PlaneGeometry(SIZE, SIZE, SEG, SEG);
   groundGeo.rotateX(-Math.PI / 2);
   {
@@ -237,11 +281,11 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
     for (let i = 0; i < gp.count; i++) {
       // Denser vertices near the base: remap the regular grid with a power curve.
       const u = gp.getX(i) / (SIZE / 2), v = gp.getZ(i) / (SIZE / 2);
-      const x = Math.sign(u) * Math.pow(Math.abs(u), 1.75) * (SIZE / 2), z = Math.sign(v) * Math.pow(Math.abs(v), 1.75) * (SIZE / 2);
+      const x = Math.sign(u) * Math.pow(Math.abs(u), 2.0) * (SIZE / 2), z = Math.sign(v) * Math.pow(Math.abs(v), 2.0) * (SIZE / 2);
       const h = height(x, z);
       gp.setXYZ(i, x, h, z);
       uv.setXY(i, x / SIZE + 0.5, z / SIZE + 0.5);
-      // Vertex colour breaks up texture tiling: broad bright/dark patches, darker crater floors.
+      // Vertex colour breaks up texture tiling: broad bright/dark patches.
       const tone = 0.86 + 0.18 * N.fbm(x * 0.02 + 40, z * 0.02, 5, 3) + 0.06 * N.fbm(x * 0.15, z * 0.15, 6, 2);
       col[i * 3] = tone; col[i * 3 + 1] = tone; col[i * 3 + 2] = tone * 0.985;
     }
@@ -251,6 +295,31 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
   const ground = new THREE.Mesh(groundGeo, regolithMat);
   ground.receiveShadow = true;
   scene.add(ground);
+
+  // The skyline: the real 360-degree horizon seen from the site (LOLA, out to 290 km, with the
+  // Moon's curvature). A band of ground runs from the edge of the terrain mesh out to a ring at
+  // 1 km whose top edge sits at the measured horizon angle in every direction.
+  {
+    const n = HORIZON.angle_deg.length, R_IN = SIZE / 2 - 2, R_OUT = 1000;
+    const pos = new Float32Array((n + 1) * 2 * 3), uv = new Float32Array((n + 1) * 2 * 2), idx = [];
+    for (let i = 0; i <= n; i++) {
+      const k = i % n, az = (k * HORIZON.step_deg) * Math.PI / 180, sx = Math.sin(az), sz = -Math.cos(az);
+      const edge = height(sx * R_IN, sz * R_IN);
+      const top = R_OUT * Math.tan(HORIZON.angle_deg[k] * Math.PI / 180) + 1.7;
+      pos.set([sx * R_IN, edge, sz * R_IN], i * 6);
+      pos.set([sx * R_OUT, top, sz * R_OUT], i * 6 + 3);
+      uv.set([i / n * 160, 0, i / n * 160, 12], i * 4);
+      if (i < n) idx.push(i * 2, i * 2 + 1, i * 2 + 2, i * 2 + 1, i * 2 + 3, i * 2 + 2);
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    g.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+    g.setIndex(idx);
+    g.computeVertexNormals();
+    const apron = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ map: regolith, bumpMap: regolithBump, bumpScale: 0.35, roughness: 1, color: 0xd9d6cf, side: THREE.DoubleSide }));
+    apron.receiveShadow = true;
+    scene.add(apron);
+  }
 
   // ---------- rocks ----------
   // Two shapes (jagged, rounded), each displaced by noise, instanced many times.
@@ -308,16 +377,17 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
     const bandN = new THREE.Vector3(0.35, 0.82, 0.45).normalize();
     for (let i = 0; i < COUNT; i++) {
       let v;
-      if (i < COUNT * 0.6) { // band star: near the great circle perpendicular to bandN
-        const a = rnd() * Math.PI * 2, off = (rnd() + rnd() + rnd() - 1.5) * 0.22;
-        const t1 = new THREE.Vector3(1, 0, 0).cross(bandN).normalize(), t2 = bandN.clone().cross(t1);
-        v = t1.multiplyScalar(Math.cos(a)).add(t2.multiplyScalar(Math.sin(a))).add(bandN.clone().multiplyScalar(off)).normalize();
-      } else {
-        const u = rnd() * 2 - 1, a = rnd() * Math.PI * 2, rr = Math.sqrt(1 - u * u);
-        v = new THREE.Vector3(rr * Math.cos(a), u, rr * Math.sin(a));
-      }
-      if (v.y < 0.01) v.y = 0.01 + rnd() * 0.05;
-      pos.set([v.x * 1500, v.y * 1500, v.z * 1500], i * 3);
+      do { // only stars above the horizon; the ones below are simply not there (no piling up at the horizon)
+        if (i < COUNT * 0.6) { // band star: near the great circle perpendicular to bandN
+          const a = rnd() * Math.PI * 2, off = (rnd() + rnd() + rnd() - 1.5) * 0.22;
+          const t1 = new THREE.Vector3(1, 0, 0).cross(bandN).normalize(), t2 = bandN.clone().cross(t1);
+          v = t1.multiplyScalar(Math.cos(a)).add(t2.multiplyScalar(Math.sin(a))).add(bandN.clone().multiplyScalar(off)).normalize();
+        } else {
+          const u = rnd() * 2 - 1, a = rnd() * Math.PI * 2, rr = Math.sqrt(1 - u * u);
+          v = new THREE.Vector3(rr * Math.cos(a), u, rr * Math.sin(a));
+        }
+      } while (v.y < -0.06);
+      pos.set([v.x * 2200, v.y * 2200, v.z * 2200], i * 3);
       const mag = Math.pow(rnd(), 3);
       size[i] = 0.8 + mag * 3.2 + (i < COUNT * 0.6 ? 0 : rnd() * 0.6);
       const temp = rnd();
@@ -339,18 +409,18 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
 
     // The sun itself: a hard disc and a soft glow, far along the light direction.
     const disc = new THREE.Sprite(new THREE.SpriteMaterial({ map: sunTex, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false }));
-    disc.position.copy(sunDir).multiplyScalar(1400); disc.scale.setScalar(190);
+    disc.position.copy(sunDir).multiplyScalar(2100); disc.scale.setScalar(285);
     const glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: sunTex, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false, opacity: 0.55 }));
-    glow.position.copy(disc.position); glow.scale.setScalar(900);
+    glow.position.copy(disc.position); glow.scale.setScalar(1350);
     scene.add(disc, glow);
   }
 
   // Earth, low over the northern horizon: continents, clouds, a sunlit atmosphere rim, and the
   // same sun lighting it, so it shows a phase.
   const earth = new THREE.Group();
-  earth.position.set(140, 118, -640);
+  earth.position.set(...EARTH_POS);
   {
-    const R = 34;
+    const R = EARTH_R;
     earth.add(new THREE.Mesh(new THREE.SphereGeometry(R, 48, 32), new THREE.MeshStandardMaterial({ map: earthTex, roughness: 0.75, metalness: 0, emissive: 0x06101f, emissiveIntensity: 0.6 })));
     const clouds = new THREE.Mesh(new THREE.SphereGeometry(R * 1.012, 48, 32), new THREE.MeshStandardMaterial({ color: 0xffffff, alphaMap: cloudTex, transparent: true, roughness: 1, depthWrite: false }));
     earth.add(clouds);
@@ -403,7 +473,7 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
     for (const s of [-1, 1]) { const rad = mesh(new THREE.BoxGeometry(1.6, 0.04, 0.9), whitePlain, s * 0.9, 4.8, -0.9, hab); rad.rotation.z = s * 0.32; rad.rotation.x = 0.34; }
     tube(steel, [1.2, 2.0, 0], [1.2, 6.4, 0], 0.035, hab);
     const dish = mesh(new THREE.LatheGeometry(Array.from({ length: 12 }, (_, i) => new THREE.Vector2(i * 0.05, (i * 0.05) ** 2 * 0.5)), 24), whitePlain, 1.2, 6.5, 0, hab);
-    dish.lookAt(new THREE.Vector3(140, 118, -640).add(hab.position)); dish.rotateX(-Math.PI / 2 + 0.6);
+    dish.lookAt(new THREE.Vector3(...EARTH_POS).add(hab.position)); dish.rotateX(-Math.PI / 2 + 0.6);
     for (const a of [1.1, -1.1]) { // two lit windows with frames
       const f = mesh(new THREE.BoxGeometry(0.8, 0.5, 0.06), dark, Math.sin(a) * 2.5, 2.0, Math.cos(a) * 2.5, hab); f.lookAt(new THREE.Vector3(Math.sin(a) * 6, 2.0, Math.cos(a) * 6));
       const w = mesh(new THREE.BoxGeometry(0.64, 0.34, 0.05), new THREE.MeshBasicMaterial({ color: 0xffbf6a, toneMapped: false }), Math.sin(a) * 2.52, 2.0, Math.cos(a) * 2.52, hab); w.lookAt(new THREE.Vector3(Math.sin(a) * 6, 2.0, Math.cos(a) * 6));
@@ -476,7 +546,7 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
     for (let i = 0; i < 3; i++) { const a = (i / 3) * Math.PI * 2; tube(steel, [Math.cos(a) * 1.1, 0.2, Math.sin(a) * 1.1], [0, 1.5, 0], 0.015, yoke); } // feed on its tripod, near the focus
     mesh(new THREE.CylinderGeometry(0.08, 0.12, 0.25, 10), dark, 0, 1.55, 0, yoke);
     mesh(new THREE.CylinderGeometry(0.12, 0.16, 0.3, 12), grey, 0, -0.1, 0, yoke);
-    const toEarth = st.worldToLocal(new THREE.Vector3(140, 118, -640)).sub(yoke.position).normalize();
+    const toEarth = st.worldToLocal(new THREE.Vector3(...EARTH_POS)).sub(yoke.position).normalize();
     yoke.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), toEarth);
   }
   // Drill rig: tripod with winch, drill string, cuttings pile
@@ -535,7 +605,7 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
 
   // ---------- a lander on the horizon, with its flag ----------
   {
-    const L = new THREE.Group(); L.position.set(-30, height(-30, -34), -34); L.rotation.y = 0.6;
+    const L = new THREE.Group(); L.position.set(-30, height(-30, -34) - 0.1, -34); L.rotation.y = 0.6;
     mesh(new THREE.CylinderGeometry(2.3, 2.3, 1.7, 8), gold, 0, 1.9, 0, L);
     mesh(new THREE.CylinderGeometry(2.0, 2.0, 0.3, 8), dark, 0, 2.9, 0, L);
     mesh(new THREE.BoxGeometry(2.6, 2.1, 2.4), silverFoil, 0, 4.0, 0, L);
