@@ -12,14 +12,11 @@ export class Game {
     this.seq = 0;
     this.evn = 0;
     this.mode = 'demo';
-    this.last = null;
     this.reset();
   }
 
-  // Back to the lobby. The mode is kept so the next mission is the same kind, and a finished
-  // mission leaves its outcome behind in `last` for the READY board.
+  // Back to the lobby. The mode is kept so the next mission is the same kind.
   reset() {
-    if (this.phase === 'results' && this.result) this.last = { won: this.result.won, score: this.score, mode: this.mode };
     this.phase = 'lobby';
     this.debriefLeft = 0;
     this.timeLeft = CFG.roundSeconds;
@@ -54,7 +51,6 @@ export class Game {
   start() {
     if (this.phase !== 'lobby') return false;
     this.reset();
-    this.last = null;
     this.phase = 'run';
     this.script = [...SCRIPTS[this.mode]].sort((a, b) => a.at - b.at);
     if (this.mode === 'free') {
@@ -285,7 +281,6 @@ export class Game {
     const run = this.phase === 'run';
     const v = { t: 'state', n: ++this.seq, phase: this.phase, mode: this.mode, crew, score: this.score, result: this.result, powered: !run || this.powered };
     if (this.phase === 'results') { v.log = this.log; v.debriefLeft = Math.max(0, Math.ceil(this.debriefLeft)); }
-    if (this.phase === 'lobby' && this.last) v.last = this.last;
 
     // A blackout leaves mission control with static and nothing else.
     if (role !== 'astronaut' && !v.powered) return v;

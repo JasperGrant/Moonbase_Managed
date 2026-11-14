@@ -7,7 +7,7 @@ export { GameRoom } from './room.js';
 export default {
   fetch(request, env) {
     const url = new URL(request.url);
-    if (request.headers.get('Upgrade')?.toLowerCase() === 'websocket' || url.pathname === '/seats') {
+    if (request.headers.get('Upgrade')?.toLowerCase() === 'websocket' || url.pathname === '/seats' || url.pathname === '/players') {
       return env.GAME.get(env.GAME.idFromName('main')).fetch(request);
     }
     const page = url.pathname === '/' ? '/index.html' : PAGES[url.pathname];

@@ -16,6 +16,7 @@
 //
 // Headless Chromium renders WebGL in software here, so the scene runs at about a frame a second and
 // each screenshot can take seconds. That is the test machine, not the game.
+import { WebSocket } from 'ws';
 import { spawn } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
@@ -63,6 +64,15 @@ async function open(name, url) {
   watch(p, name);
   await p.goto(BASE + url);
   return p;
+}
+// A command from the admin console, sent over its own connection (no ADMIN_KEY in the smoke test).
+async function admin(cmd) {
+  const ws = new WebSocket(BASE.replace(/^http/, 'ws') + '/ws');
+  await new Promise((ok, fail) => { ws.once('open', ok); ws.once('error', fail); });
+  ws.send(JSON.stringify({ t: 'hello', role: 'admin' }));
+  ws.send(JSON.stringify({ t: 'admin', cmd }));
+  await new Promise(r => setTimeout(r, 400));
+  ws.close();
 }
 const T0 = Date.now(), step = what => console.log(`  ${String(Math.round((Date.now() - T0) / 1000)).padStart(4)} s  ${what}`);
 const POLL = { timeout: 30000, polling: 250 };
@@ -220,6 +230,30 @@ const waitFor = async (page, name, fn, seconds) => {
 };
 
 try {
+  // ---------- the landing page ----------
+  // The base in 3D draws without a WebGL complaint, the first visitor picks 2 players, the seat
+  // picker then shows two panels, and a seat a 2-player game does not have is refused.
+  step('landing page: the 3D scene, and choosing 2 players');
+  const land = await openOwn('landing', '/');
+  await land.waitForFunction(() => window.moonbase?.backdrop?.frames >= 3, null, { timeout: 90000, polling: 250 })
+    .catch(() => problems.push('landing: the 3D scene did not draw'));
+  const front = await land.evaluate(() => ({ choose: !document.getElementById('choose').hidden, headset: !document.getElementById('headsetNote').hidden,
+    gl: window.moonbase?.backdrop?.renderer.getContext().getError(), calls: window.moonbase?.backdrop?.renderer.info.render.calls }));
+  if (!front.choose || front.headset) problems.push('landing: a laptop with no game chosen should see the two choices and no headset note: ' + JSON.stringify(front));
+  if (front.gl !== 0 || !(front.calls > 20)) problems.push('landing: the scene did not draw cleanly: ' + JSON.stringify(front));
+  await shot(land, 'landing');
+  await land.click('[data-players="2"]');
+  await land.waitForFunction(() => !document.getElementById('lobby').hidden, null, POLL).catch(() => problems.push('landing: choosing 2 players did not open the seat picker'));
+  const picker = await land.evaluate(() => [...document.querySelectorAll('#lobby .lb-panel')].filter(p => !p.hidden).map(p => p.dataset.name));
+  if (JSON.stringify(picker) !== JSON.stringify(['Astronaut', 'Mission Operator'])) problems.push('landing: a 2-player game should offer the Astronaut and the Mission Operator: ' + JSON.stringify(picker));
+  const four = await (await fetch(BASE + '/players', { method: 'POST', body: JSON.stringify({ players: 4 }) })).json();
+  if (four.players !== 2) problems.push('server: a second choice changed the game: ' + JSON.stringify(four));
+  await land.goto(BASE + '/sci');
+  await land.waitForSelector('#taken', POLL).catch(() => {});
+  const refused = await land.evaluate(() => document.getElementById('taken')?.textContent || '');
+  if (!/NOT IN THIS GAME/.test(refused)) problems.push('a 2-player game should refuse the Scientist seat: ' + JSON.stringify(refused));
+  await browsers.pop().close();
+
   step('opening Mission Control and the astronaut page');
   const ctl = await openOwn('console', '/control', { width: 1280, height: 1400 });
   const astro = await openOwn('astronaut', '/astronaut');
@@ -232,10 +266,11 @@ try {
   if (pitch > 0.2) problems.push(`astronaut: camera pitched ${pitch.toFixed(2)} rad right after entering (pointer-lock jump)`);
   await astro.evaluate(installHelpers);
 
-  // Ready up: the astronaut uses the READY board in front of the spawn point, Mission Control
-  // (2-player mode, so the crew is complete) presses Ready in the lobby. The mission starts itself
-  // after the countdown.
-  if (!(await astro.evaluate(() => window.moonbase.useBoard()))) problems.push('astronaut: the READY board was not in front of the spawn point');
+  // Ready up: the astronaut uses their own card in the waiting room (two cards: a 2-player game),
+  // Mission Control presses Ready in the lobby. The mission starts itself after the countdown.
+  const cards = await astro.evaluate(() => window.moonbase.room.describe().map(c => c.role));
+  if (JSON.stringify(cards) !== JSON.stringify(['astronaut', 'all'])) problems.push('astronaut: the waiting room should have two cards in a 2-player game: ' + JSON.stringify(cards));
+  if (!(await astro.evaluate(() => window.moonbase.useBoard()))) problems.push('astronaut: could not use their own card in the waiting room');
   await ctl.click('[data-ready]');
   await ctl.waitForFunction(() => window.moonbase.state()?.phase === 'run', null, { timeout: 60000, polling: 250 });
   step('mission started');
@@ -313,12 +348,12 @@ try {
   await astro.keyboard.down('x');
   const back = await astro.evaluate(async () => {
     const mb = window.moonbase;
-    for (let i = 0; i < 100 && (mb.debrief() || mb.state().phase !== 'lobby' || !mb.board.visible); i++) await new Promise(r => setTimeout(r, 100));
+    for (let i = 0; i < 100 && (mb.debrief() || mb.state().phase !== 'lobby' || !mb.room.group.visible); i++) await new Promise(r => setTimeout(r, 100));
     await new Promise(r => setTimeout(r, 600)); // the fade
     mb.camera.updateMatrixWorld(true);
     const head = mb.camera.getWorldPosition(new mb.THREE.Vector3()), dir = mb.camera.getWorldDirection(new mb.THREE.Vector3());
-    const toBoard = mb.board.getWorldPosition(new mb.THREE.Vector3()).sub(head).normalize();
-    return { debrief: mb.debrief(), phase: mb.state().phase, where: mb.where(), board: mb.board.visible, facing: +dir.dot(toBoard).toFixed(2) };
+    const toBoard = new mb.THREE.Vector3(0, 0, -1); // the waiting room's cards stand north of the spawn point
+    return { debrief: mb.debrief(), phase: mb.state().phase, where: mb.where(), board: mb.room.group.visible, facing: +dir.dot(toBoard).toFixed(2) };
   });
   await astro.keyboard.up('x');
   if (back.debrief || back.phase !== 'lobby' || back.where !== 'out' || !back.board || back.facing < 0.8) problems.push('astronaut: holding X in the debrief did not bring them back to the READY board: ' + JSON.stringify(back));
@@ -474,7 +509,12 @@ try {
   step('radio both ways, with a microphone');
   browser = await chromium.launch({ args: [...GL, ...MIC] });
   ctx = await browser.newContext({ viewport: { width: 960, height: 540 } });
-  // The Earth side is the Mission Ops seat alone: it has no 3D scene to starve the astronaut's.
+  // Reset from the admin connection: the 2-player game is forgotten. Then a 4-player game, so the
+  // Earth side can be the Mission Ops seat alone, which has no 3D scene to starve the astronaut's.
+  await admin('reset');
+  const after = await (await fetch(BASE + '/seats')).json();
+  if (after.players !== null) problems.push('server: a reset should forget the choice of 2 or 4 players: ' + JSON.stringify(after.players));
+  await fetch(BASE + '/players', { method: 'POST', body: JSON.stringify({ players: 4 }) });
   const ops = await seat('ops', '/ops');
   const radioman = await open('astronaut', '/astronaut');
   await radioman.waitForTimeout(1000);

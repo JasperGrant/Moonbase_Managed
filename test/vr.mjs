@@ -28,10 +28,12 @@ catch { console.error('playwright is not installed. Run: npm i -D playwright && 
 // ---------- the server, in this process ----------
 const hub = new Hub(undefined, { requireFullCrew: false });
 const g = hub.game;
-const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml' };
+const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.jpg': 'image/jpeg', '.glb': 'model/gltf-binary', '.png': 'image/png' };
 const server = http.createServer((req, res) => {
   let url = new URL(req.url, 'http://x').pathname;
   if (url === '/seats') return res.end(JSON.stringify(hub.seats()));
+  if (url === '/players' && req.method === 'POST') { let b = ''; req.on('data', d => { b += d; }); req.on('end', () => { let n = null; try { n = JSON.parse(b).players; } catch {} res.end(JSON.stringify(hub.choosePlayers(n))); }); return; }
+  if (url === '/') url = '/index.html';
   url = PAGES[url] || url;
   fs.readFile(path.join(WEB, url), (e, d) => { if (e) { res.writeHead(404).end(); return; } res.writeHead(200, { 'Content-Type': MIME[path.extname(url)] || 'application/octet-stream' }); res.end(d); });
 });
@@ -161,9 +163,20 @@ const kit = async (...tools) => { g.belt = [...tools]; g.locker = ['brush', 'pat
 const reachOk = async (what, limit = 0.8) => { const r = await P(() => { const r = window.vr.reach; window.vr.resetReach(); return r; }); check(r <= limit, `${what}: needed an arm ${r.toFixed(2)} m long (a real one is about 0.75 m)`); return r; };
 
 try {
+  // The landing page knows a headset (forced here with ?device=headset), says it will be the Astronaut,
+  // and after the 4-player choice goes straight to the Astronaut's page with no seat to pick.
+  step('0. the landing page, in a headset');
+  await page.goto(`http://localhost:${PORT}/?device=headset`);
+  await page.waitForSelector('#choose:not([hidden])', { timeout: 30000 });
+  check(await P(() => !document.getElementById('headsetNote').hidden), 'landing: no "you will be the Astronaut" note in a headset');
+  await page.click('[data-players="4"]');
+  await page.waitForURL(/\/astronaut\?device=headset$/, { timeout: 60000 }).catch(() => check(false, 'landing: choosing 4 players in a headset did not go to the Astronaut page: ' + page.url()));
+  check(hub.players === 4, 'landing: the 4-player choice did not reach the server');
+  check(await serverUntil(() => hub.crew().includes('astronaut'), 30), 'landing: the headset was not seated as the Astronaut');
+
   step('putting the headset on');
-  await page.goto(`http://localhost:${PORT}/astronaut`);
   await page.waitForTimeout(1200);
+  check(await P(() => window.moonbase.headset() && document.getElementById('deskBtn').hidden), 'astronaut: a headset should not be offered "Play on this screen"');
   await page.click('#radioBtn');
   await page.waitForFunction(() => /ENTER VR/i.test(document.querySelector('#vrSlot button')?.textContent || ''), null, { timeout: 15000, polling: 200 });
   await page.click('#vrSlot button');
@@ -178,8 +191,51 @@ try {
   await P(installVR);
   const start = await P(() => window.moonbase.controllers.map(c => c.userData.hand));
   check(start.includes('left') && start.includes('right'), 'the two controllers did not connect: ' + JSON.stringify(start));
+  // ---------- the waiting room ----------
+  step('0. the waiting room: four cards, readying from your own');
+  const room = await P(() => ({ seen: window.moonbase.room.group.visible, cards: window.moonbase.room.describe() }));
+  check(room.seen && JSON.stringify(room.cards.map(c => c.role)) === JSON.stringify(['astronaut', 'ops', 'sci', 'tech']), 'waiting room: four cards in seat order: ' + JSON.stringify(room));
+  check(room.cards.every((c, i) => i === 0 || c.x > room.cards[i - 1].x), 'waiting room: the cards should run left to right: ' + JSON.stringify(room.cards.map(c => c.x.toFixed(2))));
+  check(room.cards.find(c => c.role === 'ops').key.startsWith('false'), 'waiting room: the empty Mission Ops seat should read empty');
+  const opsSeat = { send() {}, close() {} }; // someone takes the Mission Ops seat on a laptop
+  hub.add(opsSeat); hub.message(opsSeat, JSON.stringify({ t: 'hello', role: 'ops' }), false);
+  check(await P(async () => { await window.vr.until(s => s.crew.includes('ops'), 3); await window.vr.frames(3); return window.moonbase.room.describe().find(c => c.role === 'ops').key.startsWith('true'); }),
+    'waiting room: the Mission Ops card did not change when someone took the seat');
+  // Point the right controller at your own card and pull the trigger: ready. Pull it again: not ready.
+  const pointAtOwn = () => P(async () => {
+    const v = window.vr, mb = window.moonbase, at = v.wp(mb.room.own), from = v.wp(mb.camera).add(v.V(0.18, -0.3, -0.25).applyQuaternion(mb.rig.quaternion));
+    v.hand('right', from, at.clone().sub(from)); await v.frames(2);
+    window.fakeXR.trigger('right', true); await v.frames(2); window.fakeXR.trigger('right', false); await v.frames(2);
+  });
+  await P(() => window.vr.stand(-3.6, 7.0, -3.6, 0));
+  if (SHOTS) { // a picture of the waiting room, both eyes, the cards in front
+    const url = await P(async () => {
+      const mb = window.moonbase, R = mb.renderer, skip = R.render;
+      window.fakeXR.head(0, 1.7, 0, 0.12, -0.05);
+      R.render = R.realRender; await window.vr.frames(3);
+      const u = await mb.snap(); R.render = skip; window.fakeXR.head(0, 1.7, 0); return u;
+    });
+    fs.writeFileSync(path.join(OUT, 'vr-waiting-room.png'), Buffer.from(url.split(',')[1], 'base64'));
+  }
+  await pointAtOwn();
+  check(await serverUntil(() => hub.ready.has('astronaut'), 3), 'waiting room: the trigger on your own card did not ready you');
+  check(await P(async () => { await window.vr.frames(3); return window.moonbase.room.describe()[0].key.startsWith('true,true'); }), 'waiting room: your card does not show READY');
+  check(hub.game.phase === 'lobby', 'waiting room: one ready seat of two should not start the mission');
+  // Taking the headset off (the session is hidden) before the start: not ready any more.
+  await P(() => { const s = window.moonbase.renderer.xr.getSession(); s.visibilityState = 'hidden'; s.dispatchEvent(new Event('visibilitychange')); s.visibilityState = 'visible'; });
+  check(await serverUntil(() => !hub.ready.has('astronaut'), 3), 'waiting room: taking the headset off should make the Astronaut not ready');
+  // No walking or teleporting out of the waiting room.
+  const walked = await P(async () => {
+    const mb = window.moonbase, before = mb.rig.position.clone();
+    window.fakeXR.stick('left', 0, -1); await window.vr.frames(10); window.fakeXR.stick('left', 0, 0);
+    return mb.rig.position.distanceTo(before);
+  });
+  check(walked < 0.01, 'waiting room: the stick walked the Astronaut out of the waiting room: ' + walked.toFixed(2) + ' m');
+  hub.remove(opsSeat);
+
   g.start(); g.script = [];
   await P(() => window.vr.until(s => s.phase === 'run', 5));
+  check(await P(async () => { await window.vr.frames(3); return !window.moonbase.room.group.visible; }), 'waiting room: the cards are still up after the start');
   await P(() => window.vr.frames(5));
   check(await P(() => window.moonbase.fx.gloves.every(gl => gl.visible)), 'no gloves are drawn on the controllers');
 
@@ -835,11 +891,13 @@ try {
     // Where the astronaut is and what the cuff says.
     v.after = () => {
       const head = v.wp(mb.camera), dir = mb.camera.getWorldDirection(v.V()).setY(0).normalize();
-      const toBoard = v.wp(mb.board).sub(head).setY(0).normalize();
-      return { presenting: mb.renderer.xr.isPresenting, phase: mb.state().phase, debrief: mb.debrief(), where: mb.where(), board: mb.board.visible,
+      const toBoard = v.V(0, 0, -1); // the waiting room's cards stand north of the spawn point
+      return { presenting: mb.renderer.xr.isPresenting, phase: mb.state().phase, debrief: mb.debrief(), where: mb.where(), board: mb.room.group.visible,
         facing: +dir.dot(toBoard).toFixed(2), fromSpawn: +Math.hypot(head.x - spawn.x, head.z - spawn.z).toFixed(2),
         status: a.shown?.status, face: a.shown?.debrief, pressing: +a.pressing.toFixed(2),
-        result: mb.resultBoard.visible && +dir.dot(v.wp(mb.resultBoard).sub(head).setY(0).normalize()).toFixed(2) };
+        result: mb.resultBoard.visible && +dir.dot(v.wp(mb.resultBoard).sub(head).setY(0).normalize()).toFixed(2),
+        // the board's front must face the head, or it is culled and nothing is seen
+        resultFront: +v.V(0, 0, 1).applyQuaternion(mb.resultBoard.getWorldQuaternion(new T.Quaternion())).dot(head.clone().sub(v.wp(mb.resultBoard)).setY(0).normalize()).toFixed(2) };
     };
   }, CFG.spawn);
   const after = () => P(() => window.vr.after());
@@ -856,6 +914,7 @@ try {
   r = await endInside(false);
   await P(async () => { window.fakeXR.kind('left', 'hand'); window.fakeXR.kind('right', 'hand'); await window.vr.fr(8); });
   check(r.debrief && r.face && r.status === 'lost' && r.where === 'in', 'debrief: a lost mission should put a cross on the cuff: ' + JSON.stringify(r));
+  check(r.resultFront > 0.9, 'debrief: the result board is turned away from the astronaut: ' + JSON.stringify(r.resultFront));
   check(r.result > 0.9, 'debrief: a lost mission should put a MISSION FAILED board in front of the astronaut, in the world: ' + JSON.stringify(r.result));
   check(r.played.includes('lost') && !r.played.includes('won'), 'debrief: no "lost" sting when the mission failed: ' + JSON.stringify(r.played));
   check(r.haptics.some(h => h.ms >= 500), 'debrief: a lost mission should give a long pull on the hands: ' + JSON.stringify(r.haptics));

@@ -1,11 +1,15 @@
-// Plain-Node checks of the lobby: seats, ready flags, the countdown and the auto start.
+// Plain-Node checks of the lobby: 2 or 4 players, seats, ready flags, the countdown and the auto start.
 import assert from 'node:assert/strict';
 import { Hub } from '../server/hub.js';
-import { CFG } from '../client/shared/config.js';
+import { CFG, PLAYERS } from '../client/shared/config.js';
 
 const S = CFG.lobby.countdownSeconds;
-function setup(opts) {
-  const hub = new Hub(undefined, opts);
+// players: the game chosen on the landing page before anyone joins (4 unless said); null for none yet.
+function setup(opts = {}) {
+  let t = 0;
+  const hub = new Hub(undefined, { now: () => t, ...opts });
+  const players = 'players' in opts ? opts.players : 4;
+  if (players) hub.choosePlayers(players);
   const join = (role, extra = {}) => {
     const c = { got: [], closed: false, send(m) { this.got.push(m); }, close() { this.closed = true; } };
     hub.add(c);
@@ -15,7 +19,8 @@ function setup(opts) {
   const say = (c, m) => hub.message(c, JSON.stringify(m), false);
   // Advance the lobby by whole seconds without waiting in real time.
   const wait = sec => { for (let i = 0; i < sec * 10; i++) { hub.lobbyTick(0.1); hub.game.tick(0.1); } };
-  return { hub, join, say, wait };
+  const later = sec => { t += sec * 1000; }; // move the clock on, for the empty-game timeout
+  return { hub, join, say, wait, later };
 }
 
 // Nobody connected: every seat open, nobody ready.
@@ -59,11 +64,13 @@ function setup(opts) {
   say(t, { t: 'ready', on: true });
   assert.deepEqual(hub.seats().ready, [], 'ready is ignored outside the lobby');
 
-  // "Fly again": seats stay, nobody is ready.
+  // "Fly again" is a reset: everyone goes back to the landing page to choose 2 or 4 players again.
   hub.game.end(true, 'test');
   say(o, { t: 'reset' });
   assert.equal(hub.game.phase, 'lobby');
-  assert.equal(hub.crew().length, 4);
+  assert.equal(hub.players, null, 'the choice of 2 or 4 is forgotten');
+  assert.equal(hub.crew().length, 0, 'every seat is freed');
+  assert.ok([a, o, t, s].every(c => c.closed && c.got.some(m => m.includes('"home"'))), 'everyone is sent home');
   assert.deepEqual(hub.seats().ready, []);
 
   // Back to the lobby from the debrief: any seat, the astronaut included, and only from the results.
@@ -78,7 +85,6 @@ function setup(opts) {
     say(seat[r], { t: 'lobby' });
     assert.equal(hub.game.phase, 'lobby', `${r} can take the crew back to the lobby`);
     assert.deepEqual(hub.seats().ready, []);
-    assert.equal(hub.game.last.won, false);
     say(seat[r], { t: 'lobby' });
     assert.equal(hub.game.phase, 'lobby', 'a second press in the lobby does nothing');
   }
@@ -101,9 +107,9 @@ function setup(opts) {
 
 // 2-player mode: the astronaut plus one Mission Control player is a full crew.
 {
-  const { hub, join, say, wait } = setup();
+  const { hub, join, say, wait } = setup({ players: 2 });
   const a = join('astronaut'), all = join('all');
-  assert.ok(join('sci').role === null, 'Mission Control holds the Scientist seat');
+  assert.ok(join('sci').role === null, 'a 2-player game has no Scientist seat');
   say(a, { t: 'ready', on: true }); say(all, { t: 'ready', on: true });
   wait(S + 0.5);
   assert.equal(hub.game.phase, 'run');
@@ -122,11 +128,97 @@ function setup(opts) {
 
 // Testing alone: with requireFullCrew off, one ready player starts the mission.
 {
-  const { hub, join, say, wait } = setup({ requireFullCrew: false });
+  const { hub, join, say, wait } = setup({ requireFullCrew: false, players: null });
   const o = join('ops');
   say(o, { t: 'ready', on: true });
   wait(S + 0.5);
   assert.equal(hub.game.phase, 'run');
+}
+
+// ---- 2 or 4 players ----
+
+// Before anyone chooses, no seat can be taken: the page is sent to the landing page to choose.
+{
+  const { hub, join } = setup({ players: null });
+  const a = join('astronaut');
+  assert.equal(a.role, null);
+  const m = JSON.parse(a.got.at(-1));
+  assert.equal(m.t, 'refused'); assert.equal(m.why, 'nomode');
+  assert.equal(hub.seats().players, null);
+  assert.equal(hub.seats().seats, null);
+}
+
+// The first choice wins; a different one after it is ignored, and the answer says what was set.
+{
+  const { hub } = setup({ players: null });
+  assert.equal(hub.choosePlayers(2).players, 2);
+  assert.equal(hub.choosePlayers(4).players, 2, 'the second choice does not change the game');
+  assert.deepEqual(hub.seats().seats, PLAYERS[2]);
+  assert.equal(hub.choosePlayers('nonsense').players, 2);
+  const { hub: h2 } = setup({ players: null });
+  assert.equal(h2.choosePlayers(3).players, null, 'only 2 or 4');
+}
+
+// Each game refuses the other's seats, and says which game it is.
+{
+  const two = setup({ players: 2 });
+  for (const r of ['ops', 'sci', 'tech']) {
+    const c = two.join(r), m = JSON.parse(c.got.at(-1));
+    assert.ok(c.role === null && m.t === 'refused' && m.why === 'wrongseat' && m.players === 2, `2 players: ${r} refused`);
+  }
+  assert.equal(two.join('all').role, 'all', '2 players: the Mission Operator seat');
+  const four = setup({ players: 4 });
+  const c = four.join('all');
+  assert.ok(c.role === null && JSON.parse(c.got.at(-1)).why === 'wrongseat', '4 players: no all-in-one seat');
+  for (const r of ['astronaut', 'ops', 'sci', 'tech']) assert.equal(four.join(r).role, r);
+}
+
+// A 2-player game starts with two ready seats; a 4-player game does not start with only those.
+{
+  const two = setup({ players: 2 });
+  const [a, all] = ['astronaut', 'all'].map(two.join);
+  two.say(a, { t: 'ready', on: true }); two.say(all, { t: 'ready', on: true });
+  two.wait(S + 0.5);
+  assert.equal(two.hub.game.phase, 'run');
+  const four = setup({ players: 4 });
+  const [a4, o4] = ['astronaut', 'ops'].map(four.join);
+  four.say(a4, { t: 'ready', on: true }); four.say(o4, { t: 'ready', on: true });
+  four.wait(S + 1);
+  assert.equal(four.hub.game.phase, 'lobby', '4 players: two ready is not enough');
+}
+
+// Every seat is told the game in its state.
+{
+  const { hub, join } = setup({ players: 2 });
+  const a = join('astronaut');
+  hub.tick();
+  assert.equal(JSON.parse(a.got.at(-1)).players, 2);
+}
+
+// A chosen game nobody sits down in is forgotten after emptyModeSeconds; one with a seat held is not.
+{
+  const { hub, join, later } = setup({ players: 4 });
+  later(CFG.lobby.emptyModeSeconds - 1);
+  assert.equal(hub.seats().players, 4, 'not yet');
+  later(2);
+  assert.equal(hub.seats().players, null, 'empty for too long: forgotten');
+  hub.choosePlayers(2);
+  const a = join('astronaut');
+  later(CFG.lobby.emptyModeSeconds * 3);
+  assert.equal(hub.seats().players, 2, 'kept while someone is seated');
+  hub.remove(a);
+  later(CFG.lobby.emptyModeSeconds + 1);
+  assert.equal(hub.seats().players, null, 'and forgotten once they have gone');
+}
+
+// The admin can clear the choice: everyone seated is sent home.
+{
+  const { hub, join, say } = setup({ players: 4 });
+  const admin = join('admin'), o = join('ops');
+  say(admin, { t: 'admin', cmd: 'clearplayers' });
+  assert.equal(hub.players, null);
+  assert.ok(o.closed && o.got.some(m => m.includes('"home"')));
+  assert.ok(!admin.closed, 'the admin stays');
 }
 
 // ---- the admin console ----

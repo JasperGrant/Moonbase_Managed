@@ -2,6 +2,8 @@
 // Push-to-talk audio goes to the server as raw 16 kHz samples, the server holds it for the
 // light delay, and the other side plays it through a 1960s-style radio: narrow band,
 // overdriven, with static and the Apollo "Quindar" beeps at the start and end.
+import { music } from '/music.js';
+
 const RATE = 16000;
 
 export class Radio {
@@ -88,6 +90,7 @@ export class Radio {
   setTalking(on) {
     if (!this.micOk || on === this.talking) return;
     this.talking = on;
+    music.duck('tx', on); // the theme drops while you talk, and comes back when you let go
     this.mic.port.postMessage(on);
     this.net.send({ t: 'ptt', on });
     this.tone(on ? 1400 : 1000, 0.04, 0.05);
@@ -95,6 +98,7 @@ export class Radio {
 
   // The other side pressed or released their talk key (already delayed by the server).
   rxMarker(on) {
+    music.duck('rx', on); // and while the other side talks
     if (!this.ready) return;
     this.tone(on ? 2525 : 2475, 0.25, 0.12);
     this.hiss.gain.setTargetAtTime(on ? 0.06 : 0, this.ctx.currentTime, 0.05);

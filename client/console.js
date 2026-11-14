@@ -7,8 +7,9 @@ import { Radio } from '/voice.js';
 import { CFG, TOOLS, PLACES, MODES, ROLES, SOCKET_SHAPES } from '/shared/config.js';
 import { beltWeight } from '/shared/rules.js';
 import { drawTool, drawShape } from '/shared/icons.js';
-import { seatTaken, kicked } from '/seat.js';
+import { seatTaken, seatRefused, kicked } from '/seat.js';
 import { createLobby } from '/lobby.js';
+import { music } from '/music.js';
 import { PAL, CABLE, FONT, nixie, jewel, fontsReady } from '/shared/palette.js';
 
 // /console.html?role=ops or the clean URL /ops; /control is the all-in-one seat.
@@ -90,6 +91,7 @@ $('run').addEventListener('click', e => {
 // ---------- network ----------
 net.onState = s => { state = s; render(); };
 net.onTaken = seatTaken;
+net.onRefused = seatRefused; // a seat this game does not have, or no game chosen yet
 net.onKicked = kicked;
 net.onBinary = buf => radio?.receive(buf);
 net.onMsg = m => { if (m.t === 'ptt' && radio) { rx = m.on; radio.rxMarker(m.on); paintPtt(); } };
@@ -123,6 +125,7 @@ function render() {
   const view = debrief ? 'results' : s.phase;
   if (view !== shown) {
     shown = view;
+    music.mood(view === 'run' ? 'run' : 'calm');
     lobby.show(view === 'lobby');
     if (view !== 'lobby') $('planSheet').hidden = true;
     for (const id of ['run', 'results']) $(id).hidden = id !== view;
@@ -190,6 +193,7 @@ function renderResults(s) {
       <span class="crew-lamp" id="crewLamp"><i></i>Crew in lobby</span>
       <b class="nixie" id="debriefLeft"></b>
     </div>
+    ${has('ops') ? '<p class="hint"><button data-again type="button">Start over</button> Everyone goes back to the start, to choose 2 or 4 players again.</p>' : ''}
   </div>`;
   }
   const inLobby = s.phase !== 'results';
@@ -204,7 +208,10 @@ function backToLobby() {
   debrief = null; resultKey = '';
   if (state) render();
 }
-$('results').addEventListener('click', e => { if (e.target.closest('[data-lobby]')) backToLobby(); });
+$('results').addEventListener('click', e => {
+  if (e.target.closest('[data-lobby]')) backToLobby();
+  else if (e.target.closest('[data-again]')) { debrief = null; resultKey = ''; net.send({ t: 'reset' }); if (state) render(); }
+});
 addEventListener('keydown', e => { if (e.key === 'Enter' && debrief && !e.repeat && !e.target.closest?.('button, a, input')) { e.preventDefault(); backToLobby(); } });
 
 // ---------- drawing helpers ----------
