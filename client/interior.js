@@ -10,6 +10,7 @@
 // shadow. The light fixtures are glowing boxes; three real lights do the lighting, and they change
 // intensity rather than switch on and off so no shader is ever recompiled mid-game.
 import { CFG } from '/shared/config.js';
+import { buildDamage } from '/damage.js';
 
 export const ROOM = {
   origin: { x: 500, z: 0 },          // where the room sits in the world, well clear of the terrain
@@ -68,9 +69,9 @@ export function buildInterior(THREE, scene, { sfx = () => {} } = {}) {
     g.fillStyle = '#34383c'; for (let i = 0; i < 9; i++) g.fillRect(820, y(2.95) + i * 14, 150, 7);
     g.fillStyle = 'rgba(40,44,48,0.75)'; g.font = 'bold 34px monospace'; g.fillText('HAB-01', 40, y(2.55)); g.font = 'bold 22px monospace'; g.fillText('B4  115V', 560, y(1.2)); g.fillText('NO STEP', 310, y(1.35));
     g.fillStyle = '#b08a1f'; g.fillRect(540, y(1.5), 180, 12);                       // one yellow caution strip
-    for (let i = 0; i < 260; i++) {                                                 // scuffs and grime
+    for (let i = 0; i < 50; i++) {                                                  // a few light scuffs: it is kept clean
       const x = rnd() * S, yy = rnd() * S, len = 10 + rnd() * 70, a = (rnd() - 0.5) * 0.5 + (rnd() < 0.5 ? 0 : Math.PI / 2);
-      g.strokeStyle = `rgba(${rnd() < 0.5 ? '30,32,36' : '255,255,255'},${0.04 + rnd() * 0.1})`; g.lineWidth = 1 + rnd() * 2;
+      g.strokeStyle = `rgba(${rnd() < 0.5 ? '30,32,36' : '255,255,255'},${0.03 + rnd() * 0.05})`; g.lineWidth = 1 + rnd() * 1.5;
       g.beginPath(); g.moveTo(x, yy); g.lineTo(x + Math.cos(a) * len, yy + Math.sin(a) * len); g.stroke();
     }
   });
@@ -84,14 +85,14 @@ export function buildInterior(THREE, scene, { sfx = () => {} } = {}) {
       g.fillStyle = '#5a5f64'; for (const [dx, dy] of [[14, 14], [242, 14], [14, 242], [242, 242]]) { g.beginPath(); g.arc(i * 256 + dx, j * 256 + dy, 5, 0, 7); g.fill(); }
     }
     for (let i = 0; i <= 4; i++) { g.fillStyle = '#4b5055'; g.fillRect(i * 256 - 3, 0, 6, S); g.fillRect(0, i * 256 - 3, S, 6); g.fillStyle = 'rgba(255,255,255,0.25)'; g.fillRect(i * 256 + 3, 0, 2, S); g.fillRect(0, i * 256 + 3, S, 2); }
-    for (let i = 0; i < 40; i++) {
+    for (let i = 0; i < 10; i++) {
       const x = rnd() * S, yy = rnd() * S, r = 20 + rnd() * 90, rg = g.createRadialGradient(x, yy, 0, x, yy, r);
-      rg.addColorStop(0, `rgba(30,32,36,${0.05 + rnd() * 0.12})`); rg.addColorStop(1, 'rgba(30,32,36,0)');
+      rg.addColorStop(0, `rgba(30,32,36,${0.03 + rnd() * 0.05})`); rg.addColorStop(1, 'rgba(30,32,36,0)');
       g.fillStyle = rg; g.fillRect(x - r, yy - r, r * 2, r * 2);
     }
-    for (let i = 0; i < 300; i++) {
+    for (let i = 0; i < 70; i++) {
       const x = rnd() * S, yy = rnd() * S, len = 8 + rnd() * 60, a = rnd() * 7;
-      g.strokeStyle = `rgba(${rnd() < 0.6 ? '25,27,30' : '255,255,255'},${0.05 + rnd() * 0.1})`; g.lineWidth = 1 + rnd() * 1.5;
+      g.strokeStyle = `rgba(${rnd() < 0.6 ? '25,27,30' : '255,255,255'},${0.03 + rnd() * 0.05})`; g.lineWidth = 1 + rnd() * 1.5;
       g.beginPath(); g.moveTo(x, yy); g.lineTo(x + Math.cos(a) * len, yy + Math.sin(a) * len); g.stroke();
     }
   });
@@ -159,7 +160,7 @@ export function buildInterior(THREE, scene, { sfx = () => {} } = {}) {
     box(D, 7, 0.16, 0.2, 0, H - 0.08, z);
   }
   for (const x of [-3.45, 3.45]) box(D, 0.08, 0.12, 12, x, 0.06, -6);
-  tube(G, [-3.3, 2.75, -0.2], [-3.3, 2.75, -7.3], 0.05); tube(D, [-3.33, 2.6, -0.2], [-3.33, 2.6, -7.3], 0.025);
+  tube(G, [-3.3, 2.75, -0.2], [-3.3, 2.75, -7.3], 0.05); tube(D, [-3.33, 2.6, -0.2], [-3.33, 2.6, -5.0], 0.025); // the rest of this cable is in damage.js: it can tear loose
   tube(G, [3.3, 2.85, -3.3], [3.3, 2.85, -11.8], 0.06);
 
   // Roof light housings (the glowing strips themselves are a separate mesh, below)
@@ -179,7 +180,6 @@ export function buildInterior(THREE, scene, { sfx = () => {} } = {}) {
     const z = -1.25 - i * 0.5;
     box(W, 0.56, 2.0, 0.47, 3.2, 1.0, z); box(D, 0.02, 0.14, 0.3, 2.915, 1.7, z); box(D, 0.03, 0.2, 0.04, 2.91, 1.05, z + 0.17);
   }
-  box(W, 0.02, 1.9, 0.45, 2.72, 1.0, -2.0, 0, 0.9, 0);                              // one door left ajar
   box(D, 0.6, 0.06, 2.1, 3.2, 2.03, -2.0); box(O, 0.4, 0.26, 0.5, 3.2, 2.19, -1.4); box(G, 0.45, 0.2, 0.6, 3.2, 2.16, -2.5);
   blob(1.3, 2.6, 3.1, -2.0);
 
@@ -189,7 +189,7 @@ export function buildInterior(THREE, scene, { sfx = () => {} } = {}) {
   box(K, 0.05, 0.22, 0.15, -3.4, 1.3, -1.95); glow(0xff3b30, 0.01, 0.03, 0.03, -3.37, 1.36, -1.95);
   for (const z of [-3.62, -2.38]) for (const y of [0.4, 1.9]) cyl(D, 0.05, 0.1, -3.25, y, z, 0, 0, Math.PI / 2);
 
-  // Workbench island: an L of two heavy benches with drawers, a gauge and clutter
+  // Workbench island: an L of two heavy benches with drawers and a gauge. Kept tidy: a working lab.
   box(D, 3.4, 0.1, 0.8, -0.25, 0.05, -4.45); box(G, 3.5, 0.8, 0.9, -0.25, 0.5, -4.45); box(D, 3.6, 0.06, 1.0, -0.25, 0.93, -4.45);
   for (let i = 0; i < 5; i++) {
     const x = -1.61 + i * 0.68;
@@ -205,19 +205,14 @@ export function buildInterior(THREE, scene, { sfx = () => {} } = {}) {
   cyl(W, 0.05, 0.22, 0.95, 1.07, -4.25); cyl(O, 0.04, 0.16, 1.1, 1.04, -4.4); cyl(G, 0.06, 0.3, 0.8, 1.11, -4.55); cyl(D, 0.02, 0.05, 0.95, 1.2, -4.25);
   box(O, 0.46, 0.2, 0.26, -0.7, 1.06, -4.55, 0, 0.3, 0); box(D, 0.2, 0.03, 0.04, -0.7, 1.18, -4.55, 0, 0.3, 0);
   box(K, 0.52, 0.36, 0.04, 0.15, 1.16, -4.7, -0.25, 0, 0); glow(0x58e08a, 0.46, 0.3, 0.01, 0.15, 1.16, -4.678, -0.25, 0, 0);
-  box(W, 0.62, 0.02, 0.8, 1.6, 0.66, -4.45, 0, 0, -1.3);                             // sheet draped over the bench end
   box(W, 0.6, 0.5, 0.6, -1.55, 1.21, -6.05); box(D, 0.02, 0.3, 0.4, -1.245, 1.25, -6.05); glow(0xffb030, 0.012, 0.04, 0.04, -1.24, 1.42, -5.82);
   cyl(D, 0.12, 0.1, -1.6, 1.01, -5.3); cyl(G, 0.09, 0.14, -1.6, 1.03, -5.3);
   const helmet = new THREE.Mesh(new THREE.SphereGeometry(0.17, 14, 10), new THREE.MeshLambertMaterial({ color: W }));
   helmet.position.set(-1.45, 1.13, -4.4); group.add(helmet);
   const visor = new THREE.Mesh(new THREE.SphereGeometry(0.13, 12, 8), new THREE.MeshLambertMaterial({ color: 0x23272b }));
   visor.position.set(-1.42, 1.14, -4.31); group.add(visor);
-  // loose deck plates and debris around the island
-  box(W, 0.9, 0.03, 0.6, 0.95, 0.27, -3.78, -1.1, 0, 0); box(G, 0.7, 0.03, 0.5, -0.2, 0.22, -3.82, -1.15, 0, 0.05);
-  box(G, 0.8, 0.03, 0.6, 1.9, 0.02, -5.8, 0, 0.4, 0); box(W, 1.0, 0.03, 0.7, 2.2, 0.05, -6.4, 0.06, -0.3, 0);
-  for (let i = 0; i < 12; i++) { const s = 0.05 + rnd() * 0.1; box(rnd() < 0.5 ? D : G, s * 1.6, s * 0.5, s, -0.6 + rnd() * 3.2, s * 0.25, -7.2 + rnd() * 2.0, 0, rnd() * 3, 0); }
 
-  // Ceiling gantry over the island, with hanging cables
+  // Ceiling gantry over the island. Its cables are dressed in short loops and clipped to the frame.
   box(G, 2.6, 0.5, 1.1, -0.3, 2.55, -5.0); box(D, 2.7, 0.08, 1.2, -0.3, 2.28, -5.0); box(W, 0.9, 0.4, 0.8, -1.3, 2.05, -5.1);
   box(D, 3.2, 0.08, 0.08, -0.3, 2.85, -4.5); box(D, 3.2, 0.08, 0.08, -0.3, 2.85, -5.5);
   for (const x of [-1.5, 0.9]) for (const z of [-4.5, -5.5]) tube(D, [x, 2.8, z], [x, H, z], 0.035);
@@ -225,10 +220,9 @@ export function buildInterior(THREE, scene, { sfx = () => {} } = {}) {
   box(K, 0.62, 0.42, 0.05, 0.75, 1.95, -4.15, 0.3, 0, 0); glow(0x6fb6ff, 0.54, 0.34, 0.01, 0.75, 1.95, -4.12, 0.3, 0, 0); tube(D, [0.75, 2.14, -4.2], [0.75, 2.3, -4.5], 0.02);
   const cableMat = new THREE.MeshLambertMaterial({ color: K });
   for (const pts of [
-    [[-0.9, 2.3, -4.6], [-0.6, 1.5, -4.3], [0.0, 1.25, -4.4], [0.4, 2.3, -4.75]],
-    [[0.9, 2.3, -5.3], [1.3, 1.2, -5.4], [1.6, 0.3, -5.6], [2.0, 0.03, -5.9]],
-    [[-1.5, 2.6, -5.2], [-2.5, 2.15, -5.6], [-3.4, 2.7, -6.2]],
-    [[-0.3, H, -3.0], [-0.3, 2.5, -3.6], [-0.3, 2.8, -4.45]],
+    [[-0.9, 2.26, -4.62], [-0.55, 2.1, -4.5], [-0.15, 2.12, -4.5], [0.3, 2.26, -4.62]],
+    [[-1.5, 2.6, -5.2], [-2.5, 2.42, -5.6], [-3.4, 2.7, -6.2]],
+    [[-0.3, H, -3.0], [-0.3, 2.86, -3.6], [-0.3, 2.86, -4.45]],
   ]) group.add(new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts.map(p => new THREE.Vector3(...p))), 12, 0.022, 5), cableMat));
 
   // Breaker panel surround, west wall. The panel itself is built by stations.js on `mount`.
@@ -271,6 +265,9 @@ export function buildInterior(THREE, scene, { sfx = () => {} } = {}) {
   batch(lists.glow, new THREE.BoxGeometry(1, 1, 1), new THREE.MeshBasicMaterial({ toneMapped: false }));
   const blobTex = texture(64, (g, S) => { const rg = g.createRadialGradient(S / 2, S / 2, 0, S / 2, S / 2, S / 2); rg.addColorStop(0, 'rgba(0,0,0,0.55)'); rg.addColorStop(0.6, 'rgba(0,0,0,0.3)'); rg.addColorStop(1, 'rgba(0,0,0,0)'); g.fillStyle = rg; g.fillRect(0, 0, S, S); });
   batch(lists.blob, new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ map: blobTex, transparent: true, depthWrite: false }), false);
+
+  // Panels and cables that come loose when something goes wrong (damage.js).
+  const damage = buildDamage(THREE, group, { sfx });
 
   // ---------- signs and screens ----------
   function screen(w, h, pw, ph, x, y, z, ry) {
@@ -351,7 +348,9 @@ export function buildInterior(THREE, scene, { sfx = () => {} } = {}) {
   const inSolid = (x, z) => SOLIDS.some(([x0, x1, z0, z1]) => x > x0 - BODY + EPS && x < x1 + BODY - EPS && z > z0 - BODY + EPS && z < z1 + BODY - EPS);
 
   return {
-    group, mount, hatch,
+    group, mount, hatch, damage,
+    // The server's scene, every frame (null between rounds): faults knock things loose, fixes put them back.
+    setDamage(scene, audible) { damage.audible = audible; damage.set(scene); },
     get phase() { return phase; },          // 'main' | 'fail' | 'dark' | 'backup' | 'restore'
     get dark() { return phase !== 'main'; },
     // The server says whether a power alarm is live; the sequence itself runs here.
@@ -379,6 +378,7 @@ export function buildInterior(THREE, scene, { sfx = () => {} } = {}) {
         if (t >= 1000) { backupLevel = 0; if (struck === ORDER.length) phase = 'main'; }
       }
       apply(time);
+      damage.update(dt, time);
     },
     // World <-> room coordinates.
     toLocal: (x, z) => ({ x: x - ROOM.origin.x, z: z - ROOM.origin.z }),
