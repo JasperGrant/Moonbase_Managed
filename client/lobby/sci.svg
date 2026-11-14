@@ -1,0 +1,120 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 1800" preserveAspectRatio="xMidYMid slice">
+  <!-- The Scientist: late at night at a desk buried in papers, one desk lamp the only light. -->
+  <defs>
+    <radialGradient id="roomLight" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(470 1120) scale(620 520)">
+      <stop offset="0" stop-color="#3a2510"/><stop offset=".55" stop-color="#140c05"/><stop offset="1" stop-color="#050302"/>
+    </radialGradient>
+    <linearGradient id="cone" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffd38a" stop-opacity=".55"/><stop offset="1" stop-color="#ffb24a" stop-opacity=".05"/>
+    </linearGradient>
+    <radialGradient id="pool" cx=".5" cy=".5" r=".5">
+      <stop offset="0" stop-color="#ffe2a8" stop-opacity=".9"/><stop offset=".6" stop-color="#ffb04a" stop-opacity=".35"/><stop offset="1" stop-color="#ff9a2a" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="deskTop" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#4a2c16"/><stop offset="1" stop-color="#2a170a"/>
+    </linearGradient>
+    <linearGradient id="deskFront" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2c1a0c"/><stop offset="1" stop-color="#070403"/>
+    </linearGradient>
+    <linearGradient id="sweater" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#1e2a20"/><stop offset=".5" stop-color="#3b4a32"/><stop offset="1" stop-color="#26301f"/>
+    </linearGradient>
+    <linearGradient id="face" x1="0" y1="1" x2="0" y2="0">
+      <stop offset="0" stop-color="#e8b585"/><stop offset="1" stop-color="#6a4328"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="900" height="1800" fill="url(#roomLight)"/>
+
+  <!-- a chalkboard in the dark behind -->
+  <rect x="80" y="320" width="740" height="380" fill="#101611" stroke="#2a1d10" stroke-width="12"/>
+  <g stroke="#d8d4c4" stroke-width="3" fill="none" opacity=".22">
+    <path d="M130 390 h70 m20 0 q20 -20 40 0 t40 0 M130 440 l40 -30 l40 30 M260 440 h120"/>
+    <path d="M460 380 Q520 470 600 400 T760 420"/><path d="M460 470 h300"/>
+    <path d="M140 520 h220 M140 560 h160 M140 600 q40 -40 80 0 q40 40 80 0"/>
+    <circle cx="640" cy="580" r="60"/><path d="M580 580 h120 M640 520 v120"/>
+  </g>
+
+  <!-- shelf with binders -->
+  <rect x="60" y="760" width="780" height="14" fill="#1c1108"/>
+  <g opacity=".7">
+    <rect x="90" y="680" width="34" height="80" fill="#3a1f10"/><rect x="128" y="690" width="30" height="70" fill="#1f2a3a"/><rect x="160" y="676" width="38" height="84" fill="#40321a"/>
+    <rect x="690" y="684" width="34" height="76" fill="#2a1a2e"/><rect x="728" y="690" width="30" height="70" fill="#3a2a14"/><rect x="760" y="678" width="40" height="82" fill="#1f3020"/>
+  </g>
+
+  <!-- the scientist, head bowed over the manual -->
+  <g>
+    <path d="M340 1000 Q350 930 440 912 L600 912 Q690 930 700 1010 L716 1180 L324 1180Z" fill="url(#sweater)"/>
+    <path d="M470 914 L520 960 L570 914" stroke="#d8d2c0" stroke-width="10" fill="none"/>
+    <!-- head tilted down -->
+    <ellipse cx="520" cy="852" rx="70" ry="82" fill="url(#face)"/>
+    <path d="M452 836 Q450 760 520 756 Q590 760 590 836 Q580 800 556 790 Q520 784 486 792 Q462 806 452 836Z" fill="#6c665c"/>
+    <path d="M458 820 q-14 -20 -6 -40 M582 820 q14 -20 6 -40" stroke="#8a8478" stroke-width="10" fill="none" stroke-linecap="round"/>
+    <!-- glasses catching the lamp -->
+    <g stroke="#1c140c" stroke-width="4" fill="#ffe6b5" fill-opacity=".35">
+      <rect x="474" y="866" width="38" height="24" rx="8"/><rect x="528" y="866" width="38" height="24" rx="8"/>
+      <path d="M512 876 h16" fill="none"/>
+    </g>
+    <path d="M498 914 q22 10 44 0" stroke="#7a4a2a" stroke-width="4" fill="none"/>
+  </g>
+
+  <!-- the desk -->
+  <path d="M40 1170 L860 1170 L900 1250 L0 1250Z" fill="url(#deskTop)"/>
+  <path d="M0 1250 L900 1250 L900 1800 L0 1800Z" fill="url(#deskFront)"/>
+  <rect x="0" y="1250" width="900" height="10" fill="#4b2e17" opacity=".6"/>
+
+  <!-- arms resting on the desk, a pencil in the right hand -->
+  <g>
+    <path d="M356 1010 Q320 1130 390 1196 L470 1196 Q420 1140 432 1040Z" fill="#2c3826"/>
+    <path d="M684 1010 Q724 1130 650 1200 L580 1200 Q630 1140 608 1040Z" fill="#2c3826"/>
+  </g>
+
+  <!-- the lamp: heavy base on the left, arm up, shade tilted down at the work -->
+  <g>
+    <ellipse cx="200" cy="1196" rx="62" ry="15" fill="#1d1a16"/>
+    <path d="M196 1190 L236 960 L250 962 L212 1192Z" fill="#2b2620"/>
+    <path d="M240 966 L330 840 L342 850 L252 972Z" fill="#2b2620"/>
+    <circle cx="242" cy="964" r="10" fill="#3a332a"/>
+    <path d="M300 808 L392 790 L420 880 L320 900Z" fill="#1f4a2a"/>
+    <path d="M320 900 L420 880 L414 892 L326 912Z" fill="#ffe7b0"/>
+  </g>
+
+  <!-- the cone of lamp light and its pool on the desk -->
+  <path d="M322 906 L418 886 L760 1236 L170 1240Z" fill="url(#cone)"/>
+  <ellipse cx="470" cy="1214" rx="320" ry="48" fill="url(#pool)"/>
+
+  <!-- papers, charts, the open manual and a slide rule -->
+  <g>
+    <path d="M396 1186 L520 1178 L522 1238 L380 1246Z" fill="#f1e6c8"/>
+    <path d="M520 1178 L648 1186 L664 1246 L522 1238Z" fill="#fbf1d6"/>
+    <path d="M520 1178 L522 1238" stroke="#b9a57c" stroke-width="3"/>
+    <g stroke="#8a7a5a" stroke-width="2.5" opacity=".7">
+      <path d="M404 1196 l100 -6 M402 1208 l96 -6 M400 1220 l104 -6 M398 1232 l80 -5"/>
+      <path d="M534 1192 l96 6 M536 1204 l104 6 M538 1216 l90 6 M540 1228 l110 6"/>
+    </g>
+    <path d="M150 1214 L280 1196 L300 1240 L160 1252Z" fill="#e6dcc0" opacity=".85"/>
+    <path d="M168 1232 Q200 1206 226 1226 T290 1214" stroke="#c0392b" stroke-width="3" fill="none"/>
+    <path d="M690 1190 L800 1200 L812 1246 L690 1240Z" fill="#efe3c4" opacity=".9"/>
+    <path d="M700 1236 L720 1214 L744 1226 L770 1204 L796 1212" stroke="#2c4a8a" stroke-width="3" fill="none"/>
+    <rect x="240" y="1176" width="250" height="14" fill="#e9dfc4" stroke="#7a6a48" stroke-width="2" transform="rotate(-6 240 1176)"/>
+    <path d="M262 1182 v8 M282 1180 v6 M302 1178 v8 M322 1176 v6 M342 1174 v8 M362 1172 v6 M382 1170 v8 M402 1168 v6 M422 1166 v8" stroke="#3a2c18" stroke-width="2" transform="rotate(-6 240 1176)"/>
+    <!-- a coffee ring and a mug in the dark -->
+    <ellipse cx="770" cy="1176" rx="28" ry="7" fill="none" stroke="#5a3a1a" stroke-width="3"/>
+    <path d="M90 1150 h44 l-4 40 h-36z" fill="#3a2a1a"/>
+  </g>
+
+  <!-- hands on the manual -->
+  <ellipse cx="440" cy="1200" rx="34" ry="15" fill="#d9a777"/>
+  <ellipse cx="610" cy="1204" rx="34" ry="15" fill="#e2b182"/>
+  <path d="M622 1200 L676 1162" stroke="#e8c050" stroke-width="7" stroke-linecap="round"/>
+
+  <!-- papers fallen on the floor, barely lit -->
+  <g opacity=".35">
+    <path d="M120 1520 L260 1500 L280 1560 L130 1580Z" fill="#c8b896"/>
+    <path d="M560 1560 L700 1540 L730 1600 L580 1620Z" fill="#b8a888"/>
+    <path d="M330 1640 L450 1650 L440 1700 L320 1690Z" fill="#a89878"/>
+  </g>
+
+  <rect width="900" height="270" fill="#000" opacity=".4"/>
+  <rect y="1440" width="900" height="360" fill="#000" opacity=".3"/>
+</svg>
