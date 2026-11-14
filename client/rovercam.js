@@ -9,7 +9,7 @@ export function startRoverCam(canvas, getState) {
   renderer.toneMappingExposure = 1.05;
   const scene = new THREE.Scene();
   const world = buildWorld(THREE, scene, { shadows: false, renderer });
-  const camera = new THREE.PerspectiveCamera(75, 16 / 9, 0.1, 1500);
+  const camera = new THREE.PerspectiveCamera(75, 16 / 9, 0.1, 2600);
   world.rover.add(camera);
   camera.position.set(0, 1.9, 0.9);
   camera.rotation.set(-0.12, Math.PI, 0, "YXZ"); // look along the rover's +z, tipped slightly down

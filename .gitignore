@@ -3,3 +3,4 @@ certs/
 .DS_Store
 test/shots/
 .wrangler/
+__pycache__/
