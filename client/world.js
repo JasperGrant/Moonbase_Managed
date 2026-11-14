@@ -450,6 +450,14 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
     scene.add(panel);
   }
 
+  const puffs = Array.from({ length: 8 }, () => {
+    const p = new THREE.Mesh(new THREE.SphereGeometry(1, 8, 6), new THREE.MeshBasicMaterial({ color: 0xb8b1a4, transparent: true, opacity: 0, depthWrite: false }));
+    p.visible = false; p.userData = { dir: new THREE.Vector3(), born: 0 };
+    scene.add(p);
+    return p;
+  });
+  let puffNext = 0;
+
   // ---------- scenery: fuel depot, comms dish, drill rig. Nothing to fix here. ----------
   const site = p => {
     const g = new THREE.Group();
@@ -532,7 +540,7 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
       const hole = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.03, 16), new THREE.MeshBasicMaterial({ color: 0x0b0d10 }));
       hole.position.set(x, 1.38, 0.082); hole.rotation.x = Math.PI / 2; board.add(hole);
       sockets.push(new THREE.Vector3(x, 1.38, 0.14));
-      plugRest.push(new THREE.Vector3(x, 0.92, 0.2));
+      plugRest.push(new THREE.Vector3(x, 1.1, 0.24)); // a loose plug hangs in front of the box, at waist height
       const plug = new THREE.Group();
       // Unlit, so the colours read the same on white light, on red backup light, and in the dark.
       const body = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 0.14, 12), new THREE.MeshBasicMaterial({ color: CABLE_HEX[color], toneMapped: false }));
@@ -553,20 +561,22 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
 
   // ---------- tool locker: an open rack beside the airlock. The tools themselves are added by stations.js ----------
   const locker = fixture(PLACES.locker);
+  // Everything hangs between waist and shoulder height, so nothing has to be picked up off the floor:
+  // the tire on the left, the hand tools in the middle, the generator on its shelf on the right.
   const lockerSlots = {
-    brush:  new THREE.Vector3(-0.55, 1.36, 0.14),
-    patch:  new THREE.Vector3(0, 1.52, 0.2),
-    welder: new THREE.Vector3(0.45, 1.56, 0.14),
-    tire:   new THREE.Vector3(-0.45, 0.62, 0.2),
-    gen:    new THREE.Vector3(0.48, 0.76, 0.22),
+    tire:   new THREE.Vector3(-0.85, 1.12, 0.2),
+    brush:  new THREE.Vector3(-0.2, 1.3, 0.14),
+    patch:  new THREE.Vector3(0.14, 1.46, 0.2),
+    welder: new THREE.Vector3(0.52, 1.5, 0.14),
+    gen:    new THREE.Vector3(0.98, 1.08, 0.22),
   };
   {
-    mesh(new THREE.BoxGeometry(1.9, 1.9, 0.08), whitePlain, 0, 1.0, 0, locker);
-    mesh(new THREE.BoxGeometry(2.0, 0.08, 0.5), orange, 0, 1.98, 0.2, locker);
-    mesh(new THREE.BoxGeometry(1.9, 0.05, 0.45), grey, 0, 1.12, 0.22, locker);  // shelf under the hand tools
-    mesh(new THREE.BoxGeometry(1.9, 0.08, 0.5), grey, 0, 0.1, 0.22, locker);    // floor
-    mesh(new THREE.BoxGeometry(0.9, 0.05, 0.45), grey, 0.5, 0.56, 0.22, locker);  // the generator's shelf
-    for (const x of [-0.95, 0.95]) mesh(new THREE.BoxGeometry(0.06, 1.95, 0.5), grey, x, 1.0, 0.22, locker);
+    mesh(new THREE.BoxGeometry(2.7, 1.9, 0.08), whitePlain, 0, 1.0, 0, locker);
+    mesh(new THREE.BoxGeometry(2.8, 0.08, 0.5), orange, 0, 1.98, 0.2, locker);
+    mesh(new THREE.BoxGeometry(2.7, 0.08, 0.5), grey, 0, 0.1, 0.22, locker);        // floor
+    mesh(new THREE.BoxGeometry(0.6, 0.05, 0.45), grey, 1.03, 0.88, 0.22, locker);   // the generator's shelf
+    tube(steel, [-0.85, 1.12, 0.04], [-0.85, 1.12, 0.3], 0.03, locker);             // the peg the tire hangs on
+    for (const x of [-1.35, 1.35]) mesh(new THREE.BoxGeometry(0.06, 1.95, 0.5), grey, x, 1.0, 0.22, locker);
   }
 
   // ---------- airlock canopy: the one roof on the base. Stand under it in a meteor shower. ----------
@@ -741,7 +751,22 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
       warmGlow.color.setHex(s.dark ? 0x120d05 : backup ? 0x3a0c06 : 0xffc46b);
       windowGlow.color.setHex(s.dark ? 0x120d05 : backup ? 0x5a1008 : 0xffbf6a);
 
-      dustCells.forEach((c, i) => { c.visible = !!s.dust && s.dust[i]; });
+      // Dust: a cell that was dusty a moment ago and is not now puffs away.
+      dustCells.forEach((c, i) => {
+        const on = !!s.dust && s.dust[i];
+        if (c.visible && !on) {
+          const p = puffs[puffNext++ % puffs.length];
+          c.getWorldPosition(p.position); c.getWorldDirection(p.userData.dir); p.userData.born = time; p.visible = true;
+        }
+        c.visible = on;
+      });
+      for (const p of puffs) {
+        if (!p.visible) continue;
+        const u = (time - p.userData.born) / 0.7;
+        if (u >= 1) { p.visible = false; continue; }
+        p.position.addScaledVector(p.userData.dir, 0.012); p.position.y -= 0.004 * u; // off the face of the panel, then sinking: there is no air to hold it up
+        p.scale.setScalar(0.25 + u * 0.5); p.material.opacity = 0.55 * (1 - u);
+      }
 
       // Switchboard: seated plugs sit in their socket, loose ones hang underneath.
       board.userData.lamp.material.color.setHex(s.board ? (blink ? 0xff2a2a : 0x4a0b0b) : s.dark ? 0x0c2a14 : 0x2bd45a);
@@ -768,7 +793,9 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
       crack.visible = !!s.hull;
       if (s.hull) {
         if (crack.userData.spot !== s.hull.spot) { crack.userData.spot = s.hull.spot; crack.userData.place(s.hull.spot); }
-        beads.forEach((b, i) => b.material.color.setHex(s.hull.welded[i] ? 0xffa23a : 0x0a0a0a));
+        // Welded: a bright bead. Not yet: dark, glowing redder the longer the torch has been on it.
+        const heat = crack.userData.heat || [];
+        beads.forEach((b, i) => { if (s.hull.welded[i]) b.material.color.setHex(0xffa23a); else b.material.color.setRGB(0.04 + 0.96 * (heat[i] || 0), 0.04 + 0.25 * (heat[i] || 0), 0.04); b.scale.setScalar(s.hull.welded[i] ? 1 : 1 + 0.5 * (heat[i] || 0)); });
         const open = s.hull.welded.filter(x => !x).length / CRACK_POINTS;
         vapour.forEach((v, i) => {
           const u = (time * 1.3 + i / vapour.length) % 1;

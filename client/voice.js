@@ -66,7 +66,8 @@ export class Radio {
     this.suitHiss.connect(c.destination);
     this.hullHiss = hiss();
     this.panner = c.createPanner();
-    Object.assign(this.panner, { panningModel: 'HRTF', distanceModel: 'inverse', refDistance: 0.6, rolloffFactor: 1.6, maxDistance: 80 });
+    // Loud at arm's length, still there from across the base (22 m): you find the crack by walking toward the hiss.
+    Object.assign(this.panner, { panningModel: 'HRTF', distanceModel: 'inverse', refDistance: 1, rolloffFactor: 1, maxDistance: 80 });
     this.hullHiss.connect(this.panner).connect(c.destination);
     this.ready = true;
 
@@ -173,7 +174,7 @@ export class Radio {
     if (!this.ready) return;
     const t = this.ctx.currentTime;
     this.suitHiss.gain.setTargetAtTime(suit ? 0.09 : 0, t, 0.1);
-    this.hullHiss.gain.setTargetAtTime(hull ? 1.0 : 0, t, 0.1);
+    this.hullHiss.gain.setTargetAtTime(hull ? 0.9 : 0, t, 0.1);
     if (hull) {
       const p = this.panner;
       if (p.positionX) { p.positionX.value = hull.x; p.positionY.value = hull.y; p.positionZ.value = hull.z; }

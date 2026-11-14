@@ -613,10 +613,12 @@ renderer.setAnimationLoop(() => {
     if (run && s.scene.meteor !== null && now > nextThump) {
       const close = s.scene.meteor > CFG.meteorGraceSeconds;
       nextThump = now + (close ? 0.25 + Math.random() * 0.3 : 0.6 + Math.random() * 0.6);
-      radio.burst(close ? 0.5 : 0.35, (close ? 0.4 : 0.12) * (inside ? 0.4 : 1), 'lowpass', close && !inside ? 240 : 140);
+      // Under cover the impacts are duller and quieter: that, and the cuff, is how you know you are safe.
+      const dull = inside || covered;
+      radio.burst(close ? 0.5 : 0.35, (close ? 0.4 : 0.12) * (dull ? 0.4 : 1), 'lowpass', close && !dull ? 240 : 110);
       // A laptop screen can shake. A headset must not: that is how you make someone ill.
       if (close && mode === 'desk') shake = 0.012;
-      if (close) { pulse(0, 0.3, 60); pulse(1, 0.3, 60); }
+      if (close) { pulse(0, dull ? 0.15 : 0.45, 60); pulse(1, dull ? 0.15 : 0.45, 60); }
     }
   }
   world.update(now);
@@ -653,7 +655,7 @@ renderer.setAnimationLoop(() => {
 });
 
 // For debugging from the browser console, and for the tests: moonbase.state(), moonbase.fx.targets() ...
-window.moonbase = { state: () => state, fx, world, interior, radio, rig, camera, net, board, THREE, scene, use: () => use(null), useBoard: () => useBoard(null), useHatch: () => useHatch(null), sendPose, myPose, teleport, turnRig,
+window.moonbase = { resetStanding: () => { standing = 1.2; }, state: () => state, fx, world, interior, radio, rig, camera, net, board, THREE, scene, use: () => use(null), useBoard: () => useBoard(null), useHatch: () => useHatch(null), sendPose, myPose, teleport, turnRig,
   where: () => where, place, renderer, outage: on => { debugOutage = on; },
   zoom: () => zoom, setZoom, controllers, handControls, scope: scopeMesh, arm, snap, radioState: () => ({ keyed, talking, rx, shown: radioState() }) };
 
