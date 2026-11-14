@@ -1,0 +1,16 @@
+{
+  "name": "moonbase",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Moonbase: a co-op fix-it game. One astronaut in VR, mission control on laptops.",
+  "scripts": {
+    "start": "node server/server.js",
+    "test": "node test/game.test.js",
+    "cert": "mkdir -p certs && openssl req -x509 -newkey rsa:2048 -nodes -keyout certs/key.pem -out certs/cert.pem -days 30 -subj \"/CN=moonbase\""
+  },
+  "dependencies": {
+    "three": "^0.180.0",
+    "ws": "^8.18.0"
+  }
+}

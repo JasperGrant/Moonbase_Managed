@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:,">
+<title>Moonbase: mission control</title>
+<link rel="stylesheet" href="/style.css">
+<script type="importmap">{ "imports": { "three": "/vendor/three/build/three.module.js", "three/addons/": "/vendor/three/examples/jsm/" } }</script>
+</head>
+<body>
+<header>
+  <div class="brand">MOONBASE<span id="roleName"></span></div>
+  <div class="stat"><label>MISSION CLOCK</label><b id="clock">-:--</b></div>
+  <div class="stat o2"><div><label>SUIT OXYGEN</label><div class="bar"><i id="o2bar"></i></div></div><b id="o2">-</b></div>
+  <div class="stat"><label>SCORE</label><b id="score">0</b></div>
+  <div class="stat"><label>CREW ONLINE</label><div id="crew"></div></div>
+  <span id="link"></span>
+  <button id="radioBtn" hidden>Enable radio</button>
+</header>
+<div id="toast"></div>
+<main>
+  <section id="lobby" hidden></section>
+  <section id="run" class="grid" hidden></section>
+  <section id="results" hidden></section>
+</main>
+<script type="module" src="/console.js"></script>
+</body>
+</html>
