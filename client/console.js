@@ -9,6 +9,7 @@ import { beltWeight } from '/shared/rules.js';
 import { drawTool, drawShape } from '/shared/icons.js';
 import { seatTaken, seatRefused, kicked } from '/seat.js';
 import { createLobby } from '/lobby.js';
+import { music } from '/music.js';
 import { PAL, CABLE, FONT, nixie, jewel, fontsReady } from '/shared/palette.js';
 
 // /console.html?role=ops or the clean URL /ops; /control is the all-in-one seat.
@@ -117,6 +118,7 @@ function render() {
 
   if (s.phase !== shown) {
     shown = s.phase;
+    music.mood(s.phase === 'run' ? 'run' : 'calm');
     lobby.show(s.phase === 'lobby');
     if (s.phase !== 'lobby') $('planSheet').hidden = true;
     for (const id of ['run', 'results']) $(id).hidden = id !== s.phase;
@@ -151,11 +153,14 @@ function renderRun(s) {
   if (has('sci')) { if (tabOn.sci === 0) drawPower(s); else drawAir(s); }
 }
 
-// Needles swing and the radar sweeps between state updates: redraw the instruments at 30 frames a second.
-let lastFrame = 0;
+// Needles swing, lamps blink and the radar sweeps between state updates: redraw the instruments at 30
+// frames a second while a needle is swinging, and at 10 otherwise (enough for the lamps and the sweep).
+// Four consoles may share one laptop, so an idle panel must not cost a full frame rate.
+let lastFrame = 0, swinging = 0; // swinging: when a needle last moved
 (function frame(t) {
   requestAnimationFrame(frame);
-  if (t - lastFrame < 33 || !state || state.phase !== 'run' || !state.powered || document.hidden) return;
+  const every = performance.now() - swinging < 200 ? 33 : 100;
+  if (t - lastFrame < every || !state || state.phase !== 'run' || !state.powered || document.hidden) return;
   lastFrame = t; renderRun(state);
 })(0);
 fontsReady.then(() => { if (state) render(); });
@@ -201,6 +206,7 @@ function needle(key, target) {
   const n = needles.get(key) || { v: target, vel: 0, t: performance.now() };
   const now = performance.now(), dt = Math.min(0.1, (now - n.t) / 1000); n.t = now;
   n.vel += ((target - n.v) * 60 - n.vel * 9) * dt; n.v += n.vel * dt;
+  if (Math.abs(n.vel) > 0.05 || Math.abs(target - n.v) > 0.05) swinging = now;
   needles.set(key, n); return n.v;
 }
 // A meter: cream face in a bezel, ticks and numerals, the bad range painted red, a dark needle on a brass hub.

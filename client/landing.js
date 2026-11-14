@@ -5,6 +5,7 @@ import { createLobby } from '/lobby.js';
 import { startBackdrop } from '/backdrop.js';
 import { isHeadset, keepDevice } from '/device.js';
 import { ROLES } from '/shared/config.js';
+import '/music.js'; // the theme song: it starts with the first click or key press
 
 const $ = id => document.getElementById(id);
 const URLS = { astronaut: '/astronaut', ops: '/ops', sci: '/sci', tech: '/tech', all: '/control' };

@@ -2,6 +2,7 @@
 // can start or restart the mission, send everyone back to the lobby, and kick a seat free.
 import { connect } from '/net.js';
 import { ROLES, MODES } from '/shared/config.js';
+import '/music.js'; // the theme plays here too
 
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
