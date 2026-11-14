@@ -9,6 +9,7 @@ import { beltWeight } from '/shared/rules.js';
 import { drawTool, drawShape } from '/shared/icons.js';
 import { seatTaken, kicked } from '/seat.js';
 import { createLobby } from '/lobby.js';
+import { music } from '/music.js';
 import { PAL, CABLE, FONT, nixie, jewel, fontsReady } from '/shared/palette.js';
 
 // /console.html?role=ops or the clean URL /ops; /control is the all-in-one seat.
@@ -116,6 +117,7 @@ function render() {
 
   if (s.phase !== shown) {
     shown = s.phase;
+    music.mood(s.phase === 'run' ? 'run' : 'calm');
     lobby.show(s.phase === 'lobby');
     if (s.phase !== 'lobby') $('planSheet').hidden = true;
     for (const id of ['run', 'results']) $(id).hidden = id !== s.phase;

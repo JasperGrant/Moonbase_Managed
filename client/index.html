@@ -14,6 +14,7 @@
     // The landing page is the lobby before you have a seat: click a grey scene to take that role.
     // It asks the server who is in once a second.
     import { createLobby } from '/lobby.js';
+    import '/music.js'; // the theme: it starts with the first click or key press
     const URLS = { astronaut: '/astronaut', ops: '/ops', sci: '/sci', tech: '/tech' };
     const lobby = createLobby(document.getElementById('lobby'), { onPick: role => { location.href = URLS[role]; } });
     async function refresh() {

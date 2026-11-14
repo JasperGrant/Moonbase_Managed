@@ -12,6 +12,7 @@ import { seatTaken, kicked } from '/seat.js';
 import { buildArm } from '/arm.js';
 import { PAL } from '/shared/palette.js';
 import { createLobby } from '/lobby.js';
+import { music } from '/music.js';
 
 const REACH = 3.2;        // metres: how far away the mouse can work something
 const REACH_VR = 1.6;     // metres: pointing in VR is a fallback for grabbing, so it only works close up
@@ -351,6 +352,7 @@ for (const i of [0, 1]) {
   });
   // Trigger on a controller, pinch on a bare hand: both arrive as "select".
   c.addEventListener('selectstart', () => {
+    music.unlock(); // a trigger pull or a pinch is a gesture the browser counts, and the page's click listeners never see it
     const other = controllers[1 - i];
     // A bare hand that pinches on something grabs it. That is not a zoom, a turn or a teleport.
     if (c.userData.isHand && running() && fx.grab(i, handPoint(i, new THREE.Vector3()))) { c.userData.grabbed = true; return; }
@@ -720,6 +722,7 @@ renderer.setAnimationLoop(() => {
   const run = !!s && s.phase === 'run';
   if (s) {
     if (s.phase !== lastPhase) {
+      music.mood(run ? 'run' : 'calm');
       if (run) { flashUntil = 0; passage = null; shade.visible = false; if (where === 'in') place('out'); rig.position.set(CFG.spawn.x, 0, CFG.spawn.z); rig.rotation.y = 0; }
       lastPhase = s.phase;
     }
@@ -804,5 +807,5 @@ $('radioBtn').onclick = async () => {
 $('vrSlot').appendChild(VRButton.createButton(renderer, { optionalFeatures: ['hand-tracking'] }));
 $('deskBtn').onclick = () => { mode = 'desk'; keys.tab = false; $('deskBtn').blur(); lobby.show(false); $('cross').hidden = false; lockPointer(); };
 // In a headset the arm lives in the room with the hands, and follows the left one; on a laptop it hangs off the view.
-renderer.xr.addEventListener('sessionstart', () => { mode = 'vr'; rig.add(arm.group); arm.setTracked(true); lobby.show(false); });
+renderer.xr.addEventListener('sessionstart', () => { music.unlock(); mode = 'vr'; rig.add(arm.group); arm.setTracked(true); lobby.show(false); });
 renderer.xr.addEventListener('sessionend', () => { exitHeld = 0; exitTouched = exitGone = false; arm.pressExit(0); mode = null; zoom = 1; zoomGrab = null; reading = false; readFor = 0; camera.add(arm.group); arm.setTracked(false); lobby.show(true); });
