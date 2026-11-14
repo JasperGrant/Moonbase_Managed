@@ -127,6 +127,8 @@ The verdict (`MISSION COMPLETE` / `MISSION FAILED`) stays where it is. Play the 
 - `game.test.js`: a mission that ends sets `debriefLeft`; ticking past `CFG.debriefSeconds` returns to `lobby`, keeps `mode`, sets `last = { won, score, mode }`; `start()` clears `last`.
 - `hub.test.js`: in `results`, `{ t: 'lobby' }` from `tech`, from `sci` and from `astronaut` each return to the lobby with `ready` empty; during `run` it is ignored from every seat; `ready` sent during `results` is still ignored.
 
+**`npm run debrief`** (`test/debrief.mjs`): ends a mission on the server at once, so it takes about a minute and does not wait through a real one. It checks all of the laptop-side points below, in both orders of leaving, and is the quicker check to run first.
+
 **`npm run smoke:shots`** (`test/smoke.mjs`, after the existing results shot)
 
 - The smoke test runs the 2-player console and the astronaut on a laptop, so the astronaut is the seat that leaves first. The console shows BACK TO LOBBY with the lamp off and the seconds left; the astronaut's cuff shows the debrief. The astronaut holds X: they are outside, at the READY board, facing it, and the server is in the lobby. The console still shows its results, with `CREW IN LOBBY` lit. The console presses BACK TO LOBBY: it sees the lobby. (`hub.test.js` covers the Technician and Scientist sending `lobby`.)
