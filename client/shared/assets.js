@@ -99,8 +99,46 @@ export function restyle(THREE, model, { rough = 0.8, metal = 0.05, sat = 0.45, b
   return model;
 }
 
-// Load a model, restyle it (see restyle) and hand it back.
-export async function loadPeriod(THREE, id, opts) { return restyle(THREE, await loadModel(THREE, id), opts); }
+// Merge a static model's meshes into one mesh per material, so a 157-part LM costs 12 draw calls, not 157
+// (and as many again in the shadow pass). The parts' transforms are baked in; names below Root are lost,
+// so do not merge a model whose parts move or are looked up by name.
+export async function mergeStatic(THREE, model) {
+  const { mergeGeometries } = await import('three/addons/utils/BufferGeometryUtils.js');
+  model.updateMatrixWorld(true);
+  const inv = new THREE.Matrix4().copy(model.matrixWorld).invert(), groups = new Map();
+  model.traverse(o => {
+    if (!o.isMesh || Array.isArray(o.material)) return;
+    let g = o.geometry.clone();
+    for (const k of Object.keys(g.attributes)) if (!['position', 'normal', 'uv'].includes(k)) g.deleteAttribute(k);
+    for (const k of Object.keys(g.attributes)) { // meshopt quantizes: back to plain floats so parts can be joined
+      const a = g.attributes[k];
+      if (a.array instanceof Float32Array && !a.normalized && !a.isInterleavedBufferAttribute) continue;
+      const f = new Float32Array(a.count * a.itemSize);
+      for (let i = 0; i < a.count; i++) for (let c = 0; c < a.itemSize; c++) f[i * a.itemSize + c] = a.getComponent(i, c);
+      g.setAttribute(k, new THREE.BufferAttribute(f, a.itemSize));
+    }
+    if (!g.index) g.setIndex([...Array(g.attributes.position.count).keys()]);
+    g.applyMatrix4(new THREE.Matrix4().multiplyMatrices(inv, o.matrixWorld));
+    const key = o.material.uuid + '|' + Object.keys(g.attributes).sort().join();
+    if (!groups.has(key)) groups.set(key, { material: o.material, geos: [], cast: o.castShadow, receive: o.receiveShadow });
+    groups.get(key).geos.push(g);
+  });
+  const root = new THREE.Group(); root.name = 'Root';
+  for (const { material, geos, cast, receive } of groups.values()) {
+    const geo = geos.length > 1 ? mergeGeometries(geos) : geos[0];
+    if (!geo) continue;
+    const m = new THREE.Mesh(geo, material); m.castShadow = cast; m.receiveShadow = receive; m.name = material.name || 'Part';
+    root.add(m);
+  }
+  root.position.copy(model.position); root.quaternion.copy(model.quaternion); root.scale.copy(model.scale);
+  return root;
+}
+
+// Load a model, restyle it (see restyle) and hand it back. merge: true joins its parts (see mergeStatic).
+export async function loadPeriod(THREE, id, opts = {}) {
+  const m = restyle(THREE, await loadModel(THREE, id), opts);
+  return opts.merge ? mergeStatic(THREE, m) : m;
+}
 
 // The EVA glove, restyled to the palette and turned into the arm's axes: fingers along +x, the back of
 // the hand toward +z, the palm toward -z, thumb toward -y (a left hand), and the middle of the cuff

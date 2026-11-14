@@ -215,10 +215,10 @@ export function buildInterior(THREE, scene, { sfx = () => {} } = {}) {
   // an empty pressure suit at the end of the suit lockers. Small, so none casts a shadow; blobs sit under them.
   const nasa = (id, x, y, z, ry, opts) => loadPeriod(THREE, id, opts).then(m => { m.position.set(x, y, z); m.rotation.y = ry; group.add(m); return m; })
     .catch(e => console.warn(id, e));
-  nasa('helmet', -1.45, 0.96, -4.4, Math.PI - 0.4, { rough: 0.6, metal: 0.1, by: { visor: { color: PAL.hex.foilGold, rough: 0.25, metal: 0.7 }, White: { color: PAL.hex.enamel }, helmet: { color: PAL.hex.enamel }, Tree: { color: PAL.hex.console } } });
+  nasa('helmet', -1.45, 0.96, -4.4, Math.PI - 0.4, { merge: true, rough: 0.6, metal: 0.1, by: { visor: { color: PAL.hex.foilGold, rough: 0.25, metal: 0.7 }, White: { color: PAL.hex.enamel }, helmet: { color: PAL.hex.enamel }, Tree: { color: PAL.hex.console } } });
   loadGlove(THREE).then(m => { m.position.set(-0.95, 1.0, -4.3); m.rotation.set(-Math.PI / 2, 0.5, 0); group.add(m); }).catch(e => console.warn('glove', e));
   nasa('crew-lock-bag', -1.4, 0.95, -0.2, Math.PI);
-  nasa('aces-suit', 3.2, 0, -0.5, Math.PI / 2, { rough: 0.85, sat: 0.8 });
+  nasa('aces-suit', 3.2, 0, -0.5, Math.PI / 2, { merge: true, rough: 0.85, sat: 0.8 });
   blob(0.8, 0.9, 3.2, -0.5);
   // loose deck plates and debris around the island
   box(W, 0.9, 0.03, 0.6, 0.95, 0.27, -3.78, -1.1, 0, 0); box(G, 0.7, 0.03, 0.5, -0.2, 0.22, -3.82, -1.15, 0, 0.05);

@@ -579,7 +579,7 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
     const toEarth = st.worldToLocal(new THREE.Vector3(...EARTH_POS)).sub(yoke.position).normalize();
     yoke.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), toEarth);
     // The NASA tall dish (docs/ASSETS.md): reflector painted enamel, not white; turned to face Earth.
-    loadPeriod(THREE, 'comms-dish', { cast: shadows, receive: shadows, by: { ant_tall: { color: PAL.hex.enamel, rough: 0.75 }, mass: { color: PAL.hex.console } } }).then(m => {
+    loadPeriod(THREE, 'comms-dish', { merge: true, cast: shadows, receive: shadows, by: { ant_tall: { color: PAL.hex.enamel, rough: 0.75 }, mass: { color: PAL.hex.console } } }).then(m => {
       st.remove(...st.children.slice(handBuilt));
       m.position.set(0, 0, -1.6);
       m.rotation.y = Math.atan2(toEarth.x, toEarth.z);
@@ -672,7 +672,7 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
   // painted outline. Scenery: they are not game tools, nothing picks them up.
   for (const [id, x, rot] of [['wrench', -0.95, [Math.PI / 2, 0, Math.PI / 2, 'ZXY']], ['ratchet', -0.5, [Math.PI / 2, 0, Math.PI / 2, 'ZXY']],
     ['hammer', 0.0, [Math.PI / 2, 0, Math.PI / 2, 'ZXY']], ['grease-gun', 0.62, [0, Math.PI / 2, 0, 'XYZ']]]) {
-    loadPeriod(THREE, id, { rough: 0.55, metal: 0.6 }).then(m => {
+    loadPeriod(THREE, id, { rough: 0.55, metal: 0.6, merge: true }).then(m => {
       m.rotation.set(...rot); m.updateMatrix();
       const depth = new THREE.Box3().setFromObject(m).getSize(new THREE.Vector3()).z;
       m.position.set(x, 1.82, 0.046 + depth / 2);
@@ -815,7 +815,7 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
     for (let i = 0; i < 8; i++) tube(steel, [0.9, 0.3 + i * 0.4, 2.1 + i * 0.12], [1.5, 0.3 + i * 0.4, 2.1 + i * 0.12], 0.015, L); // ladder
     scene.add(L);
     // The Apollo LM model replaces the hand-built one when it loads: its foil warmed toward foil gold.
-    loadPeriod(THREE, 'apollo-lm', { cast: shadows, receive: shadows, rough: 0.5, metal: 0.6, sat: 0.7,
+    loadPeriod(THREE, 'apollo-lm', { merge: true, receive: shadows, rough: 0.5, metal: 0.6, sat: 0.7,
       by: { 'blinn1SG.002': { color: PAL.hex.foilGold, rough: 0.35, metal: 0.9 }, 'blinn9SG.001': { color: PAL.hex.foilGold, rough: 0.4, metal: 0.85 } } }).then(m => {
       L.clear(); L.add(m);
     }).catch(e => console.warn('apollo-lm', e));
@@ -842,7 +842,7 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
   avatar.visible = false;
   scene.add(avatar);
   // The NASA astronaut replaces the capsules (unrigged, in a T-pose: fine at rover-camera distance).
-  loadPeriod(THREE, 'astronaut', { cast: shadows, rough: 0.85, by: { '/astnt1/': {} } }).then(m => { avatar.clear(); avatar.add(m); })
+  loadPeriod(THREE, 'astronaut', { merge: true, cast: shadows, rough: 0.85 }).then(m => { avatar.clear(); avatar.add(m); })
     .catch(e => console.warn('astronaut', e));
 
   // ---------- scenery from the NASA set: an old Viking lander, cargo at the fuel depot ----------
@@ -851,7 +851,7 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
   const prop = (id, parent, x, z, ry, opts = {}) => loadPeriod(THREE, id, { cast: shadows, receive: shadows, ...opts }).then(m => {
     m.position.set(x, parent === props ? height(x, z) - 0.05 : 0, z); m.rotation.y = ry; parent.add(m); return m;
   }).catch(e => console.warn(id, e));
-  prop('viking-lander', props, 16, -15, 2.3, { by: { blinn4SG: { color: PAL.hex.enamel }, blinn11SG: { color: PAL.hex.enamel } } });
+  prop('viking-lander', props, 16, -15, 2.3, { merge: true, cast: false, by: { blinn4SG: { color: PAL.hex.enamel }, blinn11SG: { color: PAL.hex.enamel } } });
   prop('spectrograph-crate', depot, 2.5, -0.5, 0.25);
   prop('support-cradle', depot, -2.6, -1.0, -0.2, { by: { spstob_fss_1: { rough: 0.7 } } });
 
