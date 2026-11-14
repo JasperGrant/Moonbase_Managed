@@ -47,7 +47,8 @@ const T0 = Date.now(), step = what => console.log(`  ${String(Math.round((Date.n
 const check = (ok, what) => { if (!ok) { problems.push(what); console.log('        FAILED: ' + what); } return ok; };
 const SHOTS = !!process.env.VR_SHOTS;
 
-const browser = await chromium.launch({ args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
+// The two media flags give the page a pretend microphone and say yes to its permission prompt, so that keying the radio really transmits.
+const browser = await chromium.launch({ args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist', '--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream'] });
 const page = await (await browser.newContext({ viewport: { width: 1280, height: 640 } })).newPage();
 page.on('pageerror', e => problems.push(`page: ${e.message}\n${(e.stack || '').split('\n').slice(1, 3).join('\n')}`));
 page.on('console', m => { if (m.text().startsWith('DBG')) console.log(m.text()); if (m.type() === 'error' || /GL_INVALID|WebGL: INVALID/.test(m.text())) problems.push(`page: ${m.text()}`); });
@@ -631,8 +632,81 @@ try {
   check(Math.abs(r.zoom - 3) < 0.2, 'hands: both empty hands pinched and pulled from 20 to 60 cm apart should zoom 3x, got ' + r.zoom);
   check(r.early === 0 && r.moved > 0.5, 'hands: a right pinch at the ground should teleport when let go: ' + JSON.stringify(r));
 
-  // ---------- 11. and it draws ----------
-  step('11. drawing real frames in the headset');
+  // ---------- 11. the cuff on your own arm, and the radio ----------
+  step('11. raising the cuff to read it keys the radio');
+  // In a headset the gauge cuff is on the back of your own left forearm. Bring it up where you can
+  // read it and the radio is on; lower it, turn it over or look away and the radio is off.
+  await P(() => {
+    const v = window.vr, mb = window.moonbase, T = v.T, X = window.fakeXR;
+    // Hold the left arm so the forearm runs along `along` (elbow to hand) with the back of it facing `back`,
+    // the wrist at `wrist`. All in the world. A controller's glove runs down and back from where the
+    // controller points (0.6 rad, client/stations.js); a tracked hand's wrist joint has -z to the fingers
+    // and +y out of the back of the hand.
+    v.arm = (wrist, along, back) => {
+      const bare = mb.controllers[v.index('left')].userData.isHand;
+      const e = along.clone().normalize(), d = back.clone().addScaledVector(e, -back.dot(e)).normalize();
+      const z = e.clone().negate(), x = bare ? d.clone().cross(z) : d.clone().negate(), y = bare ? d : z.clone().cross(x);
+      const q = new T.Quaternion().setFromRotationMatrix(new T.Matrix4().makeBasis(x, y, z));
+      if (!bare) q.multiply(new T.Quaternion().setFromAxisAngle(v.V(1, 0, 0), -0.6));
+      mb.rig.updateMatrixWorld(true);
+      const local = mb.rig.worldToLocal(wrist.clone()), ql = mb.rig.getWorldQuaternion(new T.Quaternion()).invert().multiply(q);
+      // The pretend headset puts a tracked hand's wrist joint 9 cm behind the point it is given.
+      if (bare) local.add(v.V(0, 0, -0.09).applyQuaternion(ql));
+      X.hand('left', [local.x, local.y, local.z], [ql.x, ql.y, ql.z, ql.w]);
+    };
+    // The usual way to read a watch: forearm across the chest, back of it up toward the face, eyes down on it.
+    v.readCuff = (turned = 1) => {
+      X.head(0, 1.7, 0, 0, -0.55);
+      mb.rig.updateMatrixWorld(true);
+      const R = mb.rig.quaternion, head = mb.rig.localToWorld(v.V(0, 1.7, 0)); // where the head is from this frame on
+      const wrist = head.clone().add(v.V(0.1, -0.27, -0.3).applyQuaternion(R));
+      v.arm(wrist, v.V(1, 0.05, -0.15).applyQuaternion(R), head.clone().sub(wrist).multiplyScalar(turned));
+    };
+    v.cuff = () => {
+      const a = mb.arm, m = a.group.matrixWorld, at = v.V().setFromMatrixPosition(m), head = v.wp(mb.camera);
+      return { ...mb.radioState(), tracked: a.tracked, seen: a.group.visible, glove: a.group.children.some(o => o.isGroup && o.visible), icon: a.shown?.icon,
+        faces: v.V().setFromMatrixColumn(m, 2).normalize().dot(head.clone().sub(at).normalize()), upright: v.V().setFromMatrixColumn(m, 1).normalize().y,
+        fromHand: at.distanceTo(v.where('left')), fromEyes: at.distanceTo(head) };
+    };
+  });
+  const two = n => typeof n === 'number' ? +n.toFixed(2) : n, brief = o => JSON.stringify(Object.fromEntries(Object.entries(o).map(([k, v]) => [k, two(v)])));
+  const cuffChecks = async how => {
+    await stand(0, 9, 0, 0, 1.7);
+    await P(() => window.vr.sleep(400));
+    let c = await P(() => window.vr.cuff());
+    check(c.tracked && c.seen && !c.glove, `cuff (${how}): the arm should be on the real left arm, without a second glove: ${brief(c)}`);
+    check(!c.keyed && !c.reading, `cuff (${how}): the radio is on with the arms hanging at the sides: ${brief(c)}`);
+    // Up into view for an instant is not enough: it has to be held there.
+    c = await P(async () => { window.vr.readCuff(); await window.vr.frames(2); return window.vr.cuff(); });
+    check(!c.reading, `cuff (${how}): the radio came on the instant the arm came up, with no pause: ${brief(c)}`);
+    c = await P(async () => { await window.vr.sleep(700); await window.vr.frames(3); return window.vr.cuff(); });
+    check(c.reading && c.keyed && c.talking, `cuff (${how}): holding the cuff up where it can be read did not put the astronaut on the air: ${brief(c)}`);
+    check(c.faces > 0.9 && c.upright > 0.6, `cuff (${how}): held like a watch, the face of the cuff should be toward the eyes and the right way up: ${brief(c)}`);
+    check(c.fromHand > 0.1 && c.fromHand < 0.4 && c.fromEyes > 0.25 && c.fromEyes < 0.5, `cuff (${how}): the cuff is not on the forearm behind the wrist: ${brief(c)}`);
+    check(c.icon === 'microphone, live' && c.shown === 'tx', `cuff (${how}): while on the air the cuff should show a live microphone: ${brief(c)}`);
+    // Looking up from it turns the radio off; looking back turns it on again.
+    c = await P(async () => { window.fakeXR.head(0, 1.7, 0, -1.2, 0.3); await window.vr.frames(4); return window.vr.cuff(); }); // up and off to the right
+    check(!c.reading && !c.keyed && !c.talking && c.icon === 'microphone, off', `cuff (${how}): looking away from the cuff left the radio on: ${brief(c)}`);
+    c = await P(async () => { window.vr.readCuff(); await window.vr.sleep(700); await window.vr.frames(3); return window.vr.cuff(); });
+    check(c.reading, `cuff (${how}): looking back at the cuff did not key the radio again: ${brief(c)}`);
+    // Turning the arm over (palm side to the face) turns it off.
+    c = await P(async () => { window.vr.readCuff(-1); await window.vr.frames(4); return window.vr.cuff(); });
+    check(!c.reading && !c.keyed, `cuff (${how}): the radio is on with the cuff facing away: ${brief(c)}`);
+    await stand(0, 9, 0, 0, 1.7);
+    c = await P(async () => { await window.vr.frames(3); return window.vr.cuff(); });
+    check(!c.keyed, `cuff (${how}): lowering the arm left the radio on: ${brief(c)}`);
+  };
+  await P(async () => { window.fakeXR.kind('left', 'controller'); window.fakeXR.kind('right', 'controller'); await window.vr.frames(8); });
+  await kit();
+  await cuffChecks('controllers');
+  // The left trigger still keys the radio without looking, as before.
+  r = await P(async () => { window.fakeXR.trigger('left', true); await window.vr.frames(3); const on = window.moonbase.radioState().keyed; window.fakeXR.trigger('left', false); await window.vr.frames(3); return { on, off: window.moonbase.radioState().keyed }; });
+  check(r.on && !r.off, 'cuff: the left trigger should still key the radio while it is held: ' + JSON.stringify(r));
+  await P(async () => { window.fakeXR.kind('left', 'hand'); window.fakeXR.kind('right', 'hand'); await window.vr.frames(8); });
+  await cuffChecks('bare hands');
+
+  // ---------- 12. and it draws ----------
+  step('12. drawing real frames in the headset');
   // Everything above ran with the drawing skipped. Draw the scene for real, both eyes, with a tool in
   // each hand, and make sure WebGL has no complaint.
   await P(async () => { window.fakeXR.kind('left', 'controller'); window.fakeXR.kind('right', 'controller'); await window.vr.frames(8); });
@@ -713,6 +787,12 @@ try {
       await v.stand(1.2, 10.5, -0.6, 0);
       window.fakeXR.head(0, 1.7, 0, 0, -0.05);
       await v.frames(3);
+    });
+    await draw('cuff', async () => {
+      const v = window.vr;
+      await v.stand(1.2, 10.5, -0.6, 0);
+      v.readCuff();
+      await v.sleep(600); await v.frames(4);
     });
     g.break('suit', true);
     await P(() => window.vr.until(s => s.suit, 3));

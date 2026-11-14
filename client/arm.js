@@ -62,10 +62,10 @@ export function buildArm(THREE) {
   };
   const AZ = -(sleeveR(0) + 0.016);
   // A tube of varying radius along x, from a function of x.
-  function tube(x0, x1, radius, mat, steps = 72) {
+  function tube(x0, x1, radius, mat, steps = 72, parent = group) {
     const pts = [];
     for (let i = 0; i <= steps; i++) { const x = x0 + (x1 - x0) * i / steps; pts.push(new THREE.Vector2(radius(x), x)); }
-    const m = add(new THREE.LatheGeometry(pts, 28), mat, 0, 0, AZ);
+    const m = add(new THREE.LatheGeometry(pts, 28), mat, 0, 0, AZ, parent);
     m.rotation.z = -Math.PI / 2; // the lathe's axis (y) laid along x
     return m;
   }
@@ -78,15 +78,27 @@ export function buildArm(THREE) {
   tube(ELBOW, WRIST, sleeveR, fabric);
   tube(ELBOW + 0.066, ELBOW + 0.088, x => sleeveR(x) + 0.0018, stripe, 8);       // red identification stripe
   add(new THREE.SphereGeometry(0.0715, 24, 16), fabric, ELBOW, 0, AZ);           // the elbow
-  // Upper arm, running from the elbow down and back to a shoulder out of view.
-  {
-    const dir = new THREE.Vector3(-0.22, -0.72, 0.66).normalize(), pts = [];
-    for (let i = 0; i <= 40; i++) { const d = 0.36 * i / 40; pts.push(new THREE.Vector2(0.067 + 0.022 * d + 0.002 * Math.sin(d * 80), d)); }
-    const upper = add(new THREE.LatheGeometry(pts, 28), fabric, ELBOW, 0, AZ);
-    upper.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
-    const bearing = add(new THREE.TorusGeometry(0.0715, 0.003, 10, 32), satin, 0, 0.15, 0, upper); // arm bearing
+  // Upper arm, running from the elbow to the shoulder. Raised by the radio key (a laptop), it runs down
+  // and back to a shoulder out of view; on a tracked arm (a headset) it is aimed at where the shoulder is.
+  const UPPER_LEN = 0.36, UPPER_REST = new THREE.Vector3(-0.22, -0.72, 0.66).normalize(), Y = new THREE.Vector3(0, 1, 0), toShoulder = new THREE.Vector3();
+  const upper = (() => {
+    const pts = [];
+    for (let i = 0; i <= 40; i++) { const d = UPPER_LEN * i / 40; pts.push(new THREE.Vector2(0.067 + 0.022 * d + 0.002 * Math.sin(d * 80), d)); }
+    const m = add(new THREE.LatheGeometry(pts, 28), fabric, ELBOW, 0, AZ);
+    const bearing = add(new THREE.TorusGeometry(0.0715, 0.003, 10, 32), satin, 0, 0.15, 0, m); // arm bearing
     bearing.rotation.x = Math.PI / 2; bearing.scale.z = 3.5;
+    return m;
+  })();
+  // Point the upper arm at the shoulder, given in this group's own coordinates; with nothing, back to rest.
+  function aimUpper(shoulder) {
+    if (!shoulder) { upper.quaternion.setFromUnitVectors(Y, UPPER_REST); upper.scale.y = 1; return; }
+    toShoulder.copy(shoulder).sub(upper.position);
+    const len = toShoulder.length();
+    if (len < 0.05) return;
+    upper.quaternion.setFromUnitVectors(Y, toShoulder.divideScalar(len));
+    upper.scale.y = Math.max(0.5, Math.min(1.3, len / UPPER_LEN));
   }
+  aimUpper(null);
 
   // Wrist: the glove's gauntlet over the end of the sleeve, then the metal disconnect.
   tube(WRIST - 0.022, WRIST + 0.012, x => 0.0555 + 0.03 * (x - WRIST), gloveCloth, 6);
@@ -97,19 +109,21 @@ export function buildArm(THREE) {
     const a = i / 6 * Math.PI * 2 + 0.4;
     add(new THREE.BoxGeometry(0.012, 0.008, 0.008), aluminium, WRIST + 0.022, Math.cos(a) * 0.054, AZ + Math.sin(a) * 0.054).rotation.x = -a;
   }
-  tube(WRIST + 0.036, WRIST + 0.075, x => 0.045 - 0.1 * (x - WRIST - 0.036), gloveCloth, 6); // glove wrist
-
-  // Glove: back of the hand toward the eyes, fingers relaxed and curling away.
+  // Glove: back of the hand toward the eyes, fingers relaxed and curling away. It is a group of its
+  // own because a headset draws the real hand (a controller's glove, or the tracked fingers) instead.
+  const glove = new THREE.Group();
+  group.add(glove);
+  tube(WRIST + 0.036, WRIST + 0.075, x => 0.045 - 0.1 * (x - WRIST - 0.036), gloveCloth, 6, glove); // glove wrist
   const HAND = WRIST + 0.105;
-  add(new THREE.SphereGeometry(0.05, 24, 16), gloveCloth, HAND, 0, AZ).scale.set(1, 0.96, 0.52);
-  const palmStrap = add(new THREE.TorusGeometry(0.047, 0.0045, 8, 28), webbing, HAND + 0.004, 0, AZ);
+  add(new THREE.SphereGeometry(0.05, 24, 16), gloveCloth, HAND, 0, AZ, glove).scale.set(1, 0.96, 0.52);
+  const palmStrap = add(new THREE.TorusGeometry(0.047, 0.0045, 8, 28), webbing, HAND + 0.004, 0, AZ, glove);
   palmStrap.rotation.y = Math.PI / 2; palmStrap.scale.set(0.58, 1, 3);
-  add(new THREE.CapsuleGeometry(0.0125, 0.068, 4, 12), silicone, HAND + 0.036, 0, AZ + 0.013); // knuckle pad
+  add(new THREE.CapsuleGeometry(0.0125, 0.068, 4, 12), silicone, HAND + 0.036, 0, AZ + 0.013, glove); // knuckle pad
   // One finger: a chain of segments, each bent a little more toward the palm (-z) than the last.
   function finger(x, y, z, radius, lengths, curls, lean = 0) {
     let parent = new THREE.Group();
     parent.position.set(x, y, z); parent.rotation.z = lean;
-    group.add(parent);
+    glove.add(parent);
     lengths.forEach((len, i) => {
       const joint = new THREE.Group();
       joint.rotation.y = curls[i];
@@ -208,19 +222,29 @@ export function buildArm(THREE) {
     g.strokeStyle = colour; g.lineWidth = 15; g.lineCap = 'round';
     for (const s of [-1, 1]) { g.beginPath(); g.moveTo(cx - 30, cy - 30 * s); g.lineTo(cx + 30, cy + 30 * s); g.stroke(); }
   }
-  // Radio: a mast with waves coming off it. A bar through it means no microphone.
-  function antenna(cx, cy, colour, waves, barred) {
-    const top = cy - 34;
-    g.strokeStyle = colour; g.fillStyle = colour; g.lineWidth = 6; g.lineCap = 'round'; g.lineJoin = 'round';
-    g.beginPath(); g.moveTo(cx, top); g.lineTo(cx, cy + 52); g.moveTo(cx - 22, cy + 58); g.lineTo(cx, cy + 6); g.lineTo(cx + 22, cy + 58); g.stroke();
-    g.beginPath(); g.arc(cx, top, 9, 0, Math.PI * 2); g.fill();
-    for (let i = 0; i < 3; i++) {
-      g.strokeStyle = i < waves ? colour : DIM; g.lineWidth = 6;
-      const r = 22 + i * 14;
-      g.beginPath(); g.arc(cx, top, r, -0.62, 0.62); g.stroke();
-      g.beginPath(); g.arc(cx, top, r, Math.PI - 0.62, Math.PI + 0.62); g.stroke();
+  // Radio: a microphone. Solid, with sound coming off it, while you are on the air; an outline when the
+  // radio is off; a bar through it when it cannot work (no microphone, or no signal).
+  function microphone(cx, cy, colour, live, barred) {
+    g.strokeStyle = colour; g.fillStyle = colour; g.lineWidth = 7; g.lineCap = 'round'; g.lineJoin = 'round';
+    g.beginPath(); g.roundRect(cx - 15, cy - 50, 30, 58, 15);            // the capsule
+    if (live) g.fill();
+    g.stroke();
+    g.beginPath(); g.arc(cx, cy - 8, 29, 0, Math.PI); g.stroke();          // the cradle under it
+    g.beginPath(); g.moveTo(cx, cy + 21); g.lineTo(cx, cy + 46); g.moveTo(cx - 20, cy + 48); g.lineTo(cx + 20, cy + 48); g.stroke(); // stem and foot
+    for (let i = 0; i < 2; i++) {                                           // sound, either side
+      g.strokeStyle = live ? colour : DIM; g.lineWidth = 6;
+      const r = 42 + i * 14;
+      g.beginPath(); g.arc(cx, cy - 22, r, -0.5, 0.5); g.stroke();
+      g.beginPath(); g.arc(cx, cy - 22, r, Math.PI - 0.5, Math.PI + 0.5); g.stroke();
     }
-    if (barred) { g.strokeStyle = barred === true ? AMBER : barred; g.lineWidth = 9; g.beginPath(); g.moveTo(cx - 46, cy + 56); g.lineTo(cx + 46, cy - 66); g.stroke(); }
+    if (barred) { g.strokeStyle = barred; g.lineWidth = 9; g.beginPath(); g.moveTo(cx - 44, cy + 52); g.lineTo(cx + 44, cy - 58); g.stroke(); }
+  }
+  // Mission Ops talking to you: a loudspeaker with sound coming out of it.
+  function speaker(cx, cy, colour) {
+    g.strokeStyle = colour; g.fillStyle = colour; g.lineWidth = 7; g.lineCap = 'round'; g.lineJoin = 'round';
+    g.beginPath(); g.moveTo(cx - 44, cy - 16); g.lineTo(cx - 24, cy - 16); g.lineTo(cx + 2, cy - 40); g.lineTo(cx + 2, cy + 38); g.lineTo(cx - 24, cy + 14); g.lineTo(cx - 44, cy + 14); g.closePath();
+    g.fill(); g.stroke();
+    for (let i = 0; i < 3; i++) { g.beginPath(); g.arc(cx + 2, cy - 1, 18 + i * 15, -0.75, 0.75); g.stroke(); }
   }
   // Alarm: a warning triangle, lit while one is active.
   function warning(cx, cy, lit) {
@@ -275,7 +299,8 @@ export function buildArm(THREE) {
     else at(346, 190, 1.15, () => hourglass(0, 0, left, hurry ? AMBER : BLUE, running));
 
     // Radio, alarms, visor zoom.
-    antenna(506, 196, radio ? radio[1] : '#77868f', radio && info.radio !== 'dead' ? 3 : 0, info.radio === 'dead' ? RED : info.radio === 'nomic');
+    if (info.radio === 'rx') speaker(506, 190, BLUE);
+    else microphone(506, 192, radio ? radio[1] : '#77868f', info.radio === 'tx', info.radio === 'dead' ? RED : info.radio === 'nomic' ? AMBER : null);
 
     // The tool belt: one box per weight unit it can carry, filled for each unit in use.
     for (let i = 0; i < cap; i++) {
@@ -288,7 +313,7 @@ export function buildArm(THREE) {
     at(594, 258, 0.88, () => magnifier(0, 0, level));
 
     tex.needsUpdate = true;
-    shown = { radio: radio ? radio[0] : 'STANDBY', frame: radio ? radio[1] : null, oxygen: o2, seconds: t, alarms, zoomPips: level, status: info.status || '', belt };
+    shown = { radio: radio ? radio[0] : 'STANDBY', icon: info.radio === 'rx' ? 'speaker' : info.radio === 'tx' ? 'microphone, live' : radio ? 'microphone, barred' : 'microphone, off', frame: radio ? radio[1] : null, oxygen: o2, seconds: t, alarms, zoomPips: level, status: info.status || '', belt };
   }
 
   // ---------- raising and lowering ----------
@@ -307,5 +332,38 @@ export function buildArm(THREE) {
   }
   update(0, false);
 
-  return { group, canvas, draw, update, signal, get raise() { return raise; }, get shown() { return shown; } };
+  // ---------- following a real arm (a headset) ----------
+  // In a headset the cuff is on your own left arm, not swung up for you. `source` is the matrix of what
+  // the headset tracks, in the space this group is parented in:
+  //   'hand'        the wrist joint of a tracked hand. WebXR: -z runs to the fingers, +y out of the back of the hand.
+  //   'controller'  a held controller's pointing pose. Its glove (client/stations.js) runs down and back
+  //                 from it by GLOVE_TILT, and the forearm carries on along that line; thumb up is +y.
+  // Each is turned into this model's axes (x to the hand, z out of the face of the display, on the back
+  // of the forearm) and slid so the wrist ring sits just behind the tracked wrist or the glove's cuff.
+  const GLOVE_TILT = 0.6;
+  const V3 = (x, y, z) => new THREE.Vector3(x, y, z);
+  const fit = (xAxis, yAxis, zAxis, anchor, tilt = 0) => new THREE.Matrix4().makeRotationX(tilt)
+    .multiply(new THREE.Matrix4().makeBasis(xAxis, yAxis, zAxis))
+    .multiply(new THREE.Matrix4().makeTranslation(-anchor.x, -anchor.y, -anchor.z));
+  const FIT = {
+    hand: fit(V3(0, 0, -1), V3(-1, 0, 0), V3(0, 1, 0), V3(WRIST + 0.05, 0, AZ)),
+    controller: fit(V3(0, 0, -1), V3(0, -1, 0), V3(-1, 0, 0), V3(WRIST + 0.172, 0, AZ), GLOVE_TILT),
+  };
+  let tracked = false;
+  // Start or stop following. While following, `update` is not used: the real arm decides where this is.
+  function setTracked(on) {
+    tracked = on;
+    group.matrixAutoUpdate = !on;
+    glove.visible = !on;
+    if (on) { group.visible = false; raise = 0; } else { aimUpper(null); update(0, false); }
+  }
+  // Put the arm on what is tracked this frame, or hide it if nothing is (`source` null).
+  function follow(source, kind) {
+    group.visible = !!source;
+    if (!source) return;
+    group.matrix.multiplyMatrices(source, FIT[kind]);
+    group.matrixWorldNeedsUpdate = true;
+  }
+
+  return { group, canvas, draw, update, signal, setTracked, follow, aimUpper, get tracked() { return tracked; }, get raise() { return raise; }, get shown() { return shown; } };
 }
