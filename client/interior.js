@@ -11,7 +11,7 @@
 // intensity rather than switch on and off so no shader is ever recompiled mid-game.
 import { CFG } from '/shared/config.js';
 import { PAL } from '/shared/palette.js';
-import { loadPeriod, loadGlove, textureUrl } from '/shared/assets.js';
+import { loadPeriod, loadGlove } from '/shared/assets.js';
 import { buildDamage } from '/damage.js';
 
 export const ROOM = {
@@ -237,15 +237,6 @@ export function buildInterior(THREE, scene, { sfx = () => {} } = {}) {
   const mount = new THREE.Group();
   mount.position.set(ROOM.panel.x, 0, ROOM.panel.z); mount.rotation.y = Math.PI / 2; // local +z faces into the room
   group.add(mount);
-  // NASA flight-deck photos (docs/ASSETS.md), warmed: breaker panel "R14" as the surround the board sits in,
-  // and the toggle-switch panel beside the habitat-power display on the east wall.
-  const photo = (id, w, h, x, y, z, ry) => {
-    const t = new THREE.TextureLoader().load(textureUrl(id)); t.colorSpace = THREE.SRGBColorSpace;
-    const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshLambertMaterial({ map: t, color: PAL.hex.photoTint }));
-    m.position.set(x, y, z); m.rotation.y = ry; m.name = 'Panel_' + id; group.add(m);
-  };
-  photo('flight-deck-panel-c', 1.5, 1.2, -3.47, 1.4, -7.7, Math.PI / 2);
-  photo('flight-deck-panel-b', 0.9, 0.72, 3.47, 1.55, -9.95, -Math.PI / 2);
   box(D, 0.1, 0.3, 0.5, -3.44, 2.15, -7.7); tube(G, [-3.42, 2.3, -7.8], [-3.42, H, -7.8], 0.04); tube(G, [-3.42, 2.3, -7.6], [-3.42, H, -7.6], 0.04);
   for (const z of [-8.45, -6.95]) box(Y, 0.9, 0.004, 0.08, -3.0, 0.004, z); box(Y, 0.08, 0.004, 1.58, -2.55, 0.004, -7.7);
   const beacon = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 0.12, 10), new THREE.MeshBasicMaterial({ color: PAL.hex.amberOff, toneMapped: false }));
