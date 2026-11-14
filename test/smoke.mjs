@@ -406,7 +406,7 @@ try {
   await astro.keyboard.up('Tab');
   await until('wrist gauges: letting go of Tab did not lower the arm', async () => (await armState(astro)).raise === 0);
 
-  step('through the airlock, power outage lighting');
+  step('through the airlock, power outage lighting, things knocked loose');
   // Through the airlock: the hatch pad is in reach from the foot of the steps, the fade moves the
   // astronaut into the hall, the switchboard is mounted there, and the outage lighting runs.
   const indoors = await astro.evaluate(async () => {
@@ -423,6 +423,15 @@ try {
     mb.outage(false);
     for (let i = 0; i < 900 && mb.interior.phase !== 'main'; i++) await wait(100);
     if (mb.interior.phase !== 'main') return 'roof lights never came back, stuck in ' + mb.interior.phase;
+    // The hall starts clean; faults knock panels and cables loose, and fixing them puts them back.
+    if (mb.interior.damage.broken) return 'the hall is not clean before anything has gone wrong';
+    mb.wreck(true);
+    const settled = () => mb.interior.damage.pieces.every(p => p.state === 'down') && mb.interior.damage.cables.every(c => c.state === 'loose');
+    for (let i = 0; i < 900 && !settled(); i++) await wait(100);
+    if (!settled()) return 'panels did not come down: ' + mb.interior.damage.pieces.map(p => p.state).join(',');
+    mb.wreck(false);
+    for (let i = 0; i < 300 && mb.interior.damage.broken; i++) await wait(100);
+    if (mb.interior.damage.broken) return 'the fix did not put the panels and cables back';
     return 'ok';
   });
   if (indoors !== 'ok') problems.push('astronaut: ' + indoors);

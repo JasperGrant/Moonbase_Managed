@@ -202,6 +202,11 @@ export class Radio {
     if (kind === 'alert') { this.tone(520, 0.18, 0.03); this.tone(390, 0.25, 0.03, 'sine', 0.22); }
     if (kind === 'breaker') { this.tone(90, 0.1, 0.2, 'square'); this.tone(1200, 0.02, 0.05, 'square'); this.sweep(40, 120, 0.9, 0.05); }
     if (kind === 'restrike') { this.tone(2400, 0.03, 0.04, 'square'); this.tone(120, 0.08, 0.05); }
+    if (kind === 'pop') { this.tone(1800, 0.02, 0.06, 'square'); this.tone(1400, 0.02, 0.05, 'square', 0.05); }   // fasteners giving way
+    if (kind === 'clank') { this.tone(180, 0.12, 0.12, 'square'); this.burst(0.08, 0.12, 'bandpass', 900); }
+    if (kind === 'clang') { this.tone(310, 0.6, 0.1, 'triangle'); this.tone(463, 0.45, 0.06, 'triangle'); this.burst(0.1, 0.2, 'lowpass', 400); }
+    if (kind === 'snap') { this.burst(0.06, 0.25, 'highpass', 2500); this.tone(90, 0.12, 0.1, 'square', 0.02); }
+    if (kind === 'spark') { this.burst(0.05 + Math.random() * 0.12, 0.12, 'highpass', 2200 + Math.random() * 1500); }
     if (kind === 'hatch') { this.sweep(150, 60, 0.35, 0.12, 'square'); this.tone(55, 0.25, 0.18, 'sine', 0.3); }
     if (kind === 'end') { this.tone(523, 0.2, 0.1); this.tone(659, 0.2, 0.1, 'sine', 0.2); this.tone(784, 0.4, 0.1, 'sine', 0.4); }
   }
