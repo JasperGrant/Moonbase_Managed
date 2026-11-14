@@ -49,16 +49,17 @@ Each player leaves the debrief by themselves, with one action: the **EXIT button
 
 ### 2.2 Telling them the result
 
-All of this fires once, on the `end` event. Nothing on the visor.
+All of this fires once, on the `end` event. Nothing on the visor: the words are on a board standing in the world, not stuck to the view.
 
 | Channel | Won | Lost |
 | --- | --- | --- |
 | **Sound** (`voice.js`) | New `won` sting: the current rising triad. | New `lost` sting: a slower falling minor triad (G, E♭, C), sine, lower and quieter. |
 | **Haptics** | Three short pulses on the left (cuff) hand. | One long pulse on both hands. |
+| **Result board** (`astronaut.js`) | A placard appears 1.4 m in front of the head at eye height, turned to face it, and stays where it appeared until they press EXIT: a tick, `MISSION COMPLETE` in `lamp-green`, the reason, the score on a Nixie counter, and `EXIT ON YOUR WRIST: BACK TO THE READY BOARD`. It is drawn over the scene (no depth test) so a wall behind it cannot hide it. | The same with a cross and `MISSION FAILED` in `lamp-red`. |
 | **Cuff face** (`arm.js`) | The whole face becomes the debrief face (below). | Same, with a cross. |
 | **Cuff reminder** | Until the cuff has been read for 1 s (`gaugesReadable`), a soft two-tone wrist-watch beep (`watch`) and a light tap on the cuff hand every 6 s, so they know where to look. | Same. |
 
-**The debrief face** replaces the gauges on the cuff while `debrief` is set. It stays icons only, as the cuff is now: a large tick in `lamp-green` or a cross in `lamp-red` across the middle of the cream `dial` face, in the same stroke style as the current small tick and cross, and an engraved arrow pointing at the EXIT plate (toward the elbow). No words, no score: the score is on Mission Control, and Ops reads it out over the radio. `arm.draw()` gets `info.status = 'won' | 'lost'` and a new `info.debrief = true`; `arm.shown` reports `debrief: true` for the tests.
+**The debrief face** replaces the gauges on the cuff while `debrief` is set. It stays icons only, as the cuff is now: a large tick in `lamp-green` or a cross in `lamp-red` across the middle of the cream `dial` face, in the same stroke style as the current small tick and cross, and an engraved arrow pointing at the EXIT plate (toward the elbow). No words: the words are on the result board. `arm.draw()` gets `info.status = 'won' | 'lost'` and a new `info.debrief = true`; `arm.shown` reports `debrief: true` for the tests.
 
 **The EXIT lamp invites the press:** while `debrief` is set, the jewel in the EXIT cap blinks `lamp-amber` at 1 Hz (the DESIGN.md caution colour, under 2 Hz), instead of its dark `redOff`. While a finger is on it, it warms to `lamp-red` as it does now.
 
@@ -137,7 +138,8 @@ The verdict (`MISSION COMPLETE` / `MISSION FAILED`) stays where it is. Play the 
 - Press EXIT with the fake fingertip for 0.6 s: the phase goes to `lobby`, `where === 'out'`, the rig is at spawn, the READY board is visible and in view, and **the XR session is still presenting**.
 - Keep holding: the session does not end. Lift and press again: it ends.
 - End a mission, let Ops send the crew to the lobby first: the astronaut stays where they are with the debrief face until they press EXIT.
-- Shots: `astronaut-debrief-won`, `astronaut-debrief-lost` (the cuff, raised), `astronaut-board-last-mission`. Check them against DESIGN.md (palette, the blinking lamp not blown out) and add `docs/astronaut-debrief.png`.
+- The result board is visible and in front of the astronaut after a win and after a loss, and gone after EXIT.
+- Shots: `astronaut-debrief-won`, `astronaut-debrief-lost` (the cuff, raised), `result-board-lost` (the board, in the habitat), `astronaut-board-last-mission`. Check them against DESIGN.md (palette, the blinking lamp not blown out) and add `docs/astronaut-debrief.png`.
 
 ## 7. Done when
 

@@ -838,7 +838,8 @@ try {
       const toBoard = v.wp(mb.board).sub(head).setY(0).normalize();
       return { presenting: mb.renderer.xr.isPresenting, phase: mb.state().phase, debrief: mb.debrief(), where: mb.where(), board: mb.board.visible,
         facing: +dir.dot(toBoard).toFixed(2), fromSpawn: +Math.hypot(head.x - spawn.x, head.z - spawn.z).toFixed(2),
-        status: a.shown?.status, face: a.shown?.debrief, pressing: +a.pressing.toFixed(2) };
+        status: a.shown?.status, face: a.shown?.debrief, pressing: +a.pressing.toFixed(2),
+        result: mb.resultBoard.visible && +dir.dot(v.wp(mb.resultBoard).sub(head).setY(0).normalize()).toFixed(2) };
     };
   }, CFG.spawn);
   const after = () => P(() => window.vr.after());
@@ -855,6 +856,7 @@ try {
   r = await endInside(false);
   await P(async () => { window.fakeXR.kind('left', 'hand'); window.fakeXR.kind('right', 'hand'); await window.vr.fr(8); });
   check(r.debrief && r.face && r.status === 'lost' && r.where === 'in', 'debrief: a lost mission should put a cross on the cuff: ' + JSON.stringify(r));
+  check(r.result > 0.9, 'debrief: a lost mission should put a MISSION FAILED board in front of the astronaut, in the world: ' + JSON.stringify(r.result));
   check(r.played.includes('lost') && !r.played.includes('won'), 'debrief: no "lost" sting when the mission failed: ' + JSON.stringify(r.played));
   check(r.haptics.some(h => h.ms >= 500), 'debrief: a lost mission should give a long pull on the hands: ' + JSON.stringify(r.haptics));
   r = await P(async () => { const v = window.vr, seen = new Set(); for (let i = 0; i < 14; i++) { await v.sleep(100); await v.fr(1); seen.add(window.moonbase.arm.invited); } return [...seen]; });
@@ -863,13 +865,14 @@ try {
   r = await P(async () => { const v = window.vr; await v.until(s => s.phase === 'lobby', 3); await v.fr(3); return v.after(); });
   check(r.phase === 'lobby' && r.debrief && r.status === 'lost' && r.where === 'in', 'debrief: someone else going back to the lobby should not pull the astronaut out of their debrief: ' + JSON.stringify(r));
   if (SHOTS) await draw('debrief-lost', async () => { window.vr.readCuff(); await window.vr.sleep(300); await window.vr.fr(3); });
+  if (SHOTS) await draw('result-board-lost', async () => { window.fakeXR.head(0, 1.7, 0, 0, 0); for (const s of ['left', 'right']) window.fakeXR.hand(s, [s === 'left' ? -0.22 : 0.22, 1.1, -0.1], [-0.7071, 0, 0, 0.7071]); await window.vr.fr(4); });
   r = await P(() => window.vr.lineUp());
   check(Math.abs(r.off) < 0.015 && r.presenting, 'exit: could not line the fingertip up with the EXIT button: ' + JSON.stringify(r));
   // A brush: on the cap for one frame and straight off again.
   r = await P(async () => { const v = window.vr; await v.push(1); const gap = v.tipGap(); await v.push(-1); await v.sleep(500); await v.fr(3); return { gap, ...v.after() }; });
   check(r.gap < 0.02 && r.presenting && r.debrief, 'exit: brushing the EXIT button for an instant did something (or the finger never reached it): ' + JSON.stringify(r));
   r = await P(async () => { const v = window.vr; await v.push(1); await v.hold(1500); return v.after(); });
-  check(r.presenting && !r.debrief && r.where === 'out' && r.board && r.fromSpawn < 0.2 && r.facing > 0.9, 'exit: in the debrief, EXIT should bring the astronaut out to the READY board, still in the headset: ' + JSON.stringify(r));
+  check(r.presenting && !r.debrief && r.result === false && r.where === 'out' && r.board && r.fromSpawn < 0.2 && r.facing > 0.9, 'exit: in the debrief, EXIT should bring the astronaut out to the READY board, still in the headset: ' + JSON.stringify(r));
 
   // A win, and the astronaut leaves first: EXIT takes the whole crew to the lobby.
   await P(async () => { const v = window.vr; await v.push(-1); await v.fr(3); });
@@ -877,6 +880,7 @@ try {
   await P(() => window.vr.until(s => s.phase === 'run', 5));
   r = await endInside(true);
   check(r.debrief && r.face && r.status === 'won', 'debrief: a won mission should put a tick on the cuff: ' + JSON.stringify(r));
+  check(r.result > 0.9, 'debrief: a won mission should put a MISSION COMPLETE board in front of the astronaut: ' + JSON.stringify(r.result));
   check(r.played.includes('won'), 'debrief: no "won" sting when the mission was complete: ' + JSON.stringify(r.played));
   if (SHOTS) await draw('debrief-won', async () => { window.vr.readCuff(); await window.vr.sleep(300); await window.vr.fr(3); });
   r = await P(() => window.vr.lineUp());

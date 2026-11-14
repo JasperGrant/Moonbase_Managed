@@ -307,7 +307,8 @@ try {
   step('the debrief and the way back to the lobby');
   const ctlOut = await ctl.evaluate(() => ({ button: !!document.querySelector('#results [data-lobby]'), lamp: document.getElementById('crewLamp')?.classList.contains('on'), left: document.getElementById('debriefLeft')?.textContent }));
   if (!ctlOut.button || ctlOut.lamp || !(Number(ctlOut.left) > 0)) problems.push('console: the results should have BACK TO LOBBY, the lamp off and the seconds left: ' + JSON.stringify(ctlOut));
-  const cuff = await astro.evaluate(async () => { for (let i = 0; i < 40 && !window.moonbase.arm.shown?.debrief; i++) await new Promise(r => setTimeout(r, 100)); return { debrief: window.moonbase.debrief(), shown: window.moonbase.arm.shown }; });
+  const cuff = await astro.evaluate(async () => { for (let i = 0; i < 40 && !window.moonbase.arm.shown?.debrief; i++) await new Promise(r => setTimeout(r, 100)); return { debrief: window.moonbase.debrief(), shown: window.moonbase.arm.shown, board: window.moonbase.resultBoard.visible }; });
+  if (!cuff.board) problems.push('astronaut: no MISSION COMPLETE / FAILED board appeared in the world when the mission ended');
   if (!cuff.debrief || !cuff.shown?.debrief || cuff.shown.status !== (result.won ? 'won' : 'lost')) problems.push('astronaut: the cuff did not show the debrief: ' + JSON.stringify(cuff));
   await astro.keyboard.down('x');
   const back = await astro.evaluate(async () => {

@@ -26,7 +26,7 @@ let flash = '', flashUntil = 0, lastPhase = ''; // flash: 'ok' or 'bad', shown o
 let nextThump = 0, covered = false;
 // The debrief: set when a mission ends, cleared when the astronaut presses EXIT or the next run starts.
 // It outlives the server's results phase, so nobody else going back to the lobby pulls it away.
-// { won, score, read, readFor, beepAt }
+// { won, score, reason, read, readFor, beepAt }
 let debrief = null;
 
 // ---------- scene ----------
@@ -148,6 +148,48 @@ const board = new THREE.Mesh(new THREE.PlaneGeometry(1.0, 0.625), new THREE.Mesh
 board.position.set(CFG.spawn.x, 1.65, CFG.spawn.z - 1.7); // eye height
 scene.add(board);
 let boardKey = '';
+// ---------- the RESULT board: how the astronaut is told the mission is over ----------
+// A placard that appears in the world, in front of the astronaut, the moment the mission ends, and stays
+// where it appeared (it is not on the visor) until they press EXIT. The wrist says the same in icons.
+const resultCanvas = document.createElement('canvas');
+resultCanvas.width = 768; resultCanvas.height = 480;
+const result2d = resultCanvas.getContext('2d');
+const resultTex = new THREE.CanvasTexture(resultCanvas);
+resultTex.colorSpace = THREE.SRGBColorSpace;
+const resultBoard = new THREE.Mesh(new THREE.PlaneGeometry(1.2, 0.75), new THREE.MeshBasicMaterial({ map: resultTex, toneMapped: false, depthTest: false, transparent: true }));
+resultBoard.renderOrder = 30; resultBoard.visible = false; // always drawn: it is a message, not a prop
+scene.add(resultBoard);
+let resultKey = '';
+function drawResultBoard() {
+  resultBoard.visible = !!debrief;
+  if (!debrief) { resultKey = ''; return; }
+  const key = [debrief.won, debrief.score, debrief.reason, fontsLoaded].join('|');
+  if (key === resultKey) return;
+  resultKey = key;
+  const g = result2d, W = resultCanvas.width, H = resultCanvas.height, lamp = debrief.won ? PAL.green : PAL.red;
+  g.fillStyle = PAL.bakelite; g.fillRect(0, 0, W, H);
+  g.strokeStyle = PAL.bezel; g.lineWidth = 6; g.strokeRect(3, 3, W - 6, H - 6);
+  g.strokeStyle = lamp; g.lineWidth = 10; g.strokeRect(14, 14, W - 28, H - 28);
+  // A tick or a cross, in the same strokes as the wrist.
+  g.lineCap = 'round'; g.lineJoin = 'round';
+  for (const [c, w] of [[PAL.inkDial, 30], [lamp, 19]]) {
+    g.strokeStyle = c; g.lineWidth = w; g.beginPath();
+    if (debrief.won) { g.moveTo(W / 2 - 42, 112); g.lineTo(W / 2 - 14, 142); g.lineTo(W / 2 + 44, 76); }
+    else { g.moveTo(W / 2 - 38, 74); g.lineTo(W / 2 + 38, 146); g.moveTo(W / 2 + 38, 74); g.lineTo(W / 2 - 38, 146); }
+    g.stroke();
+  }
+  g.textAlign = 'center'; g.textBaseline = 'middle';
+  g.fillStyle = lamp; g.font = `46px ${FONT.label}`;
+  g.fillText(debrief.won ? 'MISSION COMPLETE' : 'MISSION FAILED', W / 2, 222);
+  g.fillStyle = PAL.ink; g.font = `bold 28px ${FONT.type}`;
+  g.fillText(debrief.reason || '', W / 2, 288);
+  g.fillStyle = PAL.inkDim; g.font = `16px ${FONT.label}`;
+  g.fillText('SCORE', W / 2 - 74, 352);
+  nixie(g, String(debrief.score), W / 2 + 18, 352, 40, { align: 'left' });
+  g.fillStyle = PAL.amber; g.font = `15px ${FONT.label}`;
+  g.fillText('EXIT ON YOUR WRIST: BACK TO THE READY BOARD', W / 2, 424);
+  resultTex.needsUpdate = true;
+}
 const iAmReady = () => !!state && (state.ready || []).includes('astronaut');
 function drawBoard() {
   const s = state;
@@ -542,7 +584,13 @@ function leaveDesk() {
 const leftHand = () => controllers.findIndex(c => c.userData.hand === 'left');
 function startDebrief(s, now) {
   const won = !!s.result?.won;
-  debrief = { won, score: s.score, read: false, readFor: 0, beepAt: now + 6 };
+  debrief = { won, score: s.score, reason: s.result?.reason || '', read: false, readFor: 0, beepAt: now + 6 };
+  // The result board stands 1.4 m in front of the head at eye height, turned to face it, and stays put.
+  camera.getWorldPosition(headPos); camera.getWorldDirection(fwd); fwd.y = 0;
+  if (fwd.lengthSq() < 1e-4) fwd.set(0, 0, -1);
+  fwd.normalize();
+  resultBoard.position.set(headPos.x + fwd.x * 1.4, headPos.y - 0.05, headPos.z + fwd.z * 1.4);
+  resultBoard.rotation.set(0, Math.atan2(-fwd.x, -fwd.z) + Math.PI, 0);
   // The sting comes with the 'end' event. The hands feel it too: three short taps on the cuff
   // hand for a win, one long pull on both for a loss.
   if (won) for (let k = 0; k < 3; k++) setTimeout(() => pulse(leftHand(), 0.6, 60), k * 180);
@@ -864,6 +912,7 @@ renderer.setAnimationLoop(() => {
   shake *= 0.86;
   if (mode === 'desk') camera.rotation.z = (Math.random() - 0.5) * shake;
   drawBoard();
+  drawResultBoard();
   debriefStep(dt, now);
   // On a laptop the radio key swings the arm up. In a headset it is on your own arm (see followArm).
   if (!arm.tracked) arm.update(Math.min(0.25, now - armFrame), keyed || (!!debrief && !!mode)); // real time, so the arm is as quick on a slow machine
@@ -878,7 +927,7 @@ renderer.setAnimationLoop(() => {
 // For debugging from the browser console, and for the tests: moonbase.state(), moonbase.fx.targets() ...
 window.moonbase = { resetStanding: () => { standing = 1.2; }, state: () => state, fx, world, interior, radio, rig, camera, net, board, THREE, scene, use: () => use(null), useBoard: () => useBoard(null), useHatch: () => useHatch(null), sendPose, myPose, teleport, turnRig,
   where: () => where, place, renderer, outage: on => { debugOutage = on; }, wreck: on => { debugDamage = on; },
-  zoom: () => zoom, setZoom, debrief: () => debrief, controllers, handControls, scope: scopeMesh, arm, snap, radioState: () => ({ keyed, talking, rx, reading, shown: radioState() }) };
+  zoom: () => zoom, setZoom, debrief: () => debrief, resultBoard, controllers, handControls, scope: scopeMesh, arm, snap, radioState: () => ({ keyed, talking, rx, reading, shown: radioState() }) };
 
 // ---------- start-up screen: the lobby, with the radio and VR steps in the astronaut's panel ----------
 const $ = id => document.getElementById(id);
