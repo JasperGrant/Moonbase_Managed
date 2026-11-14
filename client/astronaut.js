@@ -12,6 +12,7 @@ import { seatTaken, kicked } from '/seat.js';
 import { buildArm } from '/arm.js';
 import { PAL } from '/shared/palette.js';
 import { createLobby } from '/lobby.js';
+import { music } from '/music.js';
 
 const REACH = 3.2;        // metres: how far away the mouse can work something
 const REACH_VR = 1.6;     // metres: pointing in VR is a fallback for grabbing, so it only works close up
@@ -673,6 +674,7 @@ renderer.setAnimationLoop(() => {
   const run = !!s && s.phase === 'run';
   if (s) {
     if (s.phase !== lastPhase) {
+      music.mood(run ? 'run' : 'calm');
       if (run) { flashUntil = 0; passage = null; shade.visible = false; if (where === 'in') place('out'); rig.position.set(CFG.spawn.x, 0, CFG.spawn.z); rig.rotation.y = 0; }
       lastPhase = s.phase;
     }

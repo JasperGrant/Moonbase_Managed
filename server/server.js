@@ -15,7 +15,7 @@ const PORT = Number(process.env.PORT) || 3000;
 const MIME = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8',
   '.json': 'application/json', '.png': 'image/png', '.webp': 'image/webp', '.jpg': 'image/jpeg', '.svg': 'image/svg+xml',
-  '.glb': 'model/gltf-binary', '.woff2': 'font/woff2', '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.ico': 'image/x-icon',
+  '.glb': 'model/gltf-binary', '.woff2': 'font/woff2', '.mp3': 'audio/mpeg', '.m4a': 'audio/mp4', '.wav': 'audio/wav', '.ico': 'image/x-icon',
 };
 const WEB = path.join(ROOT, 'client'); // everything the pages need is in here, three.js included
 
@@ -31,7 +31,10 @@ function serve(req, res) {
   if (!file.startsWith(WEB + path.sep)) { res.writeHead(403).end(); return; }
   fs.readFile(file, (err, data) => {
     if (err) { res.writeHead(404, { 'Content-Type': 'text/plain' }).end('Not found: ' + url); return; }
-    res.writeHead(200, { 'Content-Type': MIME[path.extname(file)] || 'application/octet-stream', 'Cache-Control': 'no-store' });
+    // Everything is re-read on every load so an edit shows at once, except the big things that never change
+    // between edits: models, photos and the theme song, which every page fetches.
+    const keep = url.startsWith('/assets/') || url.startsWith('/vendor/');
+    res.writeHead(200, { 'Content-Type': MIME[path.extname(file)] || 'application/octet-stream', 'Cache-Control': keep ? 'max-age=3600' : 'no-store' });
     res.end(data);
   });
 }
