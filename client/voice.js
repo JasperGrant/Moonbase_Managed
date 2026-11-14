@@ -42,6 +42,17 @@ export class Radio {
     src.start();
     this.noise = noise;
 
+    // Room tone for the inside of the habitat: air handlers (low noise) over a mains hum.
+    // Silent until room() turns it up; outside, in vacuum, there is nothing to hear.
+    const air = c.createBiquadFilter(); air.type = 'lowpass'; air.frequency.value = 420;
+    const airGain = c.createGain(); airGain.gain.value = 0.5;
+    this.roomGain = c.createGain(); this.roomGain.gain.value = 0;
+    src.connect(air).connect(airGain).connect(this.roomGain).connect(c.destination);
+    for (const [f, v] of [[60, 0.05], [120, 0.025]]) {
+      const o = c.createOscillator(), g = c.createGain(); o.frequency.value = f; g.gain.value = v;
+      o.connect(g).connect(this.roomGain); o.start();
+    }
+
     // Leaking air. Two copies of the same hiss: one locked to the head (the suit), one at a place
     // in the world (the hull crack), so the astronaut can tell them apart by turning their head.
     const hiss = () => {
@@ -102,6 +113,23 @@ export class Radio {
     this.next = Math.max(this.next, this.ctx.currentTime + 0.08);
     src.start(this.next);
     this.next += buf.duration;
+  }
+
+  // Room tone level: 1 with the fans running, a faint 0.15 on battery, 0 outside.
+  room(level) {
+    if (!this.ready || level === this.roomLevel) return;
+    this.roomLevel = level;
+    this.roomGain.gain.setTargetAtTime(level * 0.5, this.ctx.currentTime, level ? 0.5 : 0.25);
+  }
+
+  // A tone that slides from one pitch to another: machinery winding down or spinning up.
+  sweep(f0, f1, dur, vol = 0.1, type = 'sawtooth') {
+    if (!this.ready) return;
+    const c = this.ctx, o = c.createOscillator(), g = c.createGain(), t = c.currentTime;
+    o.type = type; o.frequency.setValueAtTime(f0, t); o.frequency.exponentialRampToValueAtTime(f1, t + dur);
+    g.gain.setValueAtTime(vol, t); g.gain.linearRampToValueAtTime(0, t + dur);
+    o.connect(g).connect(c.destination);
+    o.start(t); o.stop(t + dur + 0.02);
   }
 
   tone(freq, dur, vol = 0.1, type = 'sine', at = 0) {
@@ -167,6 +195,13 @@ export class Radio {
     if (kind === 'blackout') { this.tone(440, 0.25, 0.12, 'sawtooth'); this.tone(220, 0.3, 0.12, 'sawtooth', 0.25); this.tone(110, 0.5, 0.12, 'sawtooth', 0.55); }
     if (kind === 'power') { this.tone(220, 0.15, 0.1); this.tone(440, 0.15, 0.1, 'sine', 0.15); this.tone(880, 0.3, 0.1, 'sine', 0.3); }
     if (kind === 'gen') { for (let i = 0; i < 6; i++) this.tone(55 + i * 4, 0.16, 0.16, 'sawtooth', i * 0.14); }
+    // Inside the habitat
+    if (kind === 'powerdown') { this.sweep(240, 35, 0.8, 0.12); this.tone(1500, 0.03, 0.05, 'square'); }
+    if (kind === 'relay') { this.tone(70, 0.12, 0.22, 'square'); this.tone(1700, 0.02, 0.05, 'square'); }
+    if (kind === 'alert') { this.tone(520, 0.18, 0.03); this.tone(390, 0.25, 0.03, 'sine', 0.22); }
+    if (kind === 'breaker') { this.tone(90, 0.1, 0.2, 'square'); this.tone(1200, 0.02, 0.05, 'square'); this.sweep(40, 120, 0.9, 0.05); }
+    if (kind === 'restrike') { this.tone(2400, 0.03, 0.04, 'square'); this.tone(120, 0.08, 0.05); }
+    if (kind === 'hatch') { this.sweep(150, 60, 0.35, 0.12, 'square'); this.tone(55, 0.25, 0.18, 'sine', 0.3); }
     if (kind === 'end') { this.tone(523, 0.2, 0.1); this.tone(659, 0.2, 0.1, 'sine', 0.2); this.tone(784, 0.4, 0.1, 'sine', 0.4); }
   }
 }

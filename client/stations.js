@@ -20,7 +20,7 @@ const RACK_SCALE = { brush: 1.3, patch: 1.3, welder: 1.3 };
 const WELD_DWELL = 0.4;     // seconds the tip must stay on one point of the crack
 const WELD_RANGE = 0.12;
 
-export function buildFixtures(THREE, world, { rig, camera, send, sfx = () => {} }) {
+export function buildFixtures(THREE, world, { rig, camera, send, sfx = () => {}, pulse = () => {} }) {
   const F = world.fixtures;
   const V = () => new THREE.Vector3();
   const a = V(), b = V(), c = V();

@@ -2,7 +2,7 @@
 
 A co-op fix-it game. One astronaut is on the Moon in VR. Mission control is on laptops, 1.3 light-seconds away. Something breaks. Mission control can see the symptoms but not the cause, the astronaut has the hands but not the information, and fixing things in the wrong order makes everything worse.
 
-- **Astronaut (Quest, or a laptop for testing):** has the hands, a tool belt that holds 4 weight units, and ears. No map, no gauges, no instructions.
+- **Astronaut (Quest, or a laptop for testing):** has the hands, a tool belt that holds 4 weight units, and ears. No map, no instructions, and nothing on the visor: oxygen, the clock and the belt are icons on a wrist cuff that comes up while the radio is keyed.
 - **Mission Ops:** the only voice the astronaut hears, over a delayed, crackly radio. Sees what is on the belt and what is left in the locker.
 - **Technician:** the radar map and the rover camera. Knows *where* and *when*.
 - **Scientist:** two screens of gauges, POWER and AIR. Knows *what* is wrong.
@@ -64,19 +64,46 @@ If the venue Wi-Fi blocks devices from seeing each other, use a phone hotspot.
 
 | | Controllers | Bare hands (hand tracking) | Laptop (testing) |
 | --- | --- | --- | --- |
-| Talk to Mission Ops | hold left trigger | hold your left hand up to your helmet | hold T |
+| Radio to Mission Ops, and wrist gauges | hold left trigger | hold your left hand up to your helmet | hold Tab |
 | Grab (tools off the rack and your belt, cable plugs, the rover wheel, the generator cord) | grip button | pinch | click it |
 | Use a tool | bring it to the work: the brush and patch kit work on contact, the welder lights when its tip is on the crack | same | click the work, hold to keep brushing or welding |
 | Point at something within arm's reach (a fallback for grabbing) | right trigger | | |
+| Go in or out of the habitat | point at the airlock hatch, pull trigger | point at the hatch, pinch and let go | click the hatch |
 | Take cover | crouch | crouch | hold C |
 | Patch your suit / pull the generator cord | patch kit to the red spot on your forearm / grab the generator on your belt and pull | same | F / G |
 | Move | left stick | point right hand at the ground, pinch to teleport (up to 8 m) | WASD |
 | Turn | right stick | pinch left hand in empty air, drag it sideways (30° per 10 cm) | mouse |
+| Zoom the visor | | pinch both empty hands, pull them apart (up to 6x); push them together to zoom out | |
 | Hop | A | | Space |
 
-Hand tracking kicks in when you put the controllers down; the Quest switches by itself. Your hands are drawn as white gloves, and a green ring on the ground shows where a pinch will take you.
+Hand tracking kicks in when you put the controllers down; the Quest switches by itself. Your hands are drawn as white gloves, and a green ring on the ground shows where a pinch will take you. A pinch on a tool, a plug or the wheel grabs it at once; a bare right hand pointing at the hatch, the READY board or the ground acts when the pinch lets go, so you can hold the pinch, steer the ring, and release.
 
 Mission Ops holds **Space** to talk. The Technician drives the rover with the **arrow keys**.
+
+Visor zoom is for looking at something from where you stand, such as whether the solar panels are dusty: a round scope opens in the middle of your view and magnifies what you are looking at by the amount your hands have moved apart (20 cm to 60 cm is 3x). Let go and it stays. Push your pinched hands back together to close it. It is a hand-tracking gesture only; controllers and the laptop have no zoom. While the scope is open the scene is drawn one extra time, into a 1024-pixel texture.
+
+### No display on the visor
+
+![The cuff display on the suit's forearm, up while the radio is keyed](docs/astronaut-wrist.png)
+
+The astronaut has no heads-up display. Everything is on a small cuff display strapped to the left forearm of the suit, and the arm is out of sight until the radio is keyed. Keying the radio and raising the arm are one action: hold the radio control (left trigger, left hand to helmet, or Tab on a laptop) and the arm swings up in front of you; let go and it drops. So you read your oxygen while you are talking.
+
+The display has no words or numbers on it, only icons:
+
+| Icon | Means |
+| --- | --- |
+| Gas bottle in a dial | suit oxygen: the bottle and the dial empty together, and turn red when low |
+| Hourglass in a dial | time left: the sand and the dial run down, amber for the last 30 seconds |
+| Tick or cross in place of the hourglass | something just fixed, or a wrong plug or a meteor hit, for a few seconds; at the end, mission complete or failed |
+| Radio mast | red waves while you are transmitting, blue while Mission Ops is talking, an amber bar through it if the page has no microphone, a red bar and no waves during a blackout: no signal |
+| Warning triangles | one lit for each thing that is broken right now (up to two). They do not say what |
+| Row of four boxes | the tool belt: one box per weight unit, filled for each unit in use, amber when full |
+| Magnifying glass | lit while the visor zoom is on, with pips for how far in |
+
+The arm being up is itself the sign that your radio is keyed, and the display backs it up: a light strip in its top edge and the frame round the face take the radio's colour. The arm is modelled on an EVA suit's: a woven white outer garment with soft wrinkles, a ribbed elbow, a red identification stripe, the metal wrist disconnect, and a glove with a gauntlet, palm strap, knuckle pad and silicone fingertips.
+
+Mission Ops holds **Space** to talk. The Technician drives the rover with the **arrow keys**.
+
 
 ## Tools and the belt
 
@@ -97,21 +124,33 @@ Welder, brush and patch kit fill the belt exactly, so the tire or the generator 
 | Fault | What mission control sees | What the astronaut does |
 | --- | --- | --- |
 | Dusty solar panels | Scientist: battery falling, **SOLAR IN** low | Sweep the brush over all three panels |
-| Tripped switchboard | Scientist: battery falling, SOLAR IN fine, **BOARD OUT** low, and a wiring diagram | Push each loose cable into the socket with the right shape. No tool. A wrong socket sparks and costs 4 oxygen |
+| Tripped switchboard | Scientist: battery falling, SOLAR IN fine, **BOARD OUT** low, and a wiring diagram. The habitat's windows turn red | Go in through the airlock. The board is on the west wall of the hall. Push each loose cable into the socket with the right shape. No tool. A wrong socket sparks and costs 4 oxygen |
 | Broken rover wheel | Technician: the radar map turns to static | Pull the broken wheel off, push the space tire on |
 | Hull breach | Scientist: the **LEAK** lamp, and oxygen draining 3x | Find the hiss, which comes from a place on the habitat wall, and weld along the crack |
 | Suit leak | Scientist: the same LEAK lamp, the same 3x drain | The hiss is inside the helmet and does not move when you turn. Patch the red spot on your forearm |
-| Meteor shower | Technician: blips and a countdown on the radar, 15 s ahead, if the radar is working | Stand under the airlock canopy, or crouch beside the rover |
+| Meteor shower | Technician: blips and a countdown on the radar, 15 s ahead, if the radar is working | Stand under the airlock canopy, go inside, or crouch beside the rover |
 
 And how it cascades, which is where the strategy is:
 
 | Left broken | Then |
 | --- | --- |
-| A power fault | The battery empties in 45 s and the base blacks out |
+| A power fault | The battery empties in 60 s and the base blacks out |
 | Blackout | The radio is dead both ways and every console shows static, until the power fault is fixed |
 | Rover wheel | No radar: no map, no astronaut position, no meteor warning |
 | No meteor warning | The astronaut is caught in the open: 20 oxygen gone and a suit leak |
 | Any leak | Oxygen drains three times faster. Hull and suit together: five times |
+
+## Inside the habitat
+
+The airlock hatch on the dome is a door. Point at it and select, and after a short fade you are standing in the hall inside: workbench island, suit lockers, a ceiling gantry trailing cables, life support in the far corner, and the switchboard on the west wall. It is 12 m by 7 m, bigger than the dome looks from outside, which nobody can see because only one of the two places is ever drawn.
+
+Eight roof lights keep it lit. When the switchboard trips, or the battery runs flat, they flicker and die, the hall is dark for a second and a half, then a relay clunks and six red backup lights come up. From outside, the floodlight goes out and the windows turn dim red (black in a full blackout), which the Technician can see through the rover camera. Seat the cables and the roof lights re-strike row by row, starting at the board. Being inside counts as cover from a meteor shower, and a hull breach is heard from the airlock end of the hall. On a laptop, **L** runs the lighting sequence without waiting for the alarm.
+
+![The hall](docs/astronaut-interior.png)
+
+![On backup lights](docs/astronaut-interior-backup.png)
+
+The timings are `CFG.power` in `client/shared/config.js`. The room is `client/interior.js`.
 
 Oxygen at zero is the only way to lose. Surviving to the end of the clock is the only way to win. The astronaut can fix every fault alone, by looking and by trial and error, so a blackout is never a dead end.
 
@@ -126,7 +165,9 @@ server/game.js      all game logic and what each role may see (no networking, un
 server/hub.js       who is connected, what each role may send, the 1.3 s delay, radio relay
 server/server.js    the laptop web server and WebSocket, drives hub.js
 worker/             the same thing on Cloudflare: a Worker for the pages, a Durable Object for the room
-client/astronaut.*  VR client: movement, grabbing, pointing, crouch, HUD
+client/astronaut.*  VR client: movement, grabbing, pointing, crouch, visor zoom, the airlock
+client/arm.js       the astronaut's left arm and its wrist gauge cluster
+client/interior.js  the hall inside the habitat: geometry, the lighting states, where you can walk
 client/stations.js  the tools, the belt and every repair, each with a grab-it version and a point-at-it version
 client/world.js     the Moon scene and everything that can be seen broken (shared with the rover camera)
 client/console.*    Mission Ops, Technician, Scientist and all-in-one
@@ -137,7 +178,7 @@ client/voice.js     push-to-talk radio with 1960s distortion and Quindar beeps, 
 
 ## What has and has not been tested
 
-![The base: tool locker, airlock canopy, switchboard](docs/astronaut-habitat.png)
+![The base: tool locker and airlock canopy](docs/astronaut-habitat.png)
 
 | | |
 | --- | --- |
@@ -148,7 +189,7 @@ client/voice.js     push-to-talk radio with 1960s distortion and Quindar beeps, 
 
 Everything is procedural, nothing is downloaded: cratered regolith with a generated grain texture and vertex-colour variation, boulder fields from noise-displaced rocks (none inside the play area, so you never walk through one), a Milky Way of 5,000 stars with their own sizes and colours, the sun as a disc and glow along the light direction, and an Earth with continents, drifting clouds, a sunlit atmosphere rim and a phase from the same sun that lights the ground. Filmic tone mapping and an environment map make the gold foil, visors and steel reflect something. The habitat has a ribbed dome, insulated skirt, hatch with porthole, floodlight, radiators and a dish aimed at Earth; the solar array, switchboard, tool locker, rover and a lander with its flag on the horizon follow suit. The scene is about 260k triangles, which is within a Quest 2's budget. It has five lights and nothing in the repairs adds one, because every light costs the headset on every pixel. The look was tuned from desktop screenshots in `docs/`.
 
-Tested two ways. `npm test` checks the rules in plain Node: the belt's weight limit, every repair refused without its tool or from too far away, the battery draining to a blackout and recovering, voice dropped in both directions during a blackout, the radar and the meteor warning lost with the rover wheel, cover, the meteor hit and the leak it starts, the generator, exactly what each seat is sent, the lobby, and the demo mission played well (a win) and not at all (a loss). `npm run smoke` opens Mission Control and the astronaut in headless Chromium against the real three.js r180 build, readies up, and plays the whole demo mission to a clean win the way a laptop player would: stand somewhere, look at the thing, click. Every repair goes through the same raycast as a mouse click, and the socket for each cable is read off the Scientist's wiring diagram on the other page. It needs `npm i -D playwright && npx playwright install chromium` once and leaves screenshots in `test/shots/`. It passes against the laptop server and against the Cloudflare worker (`npm run dev:cf`, then `SMOKE_URL=http://localhost:8787 npm run smoke`).
+Tested two ways. `npm test` checks the rules in plain Node: the belt's weight limit, every repair refused without its tool or from too far away, the battery draining to a blackout and recovering, voice dropped in both directions during a blackout, the radar and the meteor warning lost with the rover wheel, cover, the meteor hit and the leak it starts, the generator, exactly what each seat is sent, the lobby, and the demo mission played well (a win) and not at all (a loss). `npm run smoke` opens Mission Control and the astronaut in headless Chromium against the real three.js r180 build, readies up, and plays the whole demo mission to a clean win the way a laptop player would: stand somewhere, look at the thing, click. Every repair goes through the same raycast as a mouse click, the switchboard is reached through the airlock, and the socket for each cable is read off the Scientist's wiring diagram on the other page. It then drives the hand-tracking gestures by firing the events a pinch fires (zoom in either pinch order, turn, teleport on release), checks the visor scope's extra pass, the wrist gauges with no microphone (icons only, nothing else fixed to the view), the hall's outage lighting, and, in a second browser with a pretend microphone, the radio both ways. It needs `npm i -D playwright && npx playwright install chromium` once `npm run smoke:shots` also saves screenshots in `test/shots/`. It passes against the laptop server and against the Cloudflare worker (`npm run dev:cf`, then `SMOKE_URL=http://localhost:8787 npm run smoke`).
 
 **Not yet seen on a headset:** everything you do with your hands. Grabbing tools off the rack and the belt, sweeping the brush, holding the welder on the crack, pushing plugs into sockets, pulling the wheel, the generator cord, patching your forearm, the hiss in your ears, crouching for cover, where the belt and the HUD sit, and how the scene performs on the Quest's GPU. None of that can be run without a headset, so it has only been read, not played. The distances and sizes to tune first are at the top of `client/stations.js` (`GRAB`, `BELT_R`, `BELT_SLOT`, `WELD_RANGE`, `WELD_DWELL`). If a gesture misbehaves on the day, pointing the right trigger at the thing from within 1.6 m does the same job. Start there, with the Quest plugged in over USB or on the deployed URL. If it stutters, the first things to turn down are in `client/world.js`: the terrain segment count (`SEG`), the boulder counts in the three `scatter` calls, and the shadow map size.
 

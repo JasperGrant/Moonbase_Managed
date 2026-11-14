@@ -247,11 +247,13 @@ function drawMap(s) {
   const cn = PLACES.canopy;
   g.fillStyle = '#3a4a2a'; g.fillRect(X(cn.x0), Y(cn.z0), (cn.x1 - cn.x0) * k, (cn.z1 - cn.z0) * k);
   g.fillStyle = '#c9d6dc'; g.beginPath(); g.arc(X(0), Y(0), CFG.habRadius * k, 0, 7); g.fill();
-  label(g, 'HAB', X(0), Y(0), 12, C.bg);
+  label(g, 'HAB', X(0), Y(0) + 8, 11, C.bg);
   label(g, 'COVER', X(0), Y(cn.z1) + 9, 10, '#9db07a');
   const mark = (p, name, w = 10, h = 10) => { g.fillStyle = C.green; g.fillRect(X(p.x) - w / 2, Y(p.z) - h / 2, w, h); if (name) label(g, name, X(p.x), Y(p.z) - h / 2 - 9, 11); };
   mark(PLACES.locker, 'LOCKER');
-  mark(PLACES.board, 'BOARD');
+  // The switchboard is inside the habitat.
+  g.fillStyle = C.green; g.fillRect(X(0) - 5, Y(-1.5) - 5, 10, 10);
+  label(g, 'BOARD', X(0), Y(0) - CFG.habRadius * k - 9, 11);
   PLACES.panels.forEach((p, i) => mark(p, i === 0 ? 'SOLAR' : '', 6, 22));
   for (const p of [PLACES.depot, PLACES.dish, PLACES.drill]) { g.fillStyle = '#31424d'; g.fillRect(X(p.x) - 4, Y(p.z) - 4, 8, 8); }
 

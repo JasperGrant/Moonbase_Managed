@@ -256,7 +256,7 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
 
   // ---------- rocks ----------
   // Two shapes (jagged, rounded), each displaced by noise, instanced many times.
-  const SITES = [PLACES.locker, PLACES.board, ...PLACES.panels, PLACES.rover, PLACES.depot, PLACES.dish, PLACES.drill, CFG.spawn];
+  const SITES = [PLACES.locker, ...PLACES.panels, PLACES.rover, PLACES.depot, PLACES.dish, PLACES.drill, CFG.spawn];
   const keepClear = (x, z, m) => Math.hypot(x, z) > 4.5 + m && SITES.every(s => Math.hypot(x - s.x, z - s.z) > 2.8 + m);
   function rockGeo(detail, amp, seed) {
     // Icosahedron geometry is unindexed (flat shaded); weld shared vertices first so normals smooth.
@@ -513,13 +513,14 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
 
   // ---------- switchboard: four sockets marked with shapes, four coloured cables ----------
   const CABLE_HEX = { red: 0xe0453a, blue: 0x3f7fe8, yellow: 0xf0cf3a, green: 0x45c463 };
-  const board = fixture(PLACES.board);
+  // It hangs on a wall inside the habitat: the astronaut's page adds this group to the mount that
+  // interior.js provides. It is in no scene until then, so the rover camera never draws it.
+  const board = new THREE.Group();
   const sockets = [], plugs = [], plugRest = [];
   {
-    for (const x of [-0.42, 0.42]) tube(steel, [x, 0, 0], [x, 1.0, 0], 0.035, board);
-    mesh(new THREE.BoxGeometry(1.1, 0.8, 0.16), grey, 0, 1.4, 0, board);
-    mesh(new THREE.BoxGeometry(1.16, 0.06, 0.26), dark, 0, 1.83, 0.03, board); // rain lip, out of habit
-    tube(dark, [0, 0.1, -0.1], [-1.3, 0.1, -1.4], 0.03, board);             // conduit back to the habitat
+    // Lambert, like everything else indoors: the hall is lit by its own three lights.
+    const box = new THREE.Mesh(new THREE.BoxGeometry(1.1, 0.8, 0.16), new THREE.MeshLambertMaterial({ color: 0x6a7078 }));
+    box.position.set(0, 1.4, 0); board.add(box);
     const signTex = canvasTexture(THREE, 512, 128, (d, w, h, g) => {
       g.fillStyle = '#12161b'; g.fillRect(0, 0, w, h);
       SOCKET_SHAPES.forEach((s, i) => drawShape(g, s, 64 + i * 128, 64, 78, '#f4f4f0'));
@@ -528,12 +529,14 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
     sign.position.set(0, 1.62, 0.082); board.add(sign);
     CABLE_COLORS.forEach((color, i) => {
       const x = (i - 1.5) * 0.25;
-      const hole = mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.03, 16), dark, x, 1.38, 0.082, board); hole.rotation.x = Math.PI / 2;
+      const hole = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.03, 16), new THREE.MeshBasicMaterial({ color: 0x0b0d10 }));
+      hole.position.set(x, 1.38, 0.082); hole.rotation.x = Math.PI / 2; board.add(hole);
       sockets.push(new THREE.Vector3(x, 1.38, 0.14));
       plugRest.push(new THREE.Vector3(x, 0.92, 0.2));
       const plug = new THREE.Group();
-      const body = mesh(new THREE.CylinderGeometry(0.04, 0.04, 0.14, 12), new THREE.MeshStandardMaterial({ color: CABLE_HEX[color], roughness: 0.5, emissive: CABLE_HEX[color], emissiveIntensity: 0.35 }), 0, 0, 0, plug);
-      body.rotation.x = Math.PI / 2;
+      // Unlit, so the colours read the same on white light, on red backup light, and in the dark.
+      const body = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 0.14, 12), new THREE.MeshBasicMaterial({ color: CABLE_HEX[color], toneMapped: false }));
+      body.rotation.x = Math.PI / 2; plug.add(body);
       plug.position.copy(sockets[i]);
       plug.userData = { color, index: i, held: false };
       board.add(plug);
@@ -544,7 +547,7 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
       plugs.push(plug);
     });
     const lamp = new THREE.Mesh(new THREE.SphereGeometry(0.06, 12, 8), new THREE.MeshBasicMaterial({ color: 0x2bd45a, toneMapped: false }));
-    lamp.position.set(0.45, 1.93, 0.03); board.add(lamp);
+    lamp.position.set(0.45, 1.88, 0.06); board.add(lamp);
     board.userData.lamp = lamp;
   }
 
@@ -731,10 +734,12 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
     apply(s, time) {
       const blink = Math.floor(time * 4) % 2 === 0;
 
-      // Blackout: the habitat goes dark.
-      hab.userData.flood.intensity = s.dark ? 0 : 25;
-      warmGlow.color.setHex(s.dark ? 0x1a1206 : 0xffc46b);
-      windowGlow.color.setHex(s.dark ? 0x120d05 : 0xffbf6a);
+      // The habitat's own power shows from outside: with the switchboard tripped it is on red backup
+      // lights, and in a blackout there is nothing at all. The floodlight is off in both.
+      const backup = !!s.board && !s.dark;
+      hab.userData.flood.intensity = s.dark || s.board ? 0 : 25;
+      warmGlow.color.setHex(s.dark ? 0x120d05 : backup ? 0x3a0c06 : 0xffc46b);
+      windowGlow.color.setHex(s.dark ? 0x120d05 : backup ? 0x5a1008 : 0xffbf6a);
 
       dustCells.forEach((c, i) => { c.visible = !!s.dust && s.dust[i]; });
 

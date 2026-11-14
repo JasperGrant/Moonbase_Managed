@@ -13,7 +13,7 @@ export const CFG = {
   wrongPlug: 4,               // oxygen lost per cable pushed into the wrong socket
   fixPoints: 100,             // score per fault fixed
 
-  batterySeconds: 45,         // 100% to 0% while a power fault is active
+  batterySeconds: 60,         // 100% to 0% while a power fault is active
   rechargeSeconds: 20,        // 0% to 100% with no power fault
   blackoutEndsAt: 10,         // battery % at which a blackout lifts
   generatorSeconds: 25,       // power from one pull of the backup generator
@@ -42,6 +42,9 @@ export const CFG = {
   // The lobby: every role is picked and ready, then a short countdown starts the mission.
   // requireFullCrew: false lets one developer ready up alone (or run the server with SOLO=1).
   lobby: { requireFullCrew: true, countdownSeconds: 3 },
+  // Power outage inside the habitat: the roof lights die, the room is dark for darkMs, then the red
+  // backup lights ramp up over rampMs. Once fixed, the roof lights re-strike one row every restrikeMs.
+  power: { darkMs: 1500, rampMs: 400, restrikeMs: 120 },
 };
 
 // The four roles that must be filled before a mission starts. "all" (2-player mode) covers the last three.
@@ -78,7 +81,10 @@ export const CRACK_POINTS = 6;
 const CRACK_ANGLES = [45, 135, 195, 255, 285, 345]; // degrees round the dome, between the ribs
 export const PLACES = {
   locker: { x: -3.6, z: 4.6, ry: 0 },
-  board:  { x: 4.2, z: 3.4, ry: 0 },
+  // The switchboard is inside the habitat, on the west wall of the hall (client/interior.js). Indoors,
+  // the server sees the astronaut at the airlock, which is also under the canopy: inside is cover.
+  board:  { x: 0, z: 3 },
+  airlock: { x: 0, z: 3 },
   panels: [{ x: 9, z: 8 }, { x: 9, z: 11 }, { x: 9, z: 14 }],
   canopy: { x0: -1.5, x1: 1.5, z0: 2.6, z1: 5.8 },
   cracks: CRACK_ANGLES.map(deg => { const a = deg * Math.PI / 180; return { a, x: Math.cos(a) * 2.52, z: Math.sin(a) * 2.52 }; }),
