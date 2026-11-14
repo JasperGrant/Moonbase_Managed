@@ -1,4 +1,4 @@
-// Browser smoke test: starts the server, opens Mission Control and the astronaut page in headless
+// Browser smoke test: starts the Node server (or targets SMOKE_URL), opens Mission Control and the astronaut page in headless
 // Chromium with the real three.js build, starts a mission, and checks that the 3D scene renders
 // without errors and that using a panel reaches the server. Screenshots land in test/shots/.
 //
@@ -21,7 +21,9 @@ let chromium;
 try { ({ chromium } = await import('playwright')); }
 catch { console.error('playwright is not installed. Run: npm i -D playwright && npx playwright install chromium'); process.exit(2); }
 
-const server = spawn(process.execPath, ['server/server.js'], { cwd: ROOT, env: { ...process.env, PORT }, stdio: 'ignore' });
+// SMOKE_URL=http://localhost:8787 npm run smoke   tests a server that is already running (wrangler dev)
+const BASE = process.env.SMOKE_URL || `http://localhost:${PORT}`;
+const server = process.env.SMOKE_URL ? null : spawn(process.execPath, ['server/server.js'], { cwd: ROOT, env: { ...process.env, PORT }, stdio: 'ignore' });
 await new Promise(r => setTimeout(r, 800));
 
 const problems = [];
@@ -32,14 +34,14 @@ async function open(name, url) {
   p.on('pageerror', e => problems.push(`${name}: ${e.message}`));
   p.on('console', m => { if (m.type() === 'error') problems.push(`${name}: ${m.text()}`); });
   p.on('response', r => { if (r.status() >= 400) problems.push(`${name}: HTTP ${r.status()} ${r.url()}`); });
-  await p.goto(`http://localhost:${PORT}${url}`);
+  await p.goto(BASE + url);
   return p;
 }
 const shot = (p, name) => p.screenshot({ path: path.join(OUT, name + '.png'), timeout: 120000 });
 
 try {
-  const ctl = await open('console', '/console.html?role=all');
-  const astro = await open('astronaut', '/astronaut.html');
+  const ctl = await open('console', '/control');
+  const astro = await open('astronaut', '/astronaut');
   await astro.waitForTimeout(1000);
   await astro.click('#radioBtn');
   await astro.waitForTimeout(300);
@@ -97,7 +99,7 @@ try {
   problems.push('smoke: ' + e.message);
 } finally {
   await browser.close();
-  server.kill();
+  server?.kill();
 }
 
 if (problems.length) { console.error('SMOKE FAILED\n' + problems.join('\n')); process.exit(1); }

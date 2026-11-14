@@ -1,12 +1,14 @@
 // Mission control. One page serves all three consoles:
-//   /console.html?role=ops | tech | sci | all   ("all" is the 2-player mode)
+//   /ops | /tech | /sci | /control   ("control" is the 2-player mode, all three consoles)
 // The server only sends each role what it is allowed to know, so the panels just draw what arrives.
 import { connect } from '/net.js';
 import { Radio } from '/voice.js';
 import { CFG, VEHICLES, GEAR, STATIONS, ISSUES, ROLES, bearing } from '/shared/config.js';
 import { MANUAL } from '/shared/rules.js';
 
-const asked = new URLSearchParams(location.search).get('role');
+// /console.html?role=ops or the clean URL /ops; /control is the all-in-one seat.
+const PATH_ROLE = { ops: 'ops', tech: 'tech', sci: 'sci', control: 'all', all: 'all' };
+const asked = new URLSearchParams(location.search).get('role') || PATH_ROLE[location.pathname.split('/').pop()];
 const role = ['ops', 'tech', 'sci', 'all'].includes(asked) ? asked : 'all';
 const has = r => role === r || role === 'all';
 const $ = id => document.getElementById(id);

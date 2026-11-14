@@ -2,3 +2,5 @@ node_modules/
 certs/
 .DS_Store
 test/shots/
+dist/
+.wrangler/

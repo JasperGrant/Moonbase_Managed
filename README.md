@@ -18,14 +18,40 @@ npm start
 
 Open `http://localhost:3000` and pick a seat. Mission Ops presses **Start mission** (the standard kit is already loaded, which is the judging mode). A round is 2:30.
 
+Each seat has its own URL, so you can hand them out directly:
+
+| Seat | URL |
+| --- | --- |
+| Astronaut | `/astronaut` |
+| Mission Ops | `/ops` |
+| Technician | `/tech` |
+| Scientist | `/sci` |
+| Mission Control (2-player, all three consoles) | `/control` |
+
 `npm test` runs the game-rule checks.
+
+## Put it on the internet (Cloudflare)
+
+One command deploys it to Cloudflare Workers, which gives you HTTPS for free, so VR and the microphone work on the Quest with no certificate warnings, and nothing to keep warm: the game room wakes in milliseconds when the first player connects.
+
+```
+npx wrangler login
+npm run deploy
+```
+
+The first deploy prints the URL, something like `https://moonbase.<your-account>.workers.dev`. Hand out `<that URL>/astronaut`, `/ops`, `/tech` and `/sci`. Everyone who opens the site is in the same mission, which is what you want for a demo.
+
+How it is put together: `worker/index.js` serves the pages, `worker/room.js` is a Durable Object that holds the one game, and both it and the laptop server drive the same `server/hub.js`, so the rules and the 1.3 s delay cannot drift apart. `npm run build:cf` assembles the static files into `dist/` (the client, `shared/`, and the three files of three.js the client imports). `npm run dev:cf` runs the whole thing locally on `http://localhost:8787`, and `SMOKE_URL=http://localhost:8787 npm run smoke` tests it. The free plan covers this; the room is declared as a SQLite-backed object because that is the kind the free plan allows.
+
+The Quest-over-USB path still needs the laptop server (`npm start`), because that one answers on `localhost`.
 
 ## Getting the Quest connected
 
 VR and the microphone only work on `localhost` or over HTTPS. Pick one:
 
-1. **USB cable (simplest).** Run the server on the Mission Ops laptop, plug the Quest in, and run `adb reverse tcp:3000 tcp:3000`. In the Quest browser open `http://localhost:3000/astronaut.html`. Technician and Scientist laptops can use the plain `http://<ops-laptop-ip>:3000` address, because they need neither VR nor a mic.
+1. **USB cable (simplest).** Run the server on the Mission Ops laptop, plug the Quest in, and run `adb reverse tcp:3000 tcp:3000`. In the Quest browser open `http://localhost:3000/astronaut`. Technician and Scientist laptops can use the plain `http://<ops-laptop-ip>:3000` address, because they need neither VR nor a mic.
 2. **HTTPS on the Wi-Fi.** Run `npm run cert` once (needs `openssl`), restart, and open `https://<ip>:3000` on every device. Accept the certificate warning once per device.
+3. **Deployed.** Put it on Cloudflare (see "Put it on the internet" above) and open the public `/astronaut` URL in the headset. No cables, no certificate warnings.
 
 If the venue Wi-Fi blocks devices from seeing each other, use a phone hotspot.
 
@@ -58,7 +84,9 @@ A wrong action costs 8 oxygen. An alarm that times out costs 15. Oxygen at zero 
 shared/config.js    every number: round length, delay, penalties, station positions, gear
 shared/rules.js     puzzle rules and the Scientist's manual text
 server/game.js      all game logic and what each role may see (no networking, unit-tested)
-server/server.js    web server, WebSocket, the 1.3 s delay, radio relay
+server/hub.js       who is connected, what each role may send, the 1.3 s delay, radio relay
+server/server.js    the laptop web server and WebSocket, drives hub.js
+worker/             the same thing on Cloudflare: a Worker for the pages, a Durable Object for the room
 client/astronaut.*  VR client: movement, pointing, HUD
 client/stations.js  the four panels the astronaut works at
 client/world.js     the Moon scene (shared with the rover camera)
@@ -66,7 +94,7 @@ client/console.*    Mission Ops, Technician, Scientist and all-in-one
 client/voice.js     push-to-talk radio with 1960s distortion and Quindar beeps
 ```
 
-Suggested split: A takes `astronaut.js`, `world.js` and the art. B takes `server/` and new minigames. C takes `console.*`. D takes `rules.js`, the manual, audio, pitch and video.
+Suggested split: A takes `astronaut.js`, `world.js` and the art. B takes `server/`, `worker/` and new minigames. C takes `console.*`. D takes `rules.js`, the manual, audio, pitch and video.
 
 **Adding a minigame** takes three edits: data and checks in `server/game.js` (`makeData`, `act`, `view`), a panel in `client/stations.js`, and a rule in `shared/rules.js`. Not built yet from the list: solar array circuits, docking ring maze.
 

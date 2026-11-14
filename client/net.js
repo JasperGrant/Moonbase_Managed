@@ -5,7 +5,7 @@ export function connect(role) {
   function send(obj) { if (ws && ws.readyState === 1) ws.send(JSON.stringify(obj)); }
   function sendBin(buf) { if (ws && ws.readyState === 1) ws.send(buf); }
   function open() {
-    ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}`);
+    ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`);
     ws.binaryType = 'arraybuffer';
     ws.onopen = () => { lastN = 0; api.open = true; send({ t: 'hello', role }); };
     ws.onclose = () => { api.open = false; setTimeout(open, 1000); };
