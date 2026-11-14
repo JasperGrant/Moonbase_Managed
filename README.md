@@ -45,7 +45,7 @@ Connect the repo once and every push to `main` deploys itself. Cloudflare gives 
 
 1. Cloudflare dashboard, **Workers & Pages**, **Create**, **Import a repository**, pick this repo.
 2. Leave the build command empty and the deploy command as `npx wrangler deploy`. Deploy.
-3. The dashboard shows the URL, like `https://moonbase-manager.<your-account>.workers.dev`. Hand out `<that URL>/astronaut`, `/ops`, `/tech` and `/sci`.
+3. The dashboard shows the URL, like `https://moonbase-manager.<your-account>.workers.dev`. Hand out `<that URL>/astronaut`, `/ops`, `/tech` and `/sci`. The live deployment is at **https://moonbasemanagedfrom.earth** (a custom domain on the same Worker): seats are `/astronaut`, `/ops`, `/tech`, `/sci`, `/control` for two players, and `/admin` for the referee.
 
 There is no build step because everything the pages need is committed under `client/`, three.js included. Everyone who opens the site is in the same mission, which is what you want for a demo. The free plan covers this; the room is declared as a SQLite-backed Durable Object because that is the kind the free plan allows. `npm run deploy` does the same from a laptop after `npx wrangler login`.
 
