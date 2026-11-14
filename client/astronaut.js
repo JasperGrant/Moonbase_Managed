@@ -37,7 +37,7 @@ scene.add(rig);
 const world = buildWorld(THREE, scene);
 const panels = buildPanels(THREE, world, (id, a) => net.send({ t: 'act', id, a }), k => radio.sfx(k));
 
-const lamp = new THREE.SpotLight(0xffffff, 40, 16, 0.6, 0.5);
+const lamp = new THREE.SpotLight(0xffffff, 14, 16, 0.65, 0.6); // candela; 40 blew out panels at arm's length
 lamp.target.position.set(0, -0.15, -1);
 camera.add(lamp, lamp.target);
 lamp.visible = false;
@@ -108,10 +108,16 @@ const keys = {};
 addEventListener('keydown', e => { keys[e.key.toLowerCase()] = true; if (e.key === ' ') e.preventDefault(); });
 addEventListener('keyup', e => { keys[e.key.toLowerCase()] = false; });
 addEventListener('blur', () => { for (const k in keys) keys[k] = false; });
+// Chrome reports one huge movementX/Y on the first event after the pointer locks (the cursor
+// snapping to the centre), which used to leave the camera staring at the sky. Clamp it away.
+let lockedAt = 0, skipNext = false;
+document.addEventListener('pointerlockchange', () => { lockedAt = performance.now(); skipNext = true; });
 addEventListener('mousemove', e => {
   if (document.pointerLockElement !== renderer.domElement) return;
-  rig.rotation.y -= e.movementX * 0.0022;
-  camera.rotation.x = Math.max(-1.4, Math.min(1.4, camera.rotation.x - e.movementY * 0.0022));
+  if (skipNext || performance.now() - lockedAt < 100) { skipNext = false; return; }
+  const dx = Math.max(-60, Math.min(60, e.movementX)), dy = Math.max(-60, Math.min(60, e.movementY));
+  rig.rotation.y -= dx * 0.0022;
+  camera.rotation.x = Math.max(-1.4, Math.min(1.4, camera.rotation.x - dy * 0.0022));
 });
 renderer.domElement.addEventListener('click', () => {
   if (mode !== 'desk') return;
@@ -241,7 +247,7 @@ renderer.setAnimationLoop(() => {
 });
 
 // For debugging from the browser console: moonbase.state(), moonbase.panels.targets() ...
-window.moonbase = { state: () => state, panels, world, radio, rig, camera, net };
+window.moonbase = { state: () => state, panels, world, radio, rig, camera, net, use: () => use(null) };
 
 // ---------- start-up screen ----------
 const $ = id => document.getElementById(id);

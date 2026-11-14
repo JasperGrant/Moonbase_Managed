@@ -72,9 +72,13 @@ Suggested split: A takes `astronaut.js`, `world.js` and the art. B takes `server
 
 ## What has and has not been tested
 
-Tested in a headless browser with all five pages open: lobby and loadout, a full round with every alarm type solved through the astronaut's panels, the delayed voice link in both directions, rover driving, results, and "Fly again".
+![The astronaut at the fuel depot](docs/astronaut-fuel-depot.png)
 
-**Not yet seen on a real screen or headset:** the 3D scene itself. It was written against three.js r180 but the test machine had no copy of three.js, so the look, the lighting and the VR controls need a first pass on real hardware. Start there.
+Tested in headless Chromium against the real three.js r180 build: lobby and loadout, a full round with every alarm type solved through the astronaut's panels, the delayed voice link in both directions, rover driving, results, "Fly again", and the 3D scene itself: it loads with no errors, every station, the rover and the Technician's rover camera render, and clicking a wire on the fuel depot panel reaches the server through the raycaster. `npm run smoke` repeats the scene check (it needs `npm i -D playwright && npx playwright install chromium` once) and leaves screenshots in `test/shots/`. More screenshots in `docs/`.
+
+Fixed on that first pass: the camera could end up staring at the sky the moment the pointer locked (Chrome's first mouse event after a lock carries a huge jump), the drill tripod legs splayed outward, the helmet lamp and rover headlight blew out to pure white at arm's length, and Earth was a flat unlit disc.
+
+**Not yet seen on a headset:** the VR controls, hand pointing and HUD placement were written to the WebXR API but have only run on a desktop screen. Start there, with the Quest plugged in over USB.
 
 ## Science notes for the pitch
 

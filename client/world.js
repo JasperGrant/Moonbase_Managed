@@ -34,10 +34,11 @@ export function buildWorld(THREE, scene, { shadows = true } = {}) {
   scene.add(new THREE.Points(starGeo, new THREE.PointsMaterial({ color: 0xffffff, size: 1.6, sizeAttenuation: false })));
 
   // Earth, low over the northern horizon
-  const earth = new THREE.Mesh(new THREE.SphereGeometry(26, 32, 16), new THREE.MeshBasicMaterial({ color: 0x3f79d8 }));
+  // Lit by the same sun as the ground, so it shows a phase instead of a flat disc.
+  const earth = new THREE.Mesh(new THREE.SphereGeometry(26, 32, 16), new THREE.MeshLambertMaterial({ color: 0x4d86e0, emissive: 0x0a1630 }));
   earth.position.set(140, 70, -640);
   scene.add(earth);
-  const haze = new THREE.Mesh(new THREE.SphereGeometry(27.5, 32, 16), new THREE.MeshBasicMaterial({ color: 0x9cc4ff, transparent: true, opacity: 0.25 }));
+  const haze = new THREE.Mesh(new THREE.SphereGeometry(27.5, 32, 16), new THREE.MeshBasicMaterial({ color: 0x9cc4ff, transparent: true, opacity: 0.18, side: THREE.BackSide }));
   haze.position.copy(earth.position);
   scene.add(haze);
 
@@ -126,7 +127,7 @@ export function buildWorld(THREE, scene, { shadows = true } = {}) {
   for (let i = 0; i < 3; i++) {
     const a = (i / 3) * Math.PI * 2;
     const leg = mesh(new THREE.CylinderGeometry(0.05, 0.05, 4.2, 6), grey, Math.sin(a) * 0.6, 2, -1.8 + Math.cos(a) * 0.6, stations.drill);
-    leg.rotation.set(Math.cos(a) * 0.3, 0, -Math.sin(a) * 0.3);
+    leg.rotation.set(-Math.cos(a) * 0.3, 0, Math.sin(a) * 0.3); // lean in, so the tops meet above the drill
   }
   mesh(new THREE.CylinderGeometry(0.09, 0.09, 3, 8), gold, 0, 1.5, -1.8, stations.drill);
   // Airlock terminal: a pedestal
@@ -149,7 +150,7 @@ export function buildWorld(THREE, scene, { shadows = true } = {}) {
     h.position.set(x, 0.8, 1.22);
     rover.add(h);
   }
-  const head = new THREE.SpotLight(0xffffff, 60, 18, 0.55, 0.6);
+  const head = new THREE.SpotLight(0xffffff, 30, 18, 0.55, 0.6);
   head.position.set(0, 1, 1.2);
   head.target.position.set(0, 0.2, 6);
   rover.add(head, head.target);
