@@ -8,6 +8,7 @@ import { buildPanels } from '/stations.js';
 import { buildInterior, ROOM } from '/interior.js';
 import { CFG, CREW, ROLES, covers } from '/shared/config.js';
 import { seatTaken } from '/seat.js';
+import { buildArm } from '/arm.js';
 import { createLobby } from '/lobby.js';
 
 const REACH = 3.2;        // metres: how far away a panel can be used
@@ -17,7 +18,7 @@ const GRAVITY = 1.62;     // m/s^2, lunar
 const net = connect('astronaut');
 const radio = new Radio(net);
 let state = null, lastEv = 0, rx = false, talking = false, mode = null; // mode: 'vr' | 'desk'
-let prompt = '', promptUntil = 0, runStart = 0, lastPhase = '';
+let flash = '', flashUntil = 0, lastPhase = ''; // flash: 'ok' or 'bad', shown on the gauges for a few seconds
 
 // ---------- scene ----------
 const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -82,59 +83,30 @@ addEventListener('resize', () => {
   renderer.setSize(innerWidth, innerHeight);
 });
 
-// ---------- heads-up display (a strip locked to the bottom of your view) ----------
-const hudCanvas = document.createElement('canvas');
-hudCanvas.width = 1024; hudCanvas.height = 160;
-const hud = hudCanvas.getContext('2d');
-const hudTex = new THREE.CanvasTexture(hudCanvas);
-hudTex.colorSpace = THREE.SRGBColorSpace;
-const hudMesh = new THREE.Mesh(new THREE.PlaneGeometry(1.15, 0.18), new THREE.MeshBasicMaterial({ map: hudTex, transparent: true, depthTest: false, toneMapped: false }));
-hudMesh.position.set(0, -0.4, -1.3);
-hudMesh.renderOrder = 10;
-camera.add(hudMesh);
-let hudKey = '';
+// ---------- wrist gauges ----------
+// Nothing is drawn on the visor. Oxygen, the mission clock, the radio, the alarms and the zoom
+// level all live, as icons, on a gauge cluster on the left forearm, and the arm comes up in front
+// of the face only while the radio is keyed (see client/arm.js).
+const arm = buildArm(THREE);
+camera.add(arm.group);
+// Keying the radio and raising the arm are one action: Tab on a laptop, the left trigger on a
+// controller, the left hand to the helmet with bare hands.
+let keyed = false; // the talk control is held, whether or not there is a microphone
 
-function drawHud(now) {
+// What the clock dial shows instead of its hourglass: a tick or a cross for the mission's outcome or
+// for the thing that just happened, and a dark hourglass while waiting in the lobby.
+function status(now) {
   const s = state;
-  let line = now < promptUntil ? prompt : '';
-  if (!s) line = 'Connecting to the base...';
-  else if (s.phase === 'lobby') line = (iAmReady() ? 'You are GO. ' : (mode !== 'vr' ? 'Click' : usingHands() ? 'Point and pinch' : 'Point and pull the RIGHT TRIGGER') + ' on the READY board when you are set. ')
-    + 'Radio check: ' + (mode !== 'vr' ? 'hold T' : usingHands() ? 'left hand to helmet' : 'hold LEFT TRIGGER') + ' and say hello.';
-  else if (s.phase === 'results') line = (s.result.won ? 'MISSION COMPLETE' : 'MISSION FAILED') + `   Score ${s.score}.   ${s.result.reason}`;
-  else if (!line && now - runStart < 14) line = mode !== 'vr' ? 'Hold T to talk to Mission Ops.  Click to use a panel.  WASD to walk.'
-    : usingHands() ? 'Left hand to helmet = talk.  Point + pinch = use a panel.  Pinch the ground = teleport.' : 'Hold LEFT TRIGGER to talk to Mission Ops.  Point + RIGHT TRIGGER to use a panel.';
-  else if (!line && where === 'out' && s.issues.some(i => i.type === 'power')) line = 'Habitat lights are out. Go inside through the airlock.';
-  else if (!line && s.issues.length) line = `${s.issues.length} alarm${s.issues.length > 1 ? 's' : ''} active. Ask Mission Ops where to go.`;
-  const radioTxt = talking ? 'TX' : rx ? 'RX' : '';
-  const key = [line, radioTxt, s && Math.ceil(s.timeLeft), s && Math.round(s.oxygen)].join('|');
-  if (key === hudKey) return;
-  hudKey = key;
-  const W = hudCanvas.width, H = hudCanvas.height;
-  hud.clearRect(0, 0, W, H);
-  hud.fillStyle = 'rgba(4,10,8,0.72)'; hud.fillRect(0, 0, W, H);
-  hud.textBaseline = 'middle';
-  if (s) {
-    const frac = Math.max(0, Math.min(1, s.oxygen / s.o2Max)), low = s.oxygen < 25;
-    hud.font = 'bold 30px monospace'; hud.textAlign = 'left';
-    hud.fillStyle = '#7d909c'; hud.fillText('O2', 20, 40);
-    hud.strokeStyle = '#7d909c'; hud.lineWidth = 3; hud.strokeRect(74, 22, 300, 36);
-    hud.fillStyle = low ? '#ff5c5c' : '#58e08a'; hud.fillRect(78, 26, 292 * frac, 28);
-    hud.fillStyle = '#fff'; hud.fillText(String(Math.round(s.oxygen)), 388, 40);
-    const t = Math.max(0, Math.ceil(s.timeLeft));
-    hud.textAlign = 'right'; hud.fillText(`${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`, W - 20, 40);
-  }
-  if (radioTxt) {
-    hud.fillStyle = talking ? '#ff5c5c' : '#6fb6ff';
-    hud.textAlign = 'center'; hud.font = 'bold 30px monospace';
-    hud.fillText(talking ? 'TRANSMITTING' : 'MISSION OPS ON RADIO', W / 2 + 60, 40);
-  }
-  hud.fillStyle = '#ffe9a8'; hud.textAlign = 'center';
-  let size = 34; hud.font = `bold ${size}px monospace`;
-  while (hud.measureText(line).width > W - 30 && size > 16) hud.font = `bold ${--size}px monospace`;
-  hud.fillText(line, W / 2, 112);
-  hudTex.needsUpdate = true;
+  if (!s || s.phase === 'lobby') return 'standby';
+  if (s.phase === 'results') return s.result.won ? 'won' : 'lost';
+  return now < flashUntil ? flash : '';
 }
-function say(text, seconds = 6) { prompt = text; promptUntil = performance.now() / 1000 + seconds; }
+const radioState = () => talking ? 'tx' : rx ? 'rx' : keyed && !radio.micOk ? 'nomic' : '';
+function drawGauges(now) {
+  arm.draw({ state, status: status(now), zoom: scopeOn() ? zoom : 1, total: CFG.roundSeconds, radio: radioState() });
+  arm.signal(radioState(), now);
+}
+function show(what, seconds) { flash = what; flashUntil = performance.now() / 1000 + seconds; }
 
 // ---------- the READY board: how the astronaut readies up, from inside the headset ----------
 // It stands just in front of the spawn point while the crew is in the lobby, so the mission can
@@ -145,7 +117,7 @@ const board2d = boardCanvas.getContext('2d');
 const boardTex = new THREE.CanvasTexture(boardCanvas);
 boardTex.colorSpace = THREE.SRGBColorSpace;
 const board = new THREE.Mesh(new THREE.PlaneGeometry(1.0, 0.625), new THREE.MeshBasicMaterial({ map: boardTex, toneMapped: false }));
-board.position.set(CFG.spawn.x, 1.65, CFG.spawn.z - 1.7); // eye height, clear of the HUD strip
+board.position.set(CFG.spawn.x, 1.65, CFG.spawn.z - 1.7); // eye height
 scene.add(board);
 let boardKey = '';
 const iAmReady = () => !!state && (state.ready || []).includes('astronaut');
@@ -190,7 +162,13 @@ net.onMsg = m => { if (m.t === 'ptt') { rx = m.on; radio.rxMarker(m.on); } };
 // ---------- controls ----------
 const keys = {};
 let debugOutage = false; // laptop only: L runs the power-outage lighting without a server alarm
-addEventListener('keydown', e => { keys[e.key.toLowerCase()] = true; if (e.key === ' ') e.preventDefault(); if (e.key.toLowerCase() === 'l' && mode === 'desk' && !e.repeat) debugOutage = !debugOutage; });
+addEventListener('keydown', e => {
+  keys[e.key.toLowerCase()] = true;
+  // Space would scroll the page. Tab is the radio key once you are playing, so it must not move the
+  // keyboard focus; on the start screen it is left alone, to step between the buttons as usual.
+  if (e.key === ' ' || (e.key === 'Tab' && mode === 'desk')) e.preventDefault();
+  if (e.key.toLowerCase() === 'l' && mode === 'desk' && !e.repeat) debugOutage = !debugOutage;
+});
 addEventListener('keyup', e => { keys[e.key.toLowerCase()] = false; });
 addEventListener('blur', () => { for (const k in keys) keys[k] = false; });
 // Chrome reports one huge movementX/Y on the first event after the pointer locks (the cursor
@@ -207,7 +185,7 @@ addEventListener('mousemove', e => {
 renderer.domElement.addEventListener('click', () => {
   if (mode !== 'desk') return;
   if (document.pointerLockElement !== renderer.domElement) lockPointer();
-  else if (!useBoard(null) && !useHatch(null)) use(null);
+  else useAny(null);
 });
 
 function lockPointer() { try { renderer.domElement.requestPointerLock()?.catch?.(() => {}); } catch {} }
@@ -245,17 +223,24 @@ function use(controller) {
   if (hit) panels.click(hit.object);
   return !!hit;
 }
+// Use whatever is being pointed at: the READY board, the airlock hatch, or a panel.
+const useAny = controller => useBoard(controller) || useHatch(controller) || use(controller);
 
 // ---------- hands and controllers ----------
 // Controllers: right trigger uses, left trigger talks, sticks walk and turn, A hops.
 // Hand tracking (put the controllers down): point the right hand and pinch to use a panel,
 // pinch at the ground to teleport there, pinch the left hand and drag it sideways to turn,
-// and hold the left hand up to your helmet to talk.
+// hold the left hand up to your helmet to talk, and pinch both hands and pull them apart to
+// zoom the visor (push them together to zoom back out).
 const TELEPORT_MAX = 8;   // metres per hop
 const TURN_STEP = 0.1;    // metres of left-hand drag per 30-degree snap turn
 const HELMET = 0.22;      // metres from the head that counts as "hand on helmet"
+const ZOOM_MAX = 6;       // visor magnification with the hands pulled wide apart
+const ZOOM_OFF = 1.15;    // let go below this and the visor scope closes
+const GAP_MIN = 0.1;      // metres: hands closer than this count as this far apart, so a pinch
+                          // that starts with the fingers touching does not jump to full zoom
 const ground = new THREE.Plane(UP, 0);
-const hitPoint = new THREE.Vector3(), tmpV = new THREE.Vector3();
+const hitPoint = new THREE.Vector3(), tmpV = new THREE.Vector3(), gapA = new THREE.Vector3(), gapB = new THREE.Vector3();
 const marker = new THREE.Mesh(new THREE.RingGeometry(0.22, 0.3, 32), new THREE.MeshBasicMaterial({ color: 0x58e08a, transparent: true, opacity: 0.8, side: THREE.DoubleSide, depthWrite: false, toneMapped: false }));
 marker.rotation.x = -Math.PI / 2; marker.visible = false;
 scene.add(marker);
@@ -284,7 +269,21 @@ const controllers = [], hands = [];
 const jointGeo = new THREE.SphereGeometry(0.009, 8, 6);
 const jointMat = new THREE.MeshStandardMaterial({ color: 0xe9e7e1, roughness: 0.6 });
 let leftDrag = null, helmetTalk = false; // leftDrag = { x } while the left hand is pinched
+let zoomGrab = null;                     // { gap, zoom } at the moment both hands pinched
 const usingHands = () => controllers.some(c => c.userData.isHand);
+
+// Where a hand is pinching: between thumb tip and index tip, or the hand itself if the joints are not tracked.
+function pinchPoint(i, out) {
+  const j = hands[i].joints, a = j?.['thumb-tip'], b = j?.['index-finger-tip'];
+  if (a && b && a.visible && b.visible) return out.addVectors(a.getWorldPosition(out), b.getWorldPosition(tmpV)).multiplyScalar(0.5);
+  return controllers[i].getWorldPosition(out);
+}
+const handGap = () => Math.max(GAP_MIN, pinchPoint(0, gapA).distanceTo(pinchPoint(1, gapB)));
+function endZoomGrab() {
+  if (!zoomGrab) return;
+  zoomGrab = null;
+  if (zoom < ZOOM_OFF) zoom = 1;
+}
 
 for (const i of [0, 1]) {
   const c = renderer.xr.getController(i);
@@ -297,14 +296,33 @@ for (const i of [0, 1]) {
       c.add(c.userData.ray);
     }
   });
-  c.addEventListener('disconnected', () => { c.userData.isHand = false; marker.visible = false; leftDrag = null; });
+  c.addEventListener('disconnected', () => {
+    c.userData.isHand = c.userData.pinched = c.userData.zoomed = false;
+    marker.visible = false; leftDrag = null; endZoomGrab();
+  });
   // Trigger on a controller, pinch on a bare hand: both arrive as "select".
   c.addEventListener('selectstart', () => {
+    const other = controllers[1 - i];
+    c.userData.pinched = true;
+    // Both bare hands pinched: this is a zoom, not a turn, a teleport or a panel press.
+    if (c.userData.isHand && other.userData.isHand && other.userData.pinched) {
+      c.userData.zoomed = other.userData.zoomed = true;
+      leftDrag = null;
+      zoomGrab = { gap: handGap(), zoom };
+      return;
+    }
     if (c.userData.hand === 'left') { if (c.userData.isHand) leftDrag = { x: lateral(c) }; return; }
-    if (useBoard(c) || useHatch(c) || use(c)) return;
-    if (c.userData.isHand && groundTarget(c, hitPoint)) teleport(hitPoint);
+    if (!c.userData.isHand) useAny(c); // a bare hand acts when the pinch lets go, see below
   });
-  c.addEventListener('selectend', () => { if (c.userData.hand === 'left') leftDrag = null; });
+  c.addEventListener('selectend', () => {
+    const wasZoom = c.userData.zoomed, act = c.userData.pinched && !wasZoom;
+    c.userData.pinched = c.userData.zoomed = false;
+    endZoomGrab();
+    if (c.userData.hand === 'left') { leftDrag = null; return; }
+    // A bare right hand uses the board, hatch or panel, or teleports, on release, not on pinch, so that the first
+    // hand of a two-handed zoom does not fire on its way in. The ring shows where you will land.
+    if (c.userData.isHand && act && !useAny(c) && groundTarget(c, hitPoint)) teleport(hitPoint);
+  });
   rig.add(c);
   controllers.push(c);
 
@@ -324,6 +342,7 @@ function drawHand(h) {
 
 // Everything hand tracking adds per frame. Sets ptt and the teleport marker.
 function handControls(ptt) {
+  if (zoomGrab) zoom = Math.max(1, Math.min(ZOOM_MAX, zoomGrab.zoom * handGap() / zoomGrab.gap));
   for (let i = 0; i < 2; i++) {
     const c = controllers[i];
     if (!c.userData.isHand) continue;
@@ -338,7 +357,7 @@ function handControls(ptt) {
         if (Math.abs(dx) > TURN_STEP) { turnRig(-Math.sign(dx) * Math.PI / 6); leftDrag.x = x; }
       }
     } else {
-      const p = !panelInReach(c) && groundTarget(c, hitPoint);
+      const p = !zoomGrab && !panelInReach(c) && groundTarget(c, hitPoint);
       marker.visible = !!p;
       if (p) marker.position.set(p.x, 0.02, p.z);
     }
@@ -351,6 +370,69 @@ function turnRig(angle) { // turn on the spot, around where the head is
   rig.position.sub(headPos).applyAxisAngle(UP, angle).add(headPos);
   rig.rotation.y += angle;
 }
+
+// ---------- visor zoom ----------
+// A round scope in the middle of the view showing the scene through a narrow lens. A headset
+// will not let a page change the field of view of the eyes themselves, so the magnified picture
+// is drawn into a texture from the head's position and shown on a disc fixed to the visor.
+// The disc's lens is sized so that things in it look exactly `zoom` times bigger.
+const SCOPE_R = 0.3, SCOPE_D = 1.3; // disc radius and distance from the eyes, metres
+let zoom = 1;
+const scopeOn = () => zoom > 1.01 || !!zoomGrab;
+const scopeRT = new THREE.WebGLRenderTarget(1024, 1024);
+// Marking the target as a display target makes three.js draw into it exactly as it draws to the
+// screen or headset (tone mapped, sRGB), so the disc below can copy its pixels through unchanged
+// and panel screens look the same in the scope as outside it. No multisampling: with this mark
+// three.js gives the multisample buffer a different format from the texture and the copy between
+// them fails, leaving the scope black. 1024 pixels across a 26-degree disc is already finer than
+// the headset's own pixels, which does the smoothing instead.
+scopeRT.isXRRenderTarget = true;
+scopeRT.texture.colorSpace = THREE.SRGBColorSpace;
+const scopeCam = new THREE.PerspectiveCamera(20, 1, 0.1, 2000);
+const scopeMesh = new THREE.Mesh(new THREE.PlaneGeometry(SCOPE_R * 2, SCOPE_R * 2), new THREE.ShaderMaterial({
+  uniforms: { map: { value: scopeRT.texture } },
+  vertexShader: 'varying vec2 vUv; void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+  fragmentShader: `uniform sampler2D map; varying vec2 vUv;
+    void main() {
+      float r = length(vUv - 0.5) * 2.0;
+      if (r > 1.0) discard;
+      vec3 c = texture2D(map, vUv).rgb;
+      c = mix(c, vec3(0.345, 0.878, 0.541), smoothstep(0.95, 0.96, r)); // green rim
+      gl_FragColor = vec4(c, 1.0);
+    }`,
+  // Drawn after the world and over it whatever is in the way, but leaving its own depth behind,
+  // so that the arm (drawn next, and nearer) covers the scope when it comes up.
+  depthFunc: THREE.AlwaysDepth,
+}));
+scopeMesh.position.set(0, 0.03, -SCOPE_D);
+scopeMesh.renderOrder = 9;
+scopeMesh.visible = false;
+camera.add(scopeMesh);
+
+function renderScope() {
+  scopeMesh.visible = scopeOn();
+  if (!scopeMesh.visible) return;
+  rig.updateMatrixWorld(true);                                    // wherever this frame's walking and turning left the rig
+  if (renderer.xr.isPresenting) renderer.xr.updateCamera(camera); // and this frame's head pose, not the last one's
+  camera.matrixWorld.decompose(scopeCam.position, scopeCam.quaternion, tmpV);
+  scopeCam.fov = THREE.MathUtils.radToDeg(2 * Math.atan(SCOPE_R / (SCOPE_D * zoom)));
+  scopeCam.updateProjectionMatrix();
+  // Draw the scene once more into the scope's texture. The headset path and the shadow pass are
+  // switched off for this one draw (the main draw redoes the shadows anyway) and put back after.
+  const target = renderer.getRenderTarget(), xr = renderer.xr.enabled, shadows = renderer.shadowMap.autoUpdate, armWas = arm.group.visible;
+  scopeMesh.visible = arm.group.visible = false;
+  renderer.xr.enabled = false;
+  renderer.shadowMap.autoUpdate = false;
+  renderer.setRenderTarget(scopeRT);
+  renderer.clear();
+  renderer.render(scene, scopeCam);
+  scopeMesh.userData.drawCalls = renderer.info.render.calls; // for the smoke test: the scope pass drew the scene
+  renderer.setRenderTarget(target);
+  renderer.shadowMap.autoUpdate = shadows;
+  renderer.xr.enabled = xr;
+  scopeMesh.visible = true; arm.group.visible = armWas;
+}
+function setZoom(z) { zoom = Math.max(1, Math.min(ZOOM_MAX, +z || 1)); }
 
 // ---------- the airlock: moving between the surface and the hall ----------
 const FADE = 0.15; // seconds each way
@@ -380,7 +462,7 @@ function passageStep(dt) {
 
 let vy = 0, turnArmed = true, lastPose = 0;
 function control(dt, now) {
-  let mx = 0, mz = 0, jump = false, ptt = !!keys.t;
+  let mx = 0, mz = 0, jump = false, ptt = mode === 'desk' && !!keys.tab;
   const session = renderer.xr.getSession();
   camera.getWorldPosition(headPos);
   camera.getWorldDirection(fwd); fwd.y = 0; fwd.normalize();
@@ -426,6 +508,7 @@ function control(dt, now) {
   } else if (d > CFG.bounds - 1) { const k = (CFG.bounds - 1) / d; rig.position.x += headPos.x * (k - 1); rig.position.z += headPos.z * (k - 1); }
   if (where === 'out' && d < CFG.habRadius && d > 0.01) { const k = CFG.habRadius / d; rig.position.x += headPos.x * (k - 1); rig.position.z += headPos.z * (k - 1); }
 
+  keyed = ptt;
   if (ptt !== talking && radio.micOk) { talking = ptt; radio.setTalking(ptt); }
 
   if (now - lastPose > 0.1) { lastPose = now; // Indoors, the Technician's map shows the astronaut at the airlock.
@@ -433,14 +516,18 @@ function control(dt, now) {
 }
 
 // ---------- main loop ----------
+// A picture of the view as just drawn, as a PNG data URL, for the smoke test's optional screenshots.
+let snapWaiting = null;
+const snap = () => new Promise(resolve => { snapWaiting = resolve; });
 let lastFrame = performance.now() / 1000;
+let armFrame = lastFrame;
 renderer.setAnimationLoop(() => {
   const now = performance.now() / 1000, dt = Math.min(0.05, now - lastFrame);
   lastFrame = now;
   const s = state;
   if (s) {
     if (s.phase !== lastPhase) {
-      if (s.phase === 'run') { runStart = now; promptUntil = 0; passage = null; shade.visible = false; if (where === 'in') place('out'); rig.position.set(CFG.spawn.x, 0, CFG.spawn.z); }
+      if (s.phase === 'run') { flashUntil = 0; passage = null; shade.visible = false; if (where === 'in') place('out'); rig.position.set(CFG.spawn.x, 0, CFG.spawn.z); }
       lastPhase = s.phase;
     }
     if (s.ev && s.ev.n !== lastEv) {
@@ -448,10 +535,8 @@ renderer.setAnimationLoop(() => {
       const k = s.ev.kind;
       radio.sfx(k);
       // The astronaut is never told what or where: that is mission control's job.
-      if (k === 'spawn') say('ALARM! Something broke. Ask Mission Ops what and where.');
-      if (k === 'solve') say(`FIXED!  +${s.ev.pts} points`, 4);
-      if (k === 'mistake') say(s.ev.text + (s.ev.o2 ? `  (${s.ev.o2} oxygen)` : ''));
-      if (k === 'miss') say(`Too late: an alarm timed out.  (${s.ev.o2} oxygen)`);
+      if (k === 'solve') show('ok', 4);
+      if (k === 'mistake' || k === 'miss') show('bad', 5);
     }
     panels.sync(s.phase === 'run' ? s.issues : [], now);
     world.update(now, s.issues.map(i => i.type));
@@ -464,16 +549,21 @@ renderer.setAnimationLoop(() => {
   interior.update(dt, now);
   radio.room(where === 'in' ? (interior.dark ? 0.15 : 1) : 0);
   passageStep(dt);
-  if (mode) control(dt, now);
+  if (mode) control(dt, now); else keyed = false;
   panels.update(dt);
   drawBoard();
-  drawHud(now);
+  arm.update(Math.min(0.25, now - armFrame), keyed); // real time, so the arm is as quick on a slow machine
+  armFrame = now;
+  if (arm.raise > 0) drawGauges(now);
+  renderScope();
   renderer.render(scene, camera);
+  if (snapWaiting) { snapWaiting(renderer.domElement.toDataURL('image/png')); snapWaiting = null; } // must follow the draw in the same frame
 });
 
 // For debugging from the browser console: moonbase.state(), moonbase.panels.targets() ...
 window.moonbase = { state: () => state, panels, world, interior, radio, rig, camera, net, board, use: () => use(null), useBoard: () => useBoard(null), useHatch: () => useHatch(null), teleport, turnRig,
-  where: () => where, place, renderer, outage: on => { debugOutage = on; } };
+  where: () => where, place, renderer, outage: on => { debugOutage = on; },
+  zoom: () => zoom, setZoom, controllers, handControls, scope: scopeMesh, arm, snap, radioState: () => ({ keyed, talking, rx, shown: radioState() }) };
 
 // ---------- start-up screen: the lobby, with the radio and VR steps in the astronaut's panel ----------
 const $ = id => document.getElementById(id);
@@ -485,6 +575,6 @@ $('radioBtn').onclick = async () => {
   $('step2').hidden = false;
 };
 $('vrSlot').appendChild(VRButton.createButton(renderer, { optionalFeatures: ['hand-tracking'] }));
-$('deskBtn').onclick = () => { mode = 'desk'; lobby.show(false); $('cross').hidden = false; lockPointer(); };
+$('deskBtn').onclick = () => { mode = 'desk'; keys.tab = false; $('deskBtn').blur(); lobby.show(false); $('cross').hidden = false; lockPointer(); };
 renderer.xr.addEventListener('sessionstart', () => { mode = 'vr'; lobby.show(false); });
-renderer.xr.addEventListener('sessionend', () => { mode = null; lobby.show(true); });
+renderer.xr.addEventListener('sessionend', () => { mode = null; zoom = 1; zoomGrab = null; lobby.show(true); });
