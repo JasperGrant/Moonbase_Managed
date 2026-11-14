@@ -168,6 +168,31 @@ try {
   await shot(astro, 'astronaut-zoom');
   await astro.evaluate(pitch => { const mb = window.moonbase; mb.setZoom(1); mb.camera.rotation.x = pitch; }, scope.pitch);
 
+  // The wrist gauges: nothing is drawn over the view until the radio is keyed; then the arm comes up
+  // in front of the face with the gauge cluster on it, and goes back down when the key is let go.
+  const armState = () => astro.evaluate(() => { const a = window.moonbase.arm; return { raise: a.raise, visible: a.group.visible }; });
+  const armReaches = async want => {
+    for (let i = 0; i < 150; i++) { if ((await armState()).raise === want) return true; await astro.waitForTimeout(200); }
+    return false;
+  };
+  const rest = await armState();
+  if (rest.raise !== 0 || rest.visible) problems.push('wrist gauges: the arm is in view with the radio idle: ' + JSON.stringify(rest));
+  await astro.bringToFront();
+  await astro.keyboard.down('t');
+  if (!await armReaches(1)) problems.push('wrist gauges: holding the talk key did not bring the arm up: ' + JSON.stringify(await armState()));
+  await astro.waitForTimeout(1500);
+  const face = await astro.evaluate(() => {
+    const mb = window.moonbase, c = mb.arm.canvas, px = c.getContext('2d').getImageData(0, 0, c.width, c.height).data, seen = new Set();
+    for (let i = 0; i < px.length; i += 4 * 53) seen.add((px[i] >> 5) + ',' + (px[i + 1] >> 5) + ',' + (px[i + 2] >> 5));
+    const cam = mb.camera, overlays = cam.children.filter(o => o.visible && o !== mb.arm.group && o !== mb.scope && !o.isLight && o.type !== 'Object3D').length;
+    return { colours: seen.size, overlays };
+  });
+  if (face.colours < 6) problems.push('wrist gauges: the gauge face is blank: ' + JSON.stringify(face));
+  if (face.overlays) problems.push(`wrist gauges: ${face.overlays} other thing(s) are still fixed to the view`);
+  await shot(astro, 'astronaut-wrist');
+  await astro.keyboard.up('t');
+  if (!await armReaches(0)) problems.push('wrist gauges: letting go of the talk key did not lower the arm: ' + JSON.stringify(await armState()));
+
   // Screenshots last, and one page at a time: the two WebGL pages fight for the CPU in software rendering.
   await shot(astro, 'astronaut-fuel-depot');
   await astro.evaluate(() => { const mb = window.moonbase; mb.rig.position.set(0, 0, 7); mb.rig.rotation.y = 0; mb.camera.rotation.x = 0; });

@@ -69,7 +69,13 @@ If the venue Wi-Fi blocks devices from seeing each other, use a phone hotspot.
 
 Hand tracking kicks in when you put the controllers down; the Quest switches by itself. Your hands are drawn as white gloves, and a green ring on the ground shows where a pinch will take you. A bare right hand acts when the pinch lets go, so you can hold the pinch, steer the ring, and release.
 
-Visor zoom is for reading a panel or a serial number from where you stand: a round scope opens in the middle of your view and magnifies what you are looking at by the amount your hands have moved apart (20 cm to 60 cm is 3x). Let go and it stays, so your left hand is free to go to your helmet and talk. Push your pinched hands back together to close it. It is a hand-tracking gesture only; controllers and the laptop have no zoom. While the scope is open the scene is drawn one extra time, into a 1024-pixel texture.
+Visor zoom is for reading a panel or a serial number from where you stand: a round scope opens in the middle of your view and magnifies what you are looking at by the amount your hands have moved apart (20 cm to 60 cm is 3x). Let go and it stays. Push your pinched hands back together to close it. It is a hand-tracking gesture only; controllers and the laptop have no zoom. While the scope is open the scene is drawn one extra time, into a 1024-pixel texture.
+
+### No display on the visor
+
+![The wrist gauges, up while the radio is keyed](docs/astronaut-wrist.png)
+
+The astronaut has no heads-up display. Suit oxygen, time left, the radio lamp, the alarm count, the visor zoom level and the message line are on a gauge cluster strapped to the left forearm, and the arm is out of sight until the radio is keyed. Hold the talk control (left trigger, left hand to helmet, or T) and the arm swings up across your face and covers most of the view; let go and it drops. So you can look at the Moon or at your gauges, not both, and you read your oxygen while you are talking. The radio lamp reads TRANSMITTING, MISSION OPS when they are talking to you, or NO MICROPHONE if the page has none (the arm still comes up). The older screenshots in `docs/` were taken before this and still show a strip along the bottom of the view; that strip is gone.
 
 Mission Ops holds **Space** to talk. The Technician drives the rover with the **arrow keys**.
 
@@ -94,7 +100,8 @@ server/game.js      all game logic and what each role may see (no networking, un
 server/hub.js       who is connected, what each role may send, the 1.3 s delay, radio relay
 server/server.js    the laptop web server and WebSocket, drives hub.js
 worker/             the same thing on Cloudflare: a Worker for the pages, a Durable Object for the room
-client/astronaut.*  VR client: movement, pointing, HUD
+client/astronaut.*  VR client: movement, pointing, visor zoom
+client/arm.js       the astronaut's left arm and its wrist gauge cluster
 client/stations.js  the four panels the astronaut works at
 client/world.js     the Moon scene: terrain, sky, Earth, habitat, rover, lander (shared with the rover camera)
 client/console.*    Mission Ops, Technician, Scientist and all-in-one
@@ -113,9 +120,9 @@ Everything is procedural, nothing is downloaded: cratered regolith with a genera
 
 Tested in headless Chromium against the real three.js r180 build: lobby and loadout, a full round with every alarm type solved through the astronaut's panels, the delayed voice link in both directions, rover driving, results, "Fly again", seat locking, and the 3D scene itself: it loads with no errors, everything renders, and using a wire on the fuel depot panel reaches the server through the raycaster, on both the laptop server and the Cloudflare worker. `npm run smoke` repeats the scene check (it needs `npm i -D playwright && npx playwright install chromium` once) and leaves screenshots in `test/shots/`.
 
-The smoke test also drives the hand-tracking gestures without a headset, by firing the same events a pinch fires: both hands pinched and pulled apart zooms (in either pinch order, without teleporting or turning), pushed together zooms out, and the one-handed turn and teleport still work. It then checks that the visor scope holds a real picture.
+The smoke test also drives the hand-tracking gestures without a headset, by firing the same events a pinch fires: both hands pinched and pulled apart zooms (in either pinch order, without teleporting or turning), pushed together zooms out, and the one-handed turn and teleport still work. It then checks that the visor scope holds a real picture, that nothing is fixed to the view while the radio is idle, and that holding the talk key brings the arm and a drawn gauge face up and letting go lowers it.
 
-**Not yet seen on a headset:** the VR controls, hand tracking, the visor zoom drawn inside a live headset session, HUD placement, and how the scene performs on the Quest's GPU. Start there, with the Quest plugged in over USB or on the deployed URL. If it stutters, the first things to turn down are in `client/world.js`: the terrain segment count (`SEG`), the boulder counts in the three `scatter` calls, and the shadow map size.
+**Not yet seen on a headset:** the VR controls, hand tracking, the visor zoom drawn inside a live headset session, where the arm and its gauges sit in front of the face, and how the scene performs on the Quest's GPU. Start there, with the Quest plugged in over USB or on the deployed URL. If it stutters, the first things to turn down are in `client/world.js`: the terrain segment count (`SEG`), the boulder counts in the three `scatter` calls, and the shadow map size.
 
 ## Science notes for the pitch
 

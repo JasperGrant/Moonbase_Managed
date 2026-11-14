@@ -7,6 +7,7 @@ import { buildWorld } from '/world.js';
 import { buildPanels } from '/stations.js';
 import { CFG } from '/shared/config.js';
 import { seatTaken } from '/seat.js';
+import { buildArm } from '/arm.js';
 
 const REACH = 3.2;        // metres: how far away a panel can be used
 const WALK = 2.4;         // m/s
@@ -51,61 +52,31 @@ addEventListener('resize', () => {
   renderer.setSize(innerWidth, innerHeight);
 });
 
-// ---------- heads-up display (a strip locked to the bottom of your view) ----------
-const hudCanvas = document.createElement('canvas');
-hudCanvas.width = 1024; hudCanvas.height = 160;
-const hud = hudCanvas.getContext('2d');
-const hudTex = new THREE.CanvasTexture(hudCanvas);
-hudTex.colorSpace = THREE.SRGBColorSpace;
-const hudMesh = new THREE.Mesh(new THREE.PlaneGeometry(1.15, 0.18), new THREE.MeshBasicMaterial({ map: hudTex, transparent: true, depthTest: false, toneMapped: false }));
-hudMesh.position.set(0, -0.4, -1.3);
-hudMesh.renderOrder = 10;
-camera.add(hudMesh);
-let hudKey = '';
+// ---------- wrist gauges ----------
+// Nothing is drawn on the visor. Oxygen, the mission clock, the radio, the alarm count, the zoom
+// level and the message line all live on a gauge cluster on the left forearm, and the arm comes
+// up in front of the face only while the radio is keyed (see client/arm.js).
+const arm = buildArm(THREE);
+camera.add(arm.group);
+let keyed = false; // the talk button, key or gesture is held, whether or not there is a microphone
 
-function drawHud(now) {
+function message(now) {
   const s = state;
   let line = now < promptUntil ? prompt : '';
   if (!s) line = 'Connecting to the base...';
-  else if (s.phase === 'lobby') line = 'Waiting for Mission Ops to start. Try the radio: ' + (mode !== 'vr' ? 'hold T' : usingHands() ? 'hold your left hand to your helmet' : 'hold LEFT TRIGGER') + ' and say hello.';
+  else if (s.phase === 'lobby') line = 'Waiting for Mission Ops to start. Radio check: say hello.';
   else if (s.phase === 'results') line = (s.result.won ? 'MISSION COMPLETE' : 'MISSION FAILED') + `   Score ${s.score}.   ${s.result.reason}`;
-  else if (!line && now - runStart < 14) line = mode !== 'vr' ? 'Hold T to talk to Mission Ops.  Click to use a panel.  WASD to walk.'
-    : usingHands() ? 'Left hand to helmet = talk.  Point + pinch = use a panel.  Pinch the ground = teleport.' : 'Hold LEFT TRIGGER to talk to Mission Ops.  Point + RIGHT TRIGGER to use a panel.';
-  else if (!line && mode === 'vr' && usingHands() && now - runStart < 26) line = 'Pinch both hands and pull them apart to zoom your visor.  Push them together to zoom out.';
+  else if (!line && now - runStart < 14) line = mode !== 'vr' ? 'Click to use a panel.  WASD to walk.'
+    : usingHands() ? 'Point + pinch = use a panel.  Pinch the ground = teleport.  Pinch both hands + pull apart = zoom.' : 'Point + RIGHT TRIGGER to use a panel.';
   else if (!line && s.issues.length) line = `${s.issues.length} alarm${s.issues.length > 1 ? 's' : ''} active. Ask Mission Ops where to go.`;
-  const radioTxt = talking ? 'TX' : rx ? 'RX' : '';
-  const zoomTxt = scopeOn() ? `ZOOM ${zoom.toFixed(1)}x` : '';
-  const key = [line, radioTxt, zoomTxt, s && Math.ceil(s.timeLeft), s && Math.round(s.oxygen)].join('|');
-  if (key === hudKey) return;
-  hudKey = key;
-  const W = hudCanvas.width, H = hudCanvas.height;
-  hud.clearRect(0, 0, W, H);
-  hud.fillStyle = 'rgba(4,10,8,0.72)'; hud.fillRect(0, 0, W, H);
-  hud.textBaseline = 'middle';
-  if (s) {
-    const frac = Math.max(0, Math.min(1, s.oxygen / s.o2Max)), low = s.oxygen < 25;
-    hud.font = 'bold 30px monospace'; hud.textAlign = 'left';
-    hud.fillStyle = '#7d909c'; hud.fillText('O2', 20, 40);
-    hud.strokeStyle = '#7d909c'; hud.lineWidth = 3; hud.strokeRect(74, 22, 300, 36);
-    hud.fillStyle = low ? '#ff5c5c' : '#58e08a'; hud.fillRect(78, 26, 292 * frac, 28);
-    hud.fillStyle = '#fff'; hud.fillText(String(Math.round(s.oxygen)), 388, 40);
-    const t = Math.max(0, Math.ceil(s.timeLeft));
-    hud.textAlign = 'right'; hud.fillText(`${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`, W - 20, 40);
-  }
-  if (radioTxt) {
-    hud.fillStyle = talking ? '#ff5c5c' : '#6fb6ff';
-    hud.textAlign = 'center'; hud.font = 'bold 30px monospace';
-    hud.fillText(talking ? 'TRANSMITTING' : 'MISSION OPS ON RADIO', W / 2 + 60, 40);
-  }
-  if (zoomTxt) {
-    hud.fillStyle = '#58e08a'; hud.textAlign = 'right'; hud.font = 'bold 26px monospace';
-    hud.fillText(zoomTxt, W - 108, 40);
-  }
-  hud.fillStyle = '#ffe9a8'; hud.textAlign = 'center';
-  let size = 34; hud.font = `bold ${size}px monospace`;
-  while (hud.measureText(line).width > W - 30 && size > 16) hud.font = `bold ${--size}px monospace`;
-  hud.fillText(line, W / 2, 112);
-  hudTex.needsUpdate = true;
+  else if (!line) line = 'All systems nominal.';
+  return line;
+}
+function drawGauges(now) {
+  arm.draw({
+    state, line: message(now), zoom: scopeOn() ? zoom : 1, total: CFG.roundSeconds,
+    radio: talking ? 'tx' : rx ? 'rx' : keyed && !radio.micOk ? 'nomic' : '',
+  });
 }
 function say(text, seconds = 6) { prompt = text; promptUntil = performance.now() / 1000 + seconds; }
 
@@ -338,7 +309,9 @@ const scopeMesh = new THREE.Mesh(new THREE.PlaneGeometry(SCOPE_R * 2, SCOPE_R * 
       c = mix(c, vec3(0.345, 0.878, 0.541), smoothstep(0.95, 0.96, r)); // green rim
       gl_FragColor = vec4(c, 1.0);
     }`,
-  transparent: true, depthTest: false, depthWrite: false,
+  // Drawn after the world and over it whatever is in the way, but leaving its own depth behind,
+  // so that the arm (drawn next, and nearer) covers the scope when it comes up.
+  depthFunc: THREE.AlwaysDepth,
 }));
 scopeMesh.position.set(0, 0.03, -SCOPE_D);
 scopeMesh.renderOrder = 9;
@@ -355,8 +328,8 @@ function renderScope() {
   scopeCam.updateProjectionMatrix();
   // Draw the scene once more into the scope's texture. The headset path and the shadow pass are
   // switched off for this one draw (the main draw redoes the shadows anyway) and put back after.
-  const target = renderer.getRenderTarget(), xr = renderer.xr.enabled, shadows = renderer.shadowMap.autoUpdate, hudWas = hudMesh.visible;
-  scopeMesh.visible = hudMesh.visible = false;
+  const target = renderer.getRenderTarget(), xr = renderer.xr.enabled, shadows = renderer.shadowMap.autoUpdate, armWas = arm.group.visible;
+  scopeMesh.visible = arm.group.visible = false;
   renderer.xr.enabled = false;
   renderer.shadowMap.autoUpdate = false;
   renderer.setRenderTarget(scopeRT);
@@ -365,7 +338,7 @@ function renderScope() {
   renderer.setRenderTarget(target);
   renderer.shadowMap.autoUpdate = shadows;
   renderer.xr.enabled = xr;
-  scopeMesh.visible = true; hudMesh.visible = hudWas;
+  scopeMesh.visible = true; arm.group.visible = armWas;
 }
 function setZoom(z) { zoom = Math.max(1, Math.min(ZOOM_MAX, +z || 1)); }
 
@@ -414,6 +387,7 @@ function control(dt, now) {
   if (d > CFG.bounds - 1) { const k = (CFG.bounds - 1) / d; rig.position.x += headPos.x * (k - 1); rig.position.z += headPos.z * (k - 1); }
   if (d < CFG.habRadius && d > 0.01) { const k = CFG.habRadius / d; rig.position.x += headPos.x * (k - 1); rig.position.z += headPos.z * (k - 1); }
 
+  keyed = ptt;
   if (ptt !== talking && radio.micOk) { talking = ptt; radio.setTalking(ptt); }
 
   if (now - lastPose > 0.1) { lastPose = now; net.send({ t: 'pose', x: headPos.x, z: headPos.z, ry: Math.atan2(fwd.x, fwd.z) }); }
@@ -445,15 +419,16 @@ renderer.setAnimationLoop(() => {
     world.moveRover(s.rover);
     lamp.visible = s.loadout.gear.includes('lamp');
   }
-  if (mode) control(dt, now);
+  if (mode) control(dt, now); else keyed = false;
   panels.update(dt);
-  drawHud(now);
+  arm.update(dt, keyed);
+  if (arm.raise > 0) drawGauges(now);
   renderScope();
   renderer.render(scene, camera);
 });
 
 // For debugging from the browser console: moonbase.state(), moonbase.panels.targets() ...
-window.moonbase = { state: () => state, panels, world, radio, rig, camera, net, use: () => use(null), teleport, turnRig, zoom: () => zoom, setZoom, controllers, handControls, renderer, scope: scopeMesh, scopeTarget: scopeRT };
+window.moonbase = { state: () => state, panels, world, radio, rig, camera, net, use: () => use(null), teleport, turnRig, zoom: () => zoom, setZoom, controllers, handControls, renderer, scope: scopeMesh, scopeTarget: scopeRT, arm };
 
 // ---------- start-up screen ----------
 const $ = id => document.getElementById(id);
