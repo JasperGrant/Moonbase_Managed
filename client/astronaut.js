@@ -58,7 +58,9 @@ addEventListener('resize', () => {
 // up in front of the face only while the radio is keyed (see client/arm.js).
 const arm = buildArm(THREE);
 camera.add(arm.group);
-let keyed = false; // the talk button, key or gesture is held, whether or not there is a microphone
+// Keying the radio and raising the arm are one action: Tab on a laptop, the left trigger on a
+// controller, the left hand to the helmet with bare hands.
+let keyed = false; // the talk control is held, whether or not there is a microphone
 
 function message(now) {
   const s = state;
@@ -72,11 +74,10 @@ function message(now) {
   else if (!line) line = 'All systems nominal.';
   return line;
 }
+const radioState = () => talking ? 'tx' : rx ? 'rx' : keyed && !radio.micOk ? 'nomic' : '';
 function drawGauges(now) {
-  arm.draw({
-    state, line: message(now), zoom: scopeOn() ? zoom : 1, total: CFG.roundSeconds,
-    radio: talking ? 'tx' : rx ? 'rx' : keyed && !radio.micOk ? 'nomic' : '',
-  });
+  arm.draw({ state, line: message(now), zoom: scopeOn() ? zoom : 1, total: CFG.roundSeconds, radio: radioState() });
+  arm.signal(radioState(), now);
 }
 function say(text, seconds = 6) { prompt = text; promptUntil = performance.now() / 1000 + seconds; }
 
@@ -88,7 +89,12 @@ net.onMsg = m => { if (m.t === 'ptt') { rx = m.on; radio.rxMarker(m.on); } };
 
 // ---------- controls ----------
 const keys = {};
-addEventListener('keydown', e => { keys[e.key.toLowerCase()] = true; if (e.key === ' ') e.preventDefault(); });
+addEventListener('keydown', e => {
+  keys[e.key.toLowerCase()] = true;
+  // Space would scroll the page. Tab is the radio key once you are playing, so it must not move the
+  // keyboard focus; on the start screen it is left alone, to step between the buttons as usual.
+  if (e.key === ' ' || (e.key === 'Tab' && mode === 'desk')) e.preventDefault();
+});
 addEventListener('keyup', e => { keys[e.key.toLowerCase()] = false; });
 addEventListener('blur', () => { for (const k in keys) keys[k] = false; });
 // Chrome reports one huge movementX/Y on the first event after the pointer locks (the cursor
@@ -335,6 +341,7 @@ function renderScope() {
   renderer.setRenderTarget(scopeRT);
   renderer.clear();
   renderer.render(scene, scopeCam);
+  scopeMesh.userData.drawCalls = renderer.info.render.calls; // for the smoke test: the scope pass drew the scene
   renderer.setRenderTarget(target);
   renderer.shadowMap.autoUpdate = shadows;
   renderer.xr.enabled = xr;
@@ -344,7 +351,7 @@ function setZoom(z) { zoom = Math.max(1, Math.min(ZOOM_MAX, +z || 1)); }
 
 let vy = 0, turnArmed = true, lastPose = 0;
 function control(dt, now) {
-  let mx = 0, mz = 0, jump = false, ptt = !!keys.t;
+  let mx = 0, mz = 0, jump = false, ptt = mode === 'desk' && !!keys.tab;
   const session = renderer.xr.getSession();
   camera.getWorldPosition(headPos);
   camera.getWorldDirection(fwd); fwd.y = 0; fwd.normalize();
@@ -394,7 +401,11 @@ function control(dt, now) {
 }
 
 // ---------- main loop ----------
+// A picture of the view as just drawn, as a PNG data URL, for the smoke test's optional screenshots.
+let snapWaiting = null;
+const snap = () => new Promise(resolve => { snapWaiting = resolve; });
 let lastFrame = performance.now() / 1000;
+let armFrame = lastFrame;
 renderer.setAnimationLoop(() => {
   const now = performance.now() / 1000, dt = Math.min(0.05, now - lastFrame);
   lastFrame = now;
@@ -421,14 +432,16 @@ renderer.setAnimationLoop(() => {
   }
   if (mode) control(dt, now); else keyed = false;
   panels.update(dt);
-  arm.update(dt, keyed);
+  arm.update(Math.min(0.25, now - armFrame), keyed); // real time, so the arm is as quick on a slow machine
+  armFrame = now;
   if (arm.raise > 0) drawGauges(now);
   renderScope();
   renderer.render(scene, camera);
+  if (snapWaiting) { snapWaiting(renderer.domElement.toDataURL('image/png')); snapWaiting = null; } // must follow the draw in the same frame
 });
 
 // For debugging from the browser console: moonbase.state(), moonbase.panels.targets() ...
-window.moonbase = { state: () => state, panels, world, radio, rig, camera, net, use: () => use(null), teleport, turnRig, zoom: () => zoom, setZoom, controllers, handControls, renderer, scope: scopeMesh, scopeTarget: scopeRT, arm };
+window.moonbase = { state: () => state, panels, world, radio, rig, camera, net, use: () => use(null), teleport, turnRig, zoom: () => zoom, setZoom, controllers, handControls, renderer, scope: scopeMesh, arm, snap, radioState: () => ({ keyed, talking, rx, shown: radioState() }) };
 
 // ---------- start-up screen ----------
 const $ = id => document.getElementById(id);
@@ -439,6 +452,6 @@ $('radioBtn').onclick = async () => {
   $('step2').hidden = false;
 };
 $('vrSlot').appendChild(VRButton.createButton(renderer, { optionalFeatures: ['hand-tracking'] }));
-$('deskBtn').onclick = () => { mode = 'desk'; $('gate').hidden = true; $('cross').hidden = false; lockPointer(); };
+$('deskBtn').onclick = () => { mode = 'desk'; keys.tab = false; $('deskBtn').blur(); $('gate').hidden = true; $('cross').hidden = false; lockPointer(); };
 renderer.xr.addEventListener('sessionstart', () => { mode = 'vr'; $('gate').hidden = true; });
 renderer.xr.addEventListener('sessionend', () => { mode = null; zoom = 1; zoomGrab = null; $('gate').hidden = false; });

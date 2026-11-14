@@ -3,7 +3,9 @@
 // the arm only comes up in front of the face while the radio is keyed.
 //
 // Add `arm.group` to the camera. Call `arm.update(dt, radioKeyed)` every frame and `arm.draw(info)`
-// whenever the arm is in view.
+// whenever the arm is in view. The arm coming up is itself the sign that the radio is keyed; the
+// light bar on top of the cluster, the frame round the face and the RADIO lamp say what the radio
+// is doing: red while transmitting, blue while Mission Ops is talking, amber with no microphone.
 
 const W = 1024, H = 632;                       // gauge face, in canvas pixels
 const FACE_W = 0.34, FACE_H = FACE_W * H / W;  // and in metres
@@ -54,6 +56,17 @@ export function buildArm(THREE) {
     bolt.rotation.x = Math.PI / 2;
   }
 
+  // Radio light bar along the top edge of the housing. Dark until the radio does something.
+  const SIGNAL = { tx: 0xff3b3b, rx: 0x4da3ff, nomic: 0xffa52e };
+  const barMat = new THREE.MeshBasicMaterial({ color: 0x1a1f24, toneMapped: false });
+  mk(new THREE.BoxGeometry(FACE_W * 0.72, 0.016, 0.02), barMat, 0, FACE_H / 2 + 0.024, -0.012);
+  mk(new THREE.BoxGeometry(FACE_W * 0.78, 0.012, 0.03), housing, 0, FACE_H / 2 + 0.02, -0.03);
+  function signal(radio, now) {
+    if (!SIGNAL[radio]) { barMat.color.setHex(0x1a1f24); return; }
+    const pulse = radio === 'tx' ? 0.7 + 0.3 * Math.sin(now * 9) : 1; // transmitting: a quick throb
+    barMat.color.setHex(SIGNAL[radio]).multiplyScalar(pulse);
+  }
+
   const canvas = document.createElement('canvas');
   canvas.width = W; canvas.height = H;
   const g = canvas.getContext('2d');
@@ -102,7 +115,7 @@ export function buildArm(THREE) {
     return lines.length <= maxLines ? lines : null;
   }
 
-  let key = '';
+  let key = '', shown = null; // shown: what the face last drew, in words, for the smoke test
   // info = { state, line, radio: '' | 'tx' | 'rx' | 'nomic', zoom, total }. Redraws only when something shown changes.
   function draw(info) {
     const s = info.state;
@@ -112,8 +125,9 @@ export function buildArm(THREE) {
     if (k === key) return;
     key = k;
 
+    const radio = { tx: ['TRANSMITTING', RED], rx: ['MISSION OPS', BLUE], nomic: ['NO MICROPHONE', AMBER] }[info.radio];
     g.fillStyle = '#0a0e11'; g.fillRect(0, 0, W, H);
-    g.strokeStyle = '#2a343b'; g.lineWidth = 4;
+    g.strokeStyle = radio ? radio[1] : '#2a343b'; g.lineWidth = radio ? 10 : 4; // the frame lights up with the radio
     g.beginPath(); g.roundRect(8, 8, W - 16, H - 16, 22); g.stroke();
 
     // Suit oxygen.
@@ -129,7 +143,6 @@ export function buildArm(THREE) {
     label('TIME LEFT', 512, 318, 30, DIM);
 
     // Status lamps.
-    const radio = { tx: ['TRANSMITTING', RED], rx: ['MISSION OPS', BLUE], nomic: ['NO MICROPHONE', AMBER] }[info.radio];
     lamp(704, 50, 286, 100, 'RADIO', radio ? radio[0] : 'STANDBY', radio ? radio[1] : GREEN, !!radio);
     lamp(704, 164, 286, 100, 'ALARMS', alarms ? `${alarms} ACTIVE` : 'NONE', AMBER, alarms > 0);
     lamp(704, 278, 286, 100, 'VISOR ZOOM', zoom ? zoom + 'x' : 'OFF', GREEN, !!zoom);
@@ -144,6 +157,7 @@ export function buildArm(THREE) {
     g.fillStyle = '#ffe9a8'; g.textAlign = 'center'; g.textBaseline = 'middle';
     lines.forEach((ln, i) => g.fillText(ln, W / 2, 500 + (i - (lines.length - 1) / 2) * size * 1.2));
     tex.needsUpdate = true;
+    shown = { radio: radio ? radio[0] : 'STANDBY', frame: radio ? radio[1] : null, oxygen: o2, seconds: t, alarms, zoom: zoom || 'OFF', message: lines.join(' ') };
   }
 
   // ---------- raising and lowering ----------
@@ -162,5 +176,5 @@ export function buildArm(THREE) {
   }
   update(0, false);
 
-  return { group, canvas, draw, update, get raise() { return raise; } };
+  return { group, draw, update, signal, get raise() { return raise; }, get shown() { return shown; } };
 }
