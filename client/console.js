@@ -6,6 +6,7 @@ import { Radio } from '/voice.js';
 import { CFG, VEHICLES, GEAR, STATIONS, ISSUES, ROLES, bearing } from '/shared/config.js';
 import { MANUAL } from '/shared/rules.js';
 import { seatTaken } from '/seat.js';
+import { createLobby } from '/lobby.js';
 
 // /console.html?role=ops or the clean URL /ops; /control is the all-in-one seat.
 const PATH_ROLE = { ops: 'ops', tech: 'tech', sci: 'sci', control: 'all', all: 'all' };
@@ -31,7 +32,24 @@ document.title = `Moonbase: ${ROLES[role]}`;
 
 // ---------- build the static parts once ----------
 const briefs = ['ops', 'tech', 'sci'].filter(has).map(r => `<p class="brief">${role === 'all' ? `<b>${ROLES[r]}.</b> ` : ''}${BRIEF[r]}</p>`).join('');
-$('lobby').innerHTML = `<div class="grid"><div class="panel"><h3>Briefing</h3>${briefs}</div><div class="panel" id="plan"></div></div>`;
+// The briefing and the mission plan open over the lobby, from a button in your own panel.
+$('sheet').innerHTML = `<h3>Briefing</h3>${briefs}<div id="plan"></div><button class="big" data-close>Back to the lobby</button>`;
+$('planSheet').addEventListener('click', e => { if (e.target === $('planSheet') || e.target.closest('[data-close]')) $('planSheet').hidden = true; });
+
+// The lobby: in 2-player mode the briefing button sits in the Mission Ops panel only.
+const firstMine = role === 'all' ? 'ops' : role;
+const lobby = createLobby($('lobbyView'), {
+  mine: role,
+  onReady: on => { radio?.init(); net.send({ t: 'ready', on }); },
+  extraEl: r => {
+    if (r !== firstMine) return null;
+    const b = document.createElement('button');
+    b.className = 'lb-plan-btn'; b.type = 'button';
+    b.textContent = has('ops') ? 'Briefing and mission plan' : 'Briefing';
+    b.onclick = () => { $('planSheet').hidden = false; };
+    return b;
+  },
+});
 
 $('run').innerHTML = [
   has('ops') && `<div class="panel"><h3>Mission Ops</h3>
@@ -83,9 +101,12 @@ function render() {
 
   if (s.phase !== shown) {
     shown = s.phase;
-    for (const id of ['lobby', 'run', 'results']) $(id).hidden = id !== (s.phase === 'lobby' ? 'lobby' : s.phase === 'run' ? 'run' : 'results');
+    lobby.show(s.phase === 'lobby');
+    if (s.phase !== 'lobby') $('planSheet').hidden = true;
+    for (const id of ['run', 'results']) $(id).hidden = id !== s.phase;
     if (s.phase === 'lobby') { $('toast').textContent = ''; $('toast').className = ''; }
   }
+  lobby.update(s);
   if (s.phase === 'lobby') renderPlan(s);
   if (s.phase === 'run') renderRun(s);
   if (s.phase === 'results') renderResults(s);
@@ -99,9 +120,8 @@ function renderPlan(s) {
   const cap = VEHICLES[vehicle].cap;
   const used = gear.reduce((m, g) => m + GEAR[g].mass, 0);
   const canEdit = has('ops');
-  const astronautIn = s.crew.includes('astronaut');
   $('plan').innerHTML = `<h3>Mission plan</h3>
-    <p class="brief">${canEdit ? 'The standard kit is already loaded. Press Start, or change the plan: a bigger lander carries more gear, a faster one leaves more oxygen.' : 'Mission Ops sets the plan and starts the mission.'}</p>
+    <p class="brief">${canEdit ? 'The standard kit is already loaded. Change it if you like: a bigger lander carries more gear, a faster one leaves more oxygen. Changing the plan does not clear anyone\'s Ready.' : 'Mission Ops sets the plan. The mission starts when all four seats are ready.'}</p>
     <h2>Lander</h2>
     <div class="vehicles">${Object.entries(VEHICLES).map(([k, v]) =>
       `<label class="pick ${k === vehicle ? 'sel' : ''}" data-vehicle="${k}"><b>${v.name}</b><span>${v.blurb}</span></label>`).join('')}</div>
@@ -110,18 +130,15 @@ function renderPlan(s) {
       const sel = gear.includes(k), off = !sel && used + g.mass > cap;
       return `<label class="pick ${sel ? 'sel' : ''} ${off ? 'off' : ''}" data-gear="${k}" style="margin-bottom:6px"><b>${sel ? '[x]' : '[ ]'} ${g.name} <span>(mass ${g.mass})</span></b><span>${g.blurb}</span></label>`;
     }).join('')}
-    <div class="mass">Mass loaded: ${used} / ${cap} &nbsp;|&nbsp; Suit oxygen at start: ${VEHICLES[vehicle].o2 + (gear.includes('o2') ? 25 : 0)}</div>
-    ${canEdit ? `<button class="big" data-start>Start mission</button>` : ''}
-    <p class="hint">${astronautIn ? 'Astronaut is connected.' : 'Astronaut is not connected yet. You can still start, for testing.'}</p>`;
+    <div class="mass">Mass loaded: ${used} / ${cap} &nbsp;|&nbsp; Suit oxygen at start: ${VEHICLES[vehicle].o2 + (gear.includes('o2') ? 25 : 0)}</div>`;
 }
 
-$('lobby').addEventListener('click', e => {
+$('plan').addEventListener('click', e => {
   if (!has('ops') || !state) return;
-  const el = e.target.closest('[data-vehicle],[data-gear],[data-start]');
+  const el = e.target.closest('[data-vehicle],[data-gear]');
   if (!el) return;
   let { vehicle, gear } = state.loadout;
   gear = [...gear];
-  if (el.dataset.start !== undefined) { radio?.init(); net.send({ t: 'start' }); return; }
   if (el.dataset.vehicle) {
     vehicle = el.dataset.vehicle;
     while (gear.reduce((m, g) => m + GEAR[g].mass, 0) > VEHICLES[vehicle].cap) gear.pop();
@@ -183,7 +200,7 @@ function renderResults(s) {
     <h2>What happened and why</h2>
     <ul class="log">${(s.log || []).filter(l => l.kind !== 'spawn').map(l =>
       `<li class="${l.kind}"><span class="at">${clock(l.at)}</span><span>${esc(l.text)}</span><span class="d">${l.pts ? '+' + l.pts : ''}${l.o2 ? l.o2 + ' O2' : ''}</span></li>`).join('')}</ul>
-    ${has('ops') ? '<button class="big" data-again>Fly again</button> <span class="hint">Your plan stays loaded, so you can change one thing and compare.</span>' : '<p class="hint">Mission Ops can start another run.</p>'}
+    ${has('ops') ? '<button class="big" data-again>Fly again</button> <span class="hint">Everyone goes back to the lobby and readies up again. Your plan stays loaded, so you can change one thing and compare.</span>' : '<p class="hint">Mission Ops can send the crew back to the lobby for another run.</p>'}
   </div>`;
 }
 $('results').addEventListener('click', e => { if (e.target.closest('[data-again]')) { resultKey = ''; net.send({ t: 'reset' }); } });

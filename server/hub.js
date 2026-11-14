@@ -6,15 +6,18 @@
 // A client is any object the transport hands to add(); the hub sets `role` and `open` on it and
 // calls client.send(stringOrBinary). send() must never throw.
 import { Game } from './game.js';
-import { CFG, ROLES } from '../client/shared/config.js';
+import { CFG, ROLES, CREW, covers } from '../client/shared/config.js';
 
 const isControl = role => role === 'ops' || role === 'all';
 
 export class Hub {
-  constructor(game = new Game()) {
+  constructor(game = new Game(), opts = {}) {
     this.game = game;
     this.clients = new Set();
     this.last = Date.now();
+    this.requireFullCrew = opts.requireFullCrew ?? CFG.lobby.requireFullCrew;
+    this.ready = new Set();   // seats that pressed Ready, by role as held ('all' in 2-player mode)
+    this.countdown = null;    // seconds until the mission starts, while everyone is ready
   }
 
   live() { return [...this.clients].filter(c => c.open && c.role); }
@@ -28,10 +31,29 @@ export class Hub {
     return crew.includes('all') && ['ops', 'tech', 'sci'].includes(role);
   }
   // For the landing page: which seats are free right now.
-  seats() { return { crew: this.crew(), taken: Object.keys(ROLES).filter(r => this.taken(r)), phase: this.game.phase }; }
+  seats() { return { crew: this.crew(), taken: Object.keys(ROLES).filter(r => this.taken(r)), phase: this.game.phase, ready: [...this.ready], countdown: this.countdown }; }
+
+  // Lobby: the mission starts by itself once every role is held and every seat is ready.
+  // With requireFullCrew off, any crew that is all ready will do (one developer testing alone).
+  allReady() {
+    const crew = this.crew();
+    if (!crew.length || !crew.every(r => this.ready.has(r))) return false;
+    return !this.requireFullCrew || CREW.every(r => crew.some(h => covers(h, r)));
+  }
+  lobbyTick(dt) {
+    if (this.game.phase !== 'lobby' || !this.allReady()) { this.countdown = null; return; }
+    if (this.countdown === null) { this.countdown = CFG.lobby.countdownSeconds; return; }
+    this.countdown -= dt;
+    if (this.countdown <= 0) { this.countdown = null; this.ready.clear(); this.game.start(); }
+  }
 
   add(client) { client.role = null; client.open = true; this.clients.add(client); }
-  remove(client) { client.open = false; this.clients.delete(client); }
+  remove(client) {
+    client.open = false;
+    this.clients.delete(client);
+    if (client.role && !this.crew().includes(client.role)) this.ready.delete(client.role); // their panel goes grey
+    if (!this.allReady()) this.countdown = null;
+  }
 
   // The delay only applies while a mission is running, so the lobby stays snappy.
   lag() { return this.game.phase === 'run' ? CFG.delayMs : 0; }
@@ -66,6 +88,13 @@ export class Hub {
     }
     if (!ws.role) return;
 
+    if (m.t === 'ready') {
+      if (game.phase !== 'lobby') return;
+      if (m.on) this.ready.add(ws.role); else this.ready.delete(ws.role);
+      if (!this.allReady()) this.countdown = null;
+      return;
+    }
+
     if (ws.role === 'astronaut') {
       if (m.t === 'pose' && [m.x, m.z, m.ry].every(Number.isFinite)) game.astro = { x: m.x, z: m.z, ry: m.ry };
       else if (m.t === 'act') game.act(m.id, m.a);
@@ -80,8 +109,8 @@ export class Hub {
       this.later(this.lag(), () => { if (game.phase === 'run') Object.assign(game.rover, { throttle, steer }); });
     } else if (isControl(ws.role)) {
       if (m.t === 'loadout') game.setLoadout(m.vehicle, m.gear);
-      else if (m.t === 'start') game.start();
-      else if (m.t === 'reset') game.reset();
+      else if (m.t === 'start' && !this.requireFullCrew) game.start(); // normally the crew starts it by readying up
+      else if (m.t === 'reset') { game.reset(); this.ready.clear(); this.countdown = null; }
       else if (m.t === 'ptt') this.sendTo(['astronaut'], { t: 'ptt', from: 'ops', on: !!m.on }, CFG.delayMs);
       else if (m.t === 'patch') {
         const ms = this.lag();
@@ -93,11 +122,13 @@ export class Hub {
   // Call every CFG.tickMs. The astronaut sees the present; mission control sees 1.3 s ago.
   tick() {
     const now = Date.now();
-    this.game.tick(Math.min(0.5, (now - this.last) / 1000));
+    const dt = Math.min(0.5, (now - this.last) / 1000);
+    this.lobbyTick(dt);
+    this.game.tick(dt);
     this.last = now;
-    const who = this.crew();
+    const who = this.crew(), ready = [...this.ready], countdown = this.countdown;
     for (const c of this.live()) {
-      const msg = JSON.stringify(this.game.view(c.role, who));
+      const msg = JSON.stringify({ ...this.game.view(c.role, who), ready, countdown });
       this.later(c.role === 'astronaut' ? 0 : this.lag(), () => { if (c.open) c.send(msg); });
     }
   }

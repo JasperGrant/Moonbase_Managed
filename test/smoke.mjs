@@ -50,9 +50,13 @@ try {
   const pitch = await astro.evaluate(() => Math.abs(window.moonbase.camera.rotation.x));
   if (pitch > 0.2) problems.push(`astronaut: camera pitched ${pitch.toFixed(2)} rad right after entering (pointer-lock jump)`);
 
-  // Start the round now: the first alarm is always the fuel depot, 4 s in. Wait until one of its
+  // Ready up: the astronaut uses the READY board in front of the spawn point, Mission Control
+  // (2-player mode, so the crew is complete) presses Ready in the lobby. The mission starts itself
+  // after the countdown, and the first alarm is always the fuel depot, 4 s in. Wait until one of its
   // wires is clickable (the panel syncs on the next rendered frame, which lags here).
-  await ctl.click('button:has-text("Start mission")');
+  if (!(await astro.evaluate(() => window.moonbase.useBoard()))) problems.push('astronaut: the READY board was not in front of the spawn point');
+  await ctl.click('[data-ready]');
+  await ctl.waitForFunction(() => window.moonbase.state()?.phase === 'run', null, { timeout: 15000 });
   const issueId = await astro.evaluate(async () => {
     const mb = window.moonbase, st = mb.world.stations.wires;
     const onDepot = m => { for (let o = m; o; o = o.parent) if (o === st) return true; return false; };

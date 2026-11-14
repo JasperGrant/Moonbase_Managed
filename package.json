@@ -6,7 +6,7 @@
   "description": "Moonbase: a co-op fix-it game. One astronaut in VR, mission control on laptops.",
   "scripts": {
     "start": "node server/server.js",
-    "test": "node test/game.test.js",
+    "test": "node test/game.test.js && node test/hub.test.js",
     "cert": "mkdir -p certs && openssl req -x509 -newkey rsa:2048 -nodes -keyout certs/key.pem -out certs/cert.pem -days 30 -subj \"/CN=moonbase\"",
     "smoke": "node test/smoke.mjs",
     "dev:cf": "wrangler dev",

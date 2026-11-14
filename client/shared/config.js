@@ -19,7 +19,14 @@ export const CFG = {
   spawn: { x: 0, z: 7 },
   defaultVehicle: 'heavy',
   defaultGear: ['beacon', 'lamp', 'diag', 'o2'],
+  // The lobby: every role is picked and ready, then a short countdown starts the mission.
+  // requireFullCrew: false lets one developer ready up alone (or run the server with SOLO=1).
+  lobby: { requireFullCrew: true, countdownSeconds: 3 },
 };
+
+// The four roles that must be filled before a mission starts. "all" (2-player mode) covers the last three.
+export const CREW = ['astronaut', 'ops', 'sci', 'tech'];
+export const covers = (held, role) => held === role || (held === 'all' && role !== 'astronaut');
 
 // Mission design step (Space Apps): pick a lander, then fit gear into its mass capacity.
 export const VEHICLES = {

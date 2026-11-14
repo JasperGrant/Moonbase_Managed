@@ -6,33 +6,19 @@
 <title>Moonbase</title>
 <link rel="stylesheet" href="/style.css">
 </head>
-<body class="landing">
-  <h1>MOONBASE</h1>
-  <p class="sub">One astronaut on the Moon. Mission control 384,000 km away. Things keep breaking.</p>
-  <div class="seats">
-    <a href="/astronaut" data-role="astronaut"><b>Astronaut</b><span>Quest headset (or desktop to test). Hands and eyes on the surface.</span></a>
-    <a href="/ops" data-role="ops"><b>Mission Ops</b><span>The only voice to the astronaut. Uploads software patches.</span></a>
-    <a href="/tech" data-role="tech"><b>Technician</b><span>The map, the cameras and the rover. Knows where things are.</span></a>
-    <a href="/sci" data-role="sci"><b>Scientist</b><span>Telemetry and the manual. Knows how to fix things.</span></a>
-    <a href="/control" class="wide" data-role="all"><b>Mission Control (2-player mode)</b><span>All three consoles on one screen.</span></a>
-  </div>
-  <p class="hint" id="who"></p>
-  <script>
-    // Ask the server who is online and grey out seats that are already taken. One person per seat.
-    const ROLE = { astronaut: 'Astronaut', ops: 'Mission Ops', tech: 'Technician', sci: 'Scientist', all: 'Mission Control' };
+<body>
+  <div id="lobby"></div>
+  <noscript><p style="padding:2em">Moonbase needs JavaScript. Seats: <a href="/astronaut">Astronaut</a>, <a href="/ops">Mission Ops</a>, <a href="/sci">Scientist</a>, <a href="/tech">Technician</a>, <a href="/control">Mission Control (2-player)</a>.</p></noscript>
+  <script type="module">
+    // The landing page is the lobby before you have a seat: click a grey scene to take that role.
+    // It asks the server who is in once a second.
+    import { createLobby } from '/lobby.js';
+    const URLS = { astronaut: '/astronaut', ops: '/ops', sci: '/sci', tech: '/tech' };
+    const lobby = createLobby(document.getElementById('lobby'), { onPick: role => { location.href = URLS[role]; } });
     async function refresh() {
-      try {
-        const s = await (await fetch('/seats', { cache: 'no-store' })).json();
-        for (const a of document.querySelectorAll('.seats a')) {
-          const taken = s.taken.includes(a.dataset.role);
-          a.classList.toggle('taken', taken);
-          a.querySelector('i')?.remove();
-          if (taken) a.insertAdjacentHTML('beforeend', '<i>taken</i>');
-        }
-        document.getElementById('who').textContent = s.crew.length ? 'Online: ' + s.crew.map(r => ROLE[r]).join(', ') + (s.phase === 'run' ? '. Mission in progress.' : '') : 'Nobody is in yet.';
-      } catch { document.getElementById('who').textContent = ''; }
+      try { lobby.update(await (await fetch('/seats', { cache: 'no-store' })).json()); } catch {}
     }
-    refresh(); setInterval(refresh, 2000);
+    refresh(); setInterval(refresh, 1000);
   </script>
 </body>
 </html>
