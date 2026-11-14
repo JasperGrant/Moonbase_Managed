@@ -7,7 +7,7 @@ import { Radio } from '/voice.js';
 import { CFG, TOOLS, PLACES, MODES, ROLES, SOCKET_SHAPES } from '/shared/config.js';
 import { beltWeight } from '/shared/rules.js';
 import { drawTool, drawShape } from '/shared/icons.js';
-import { seatTaken, kicked } from '/seat.js';
+import { seatTaken, seatRefused, kicked } from '/seat.js';
 import { createLobby } from '/lobby.js';
 import { PAL, CABLE, FONT, nixie, jewel, fontsReady } from '/shared/palette.js';
 
@@ -87,6 +87,7 @@ $('run').addEventListener('click', e => {
 // ---------- network ----------
 net.onState = s => { state = s; render(); };
 net.onTaken = seatTaken;
+net.onRefused = seatRefused; // a seat this game does not have, or no game chosen yet
 net.onKicked = kicked;
 net.onBinary = buf => radio?.receive(buf);
 net.onMsg = m => { if (m.t === 'ptt' && radio) { rx = m.on; radio.rxMarker(m.on); paintPtt(); } };
@@ -171,7 +172,7 @@ function renderResults(s) {
     <h2>What happened</h2>
     <ul class="log">${(s.log || []).filter(l => l.kind !== 'start').map(l =>
       `<li class="${l.kind}"><span class="at">${clock(l.at)}</span><span>${esc(l.text)}</span><span class="d">${l.pts ? '+' + l.pts : ''}${l.o2 ? l.o2 + ' O2' : ''}</span></li>`).join('')}</ul>
-    ${has('ops') ? '<button class="big" data-again>Fly again</button> <span class="hint">Everyone goes back to the lobby and readies up again.</span>' : '<p class="hint">Mission Ops can send the crew back to the lobby for another run.</p>'}
+    ${has('ops') ? '<button class="big" data-again>Fly again</button> <span class="hint">Everyone goes back to the start, to choose 2 or 4 players and ready up again.</span>' : '<p class="hint">Mission Ops can send the crew back to the start for another run.</p>'}
   </div>`;
 }
 $('results').addEventListener('click', e => { if (e.target.closest('[data-again]')) { resultKey = ''; net.send({ t: 'reset' }); } });
