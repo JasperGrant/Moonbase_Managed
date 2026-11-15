@@ -1004,9 +1004,9 @@ function clampWalk() {
 let vy = 0, turnArmed = true, lastPose = 0, shake = 0, grounded = true;
 const footV = new THREE.Vector3();
 // The height of the ground under the head: the drawn lunar surface outside, the floor (0) indoors
-// and in an airlock.
+// and in an airlock chamber.
 function floorY() {
-  if (where !== 'out' || cycle) return 0;
+  if (where !== 'out' || cycle || chamberAt(footV)) return 0; // an airlock chamber has its own floor
   camera.getWorldPosition(footV);
   return world.ground ? world.ground(footV.x, footV.z) : 0;
 }

@@ -505,6 +505,8 @@ try {
   const indoors = await astro.evaluate(async () => {
     const mb = window.moonbase, T = mb.THREE, wait = ms => new Promise(r => setTimeout(r, ms));
     if (mb.where() === 'in') { const r = await window.smoke.through('out'); if (!r.ok) return 'out: ' + r.why; }
+    // The airlock re-arms only once a drawn frame has seen us outside it; frames are slow here, so wait for two.
+    await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
     mb.standAt('out', 0.1, 3.25, 0); // in airlock S's chamber, facing the inner hatch
     const local = () => { const ch = (mb.where() === 'in' ? mb.interior.doors : mb.world.doors).S; return ch.root.worldToLocal(mb.camera.getWorldPosition(new T.Vector3())); };
     const before = local();
