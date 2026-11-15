@@ -85,6 +85,7 @@ export function buildFixtures(THREE, world, { rig, camera, send, sfx = () => {},
   // (a fixture that needs a tool you are not holding keeps the floating tool outline instead).
   const OPEN = verb => ({ shape: 'open', verb }), POINT = verb => ({ shape: 'point', verb });
   const cue = (mesh, fn) => { mesh.userData.cue = fn; return mesh; };
+  let cueVR = false; // set each frame by update(): the verbs a headset uses (no keys)
   // ---------- the five tools. Each is modelled in the hand: local -z points away from you. ----------
   const tools = {};
   const orange = PAL.hex.orange, steel = PAL.hex.aluminium, dark = 0x2b2a26;
@@ -374,7 +375,7 @@ export function buildFixtures(THREE, world, { rig, camera, send, sfx = () => {},
   const spot = new THREE.Mesh(new THREE.SphereGeometry(0.04, 12, 8), new THREE.MeshBasicMaterial({ color: PAL.hex.red, toneMapped: false }));
   spot.visible = false;
   const spotHit = add(spot, new THREE.SphereGeometry(0.1, 8, 6), ghost);
-  cue(target(spotHit, () => st.suit && spot.visible, () => patchSuit()), () => has('patch') ? POINT(inVR ? 'PATCH' : 'F: PATCH') : null);
+  cue(target(spotHit, () => st.suit && spot.visible, () => patchSuit()), () => has('patch') ? POINT(cueVR ? 'PATCH' : 'F: PATCH') : null);
 
   // ---------- "you need this tool": its outline floats over a fixture you walked up to without it ----------
   const hints = {};
@@ -587,7 +588,7 @@ export function buildFixtures(THREE, world, { rig, camera, send, sfx = () => {},
   });
   F.cups.forEach((cup, n) => cue(target(add(cup, new THREE.SphereGeometry(0.14, 8, 6), ghost, 0, 0.08, 0), () => deskSamples.length > 0 && slotFree(n), () => { letGoSample(DESK, deskSamples[0], cup.getWorldPosition(V()).setY(cup.getWorldPosition(V()).y + 0.08)); }), () => POINT('STOW')));
   cue(target(add(world.port, new THREE.SphereGeometry(0.3, 8, 6), ghost, F.portMouth.x, F.portMouth.y, F.portMouth.z), () => deskSamples.length > 0, () => { letGoSample(DESK, deskSamples[0], world.port.localToWorld(F.portMouth.clone())); }), () => POINT('BANK'));
-  const railHit = cue(target(add(F.rail, new THREE.SphereGeometry(0.35, 8, 6), ghost), () => running(), () => onRail(DESK)), () => rideCue(!inVR));
+  const railHit = cue(target(add(F.rail, new THREE.SphereGeometry(0.35, 8, 6), ghost), () => running(), () => onRail(DESK)), () => rideCue(!cueVR));
   // Where a sample we have is drawn.
   const ov = V();
   world.sampleOverride = id => {
@@ -786,6 +787,7 @@ export function buildFixtures(THREE, world, { rig, camera, send, sfx = () => {},
     // Every frame. hands: [{ obj, point, side, tracked }] for the two hands (obj is where a held tool is
     // drawn, point is where the fingers are, tracked means bare hands, not controllers); empty on a laptop.
     update(dt, now, hands, vr) {
+      cueVR = !!vr;
       camera.getWorldPosition(headXZ);
       const place = placeNow();
       handObj[0] = hands[0]?.obj || null; handObj[1] = hands[1]?.obj || null;
