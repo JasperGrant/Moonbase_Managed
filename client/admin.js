@@ -25,6 +25,7 @@ for (const m in MODES) $('mode').insertAdjacentHTML('beforeend', `<option value=
 $('mode').onchange = () => cmd('mode', { mode: $('mode').value });
 $('delay').onchange = () => cmd('delay', { on: $('delay').checked });
 $('roverFaults').onchange = () => cmd('roverFaults', { on: $('roverFaults').checked });
+$('allReal').onchange = () => cmd('allReal', { on: $('allReal').checked });
 $('start').onclick = () => { if (state?.phase !== 'run' || confirm('A mission is running. Restart it from the top?')) cmd('start'); };
 $('reset').onclick = () => { if (state?.phase !== 'run' || confirm('Stop the running mission and send everyone back to the landing page?')) cmd('reset'); };
 $('clearplayers').onclick = () => { if (!state?.admin.seats.crew.length || confirm('Everyone seated goes back to the landing page to choose 2 or 4 players again. Go ahead?')) cmd('clearplayers'); };
@@ -44,6 +45,7 @@ net.onState = s => {
   if (document.activeElement !== $('mode') && s.mode) $('mode').value = s.mode;
   if (document.activeElement !== $('delay')) $('delay').checked = !!a.delay;
   if (document.activeElement !== $('roverFaults')) $('roverFaults').checked = !!a.roverFaults;
+  if (document.activeElement !== $('allReal')) $('allReal').checked = !!a.allReal;
   $('mode').disabled = s.phase !== 'lobby';
   $('start').textContent = s.phase === 'run' ? 'Restart now' : 'Start now';
   $('players').textContent = s.players ? `${s.players}-player game.` : 'No game chosen yet: the first visitor to the landing page picks 2 or 4 players.';

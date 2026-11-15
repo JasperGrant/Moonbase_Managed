@@ -164,8 +164,10 @@ setInterval(() => {
   if (tt.shown % 2 === 0 && tt.text[tt.shown - 1] !== ' ') tone(1500 + Math.random() * 500, 0.012, 0.012, 'square');
 }, 33);
 
+let legendReal = null; // the legend leaves out DUD while every sample is real
 function render() {
   const s = state;
+  if (!!s.real !== legendReal) { legendReal = !!s.real; drawLegend(); }
   $('clock').textContent = clock(s.timeLeft ?? CFG.roundSeconds);
   $('o2').textContent = Math.round(s.oxygen ?? CFG.o2Start);
   $('score').textContent = s.score;
@@ -250,7 +252,7 @@ function renderResults(s) {
     $('results').innerHTML = `<div class="panel">
     <div class="verdict ${r.won ? 'won' : 'lost'}">${r.won ? 'MISSION COMPLETE' : 'MISSION FAILED'}</div>
     <p>${esc(r.reason)}</p>
-    <p><b>Score ${d.score}</b> &nbsp;|&nbsp; manifest ${r.wanted ?? 0} of ${r.manifest ?? CFG.sample.manifest} &nbsp;|&nbsp; extra samples ${(r.samples ?? 0) - (r.wanted ?? 0)} &nbsp;|&nbsp; duds ${r.duds ?? 0} &nbsp;|&nbsp; fixed ${r.fixed} &nbsp;|&nbsp; meteor hits ${r.hits}${r.won ? ` &nbsp;|&nbsp; oxygen bonus +${r.bonus}` : ''}</p>
+    <p><b>Score ${d.score}</b> &nbsp;|&nbsp; manifest ${r.wanted ?? 0} of ${r.manifest ?? CFG.sample.manifest} &nbsp;|&nbsp; extra samples ${(r.samples ?? 0) - (r.wanted ?? 0)} ${state?.real ? '' : ` &nbsp;|&nbsp; duds ${r.duds ?? 0}`} &nbsp;|&nbsp; fixed ${r.fixed} &nbsp;|&nbsp; meteor hits ${r.hits}${r.won ? ` &nbsp;|&nbsp; oxygen bonus +${r.bonus}` : ''}</p>
     <h2>What happened</h2>
     <ul class="log">${d.log.filter(l => l.kind !== 'start').map(l =>
       `<li class="${l.kind}"><span class="at">${clock(l.at)}</span><span class="sym">${l.type ? `<img alt="" src="${faultIcon(l.type)}">` : ''}</span><span>${esc(l.text)}</span><span class="d">${l.pts ? '+' + l.pts : ''}${l.o2 ? l.o2 + ' O2' : ''}</span></li>`).join('')}</ul>
@@ -361,7 +363,7 @@ const LEGEND = {
 };
 function drawLegend() {
   const cv = $('legend'); if (!cv) return;
-  const rows = [...LEGEND.frame, ...['ops', 'tech', 'sci'].filter(has).flatMap(r => LEGEND[r])].filter((r, i, a) => a.findIndex(x => x[1] === r[1]) === i);
+  const rows = [...LEGEND.frame, ...['ops', 'tech', 'sci'].filter(has).flatMap(r => LEGEND[r])].filter((r, i, a) => a.findIndex(x => x[1] === r[1]) === i && !(r[0] === 'dud' && state?.real));
   const cols = 3, rh = 34, cw = 230, k = Math.min(2, window.devicePixelRatio || 1);
   cv.width = cols * cw * k; cv.height = Math.ceil(rows.length / cols) * rh * k;
   cv.style.width = cols * cw + 'px'; cv.style.maxWidth = '100%';

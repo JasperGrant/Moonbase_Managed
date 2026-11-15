@@ -1,4 +1,6 @@
-# Moonbase
+<p align="center"><img src="docs/logo.png" alt="Moonbase Managed" width="420"></p>
+
+# Moonbase Managed
 
 A co-op fix-it game. One astronaut is on the Moon in VR. Mission control is on laptops, 384,000 km away. Something breaks. Mission control can see the symptoms but not the cause, the astronaut has the hands but not the information, and fixing things in the wrong order makes everything worse.
 

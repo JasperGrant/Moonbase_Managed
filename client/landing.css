@@ -49,10 +49,17 @@ footer.site a { pointer-events:auto; margin:0; }
 @keyframes rise { from { opacity:0; transform:translateY(14px); } to { opacity:1; transform:none; } }
 @media (prefers-reduced-motion: reduce) { #front header, #choose, #join { animation:none; } #scene { transition:none; } }
 @media (max-height:620px) { #front { justify-content:flex-start; padding-top:4vh; } .tag { display:none; } }
+/* The logo (MOONBASE MANAGED, glowing like a Nixie panel) in place of the title text. Its glow runs past the
+   letters, so it is pulled out by the width of the glow to keep the letters on the page's left edge. */
+#front h1.logo { margin:-3.2% 0 -2.4% -7.5%; line-height:0; text-shadow:none; }
+#front h1.logo img { display:block; width:clamp(260px, 34vw, 470px); height:auto; }
+
 /* A phone: one centred column, the picture dimmed behind it. */
 @media (max-width:760px) {
   .shade { background:linear-gradient(to bottom, rgba(2,3,5,.85) 0%, rgba(2,3,5,.55) 50%, rgba(2,3,5,.75) 100%); }
   #front { max-width:none; align-items:center; text-align:center; padding:8vh 16px 88px; }
   #front h1 { margin:0 0 0 .28em; }
+  #front h1.logo { margin:-3% 0 -2%; }
+  #front h1.logo img { margin:0 auto; }
   .modes { justify-content:center; }
 }

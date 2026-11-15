@@ -136,10 +136,11 @@ export class Hub {
     else if (m.cmd === 'mode') game.setMode(m.mode);
     else if (m.cmd === 'delay') this.delayOn = !!m.on;
     else if (m.cmd === 'roverFaults') game.setRoverFaults(m.on);
+    else if (m.cmd === 'allReal') game.setAllReal(m.on);
   }
   adminView(who) {
     const connections = [...this.clients].filter(c => c.open).map(c => ({ role: c.admin ? 'admin' : c.role, since: c.since }));
-    return { ...this.game.view('all', who), ready: [...this.ready], countdown: this.countdown, suited: this.suited, players: this.players, admin: { seats: this.seats(), connections, keyed: !!this.adminKey, delay: this.delayOn, roverFaults: this.game.roverFaults } };
+    return { ...this.game.view('all', who), ready: [...this.ready], countdown: this.countdown, suited: this.suited, players: this.players, admin: { seats: this.seats(), connections, keyed: !!this.adminKey, delay: this.delayOn, roverFaults: this.game.roverFaults, allReal: this.game.allReal } };
   }
 
   // The delay only applies while a mission is running, so the lobby stays snappy.

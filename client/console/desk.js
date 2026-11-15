@@ -88,8 +88,10 @@ export function createDesk({ canvas, cam, seat, layoutFor, roundSeconds, linkOpe
     });
     // the event lights
     if (!linkOpen()) D.events.link = { t: now };
-    EVENTS.forEach(([light, ic, col], i) => {
-      const e = D.events[light], age = e ? now - e.t : Infinity;
+    // With every sample real (the admin's switch) there is no DUD light: the rest close up to the right.
+    const lights = s.real ? EVENTS.filter(([l]) => l !== 'dud') : EVENTS, skip = EVENTS.length - lights.length;
+    lights.forEach(([light, ic, col], n) => {
+      const i = n + skip, e = D.events[light], age = e ? now - e.t : Infinity;
       let level = light === 'link' ? (linkOpen() ? 0 : 1) : age < LIT_FOR ? 1 : D.last === light ? 0.45 : 0;
       if (col === 'red' && age < BLINK_FOR && !blinkOn()) level = 0.45;
       tile(g, 1076 + i * 37, 37, 30, ic, light === 'power' && e?.amber ? 'amber' : col, level);

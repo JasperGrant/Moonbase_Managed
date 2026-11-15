@@ -18,6 +18,7 @@ export class Game {
     this.evn = 0;
     this.mode = 'demo';
     this.roverFaults = false; // broken rover wheels: off unless the admin turns them on. Kept across missions, like the mode.
+    this.allReal = false;     // no lookalike samples in the field: the admin's switch, kept across missions too
     this.reset();
   }
 
@@ -73,6 +74,8 @@ export class Game {
     this.script = this.script.filter(e => this.allowed(e.ev));
   }
   allowed(ev) { return ev !== 'wheel' || this.roverFaults; }
+  // The admin's switch for lookalike samples. It lays the field, so it takes effect when the next mission starts.
+  setAllReal(on) { this.allReal = !!on; }
 
   start() {
     if (this.phase !== 'lobby') return false;
@@ -80,7 +83,8 @@ export class Game {
     this.phase = 'run';
     this.script = SCRIPTS[this.mode].filter(e => this.allowed(e.ev));
     this.tools = this.layTools(); // after reset, so free play shuffles with this mission's dice
-    const f = layField(this.rng, this.mode);
+    this.real = this.allReal; // this mission's field: no lookalikes in it
+    const f = layField(this.rng, this.mode, { fakes: !this.real });
     this.samples = f.samples.map(s => ({ ...s, at: 'ground', free: false })); // free: cored, and loose to pick up
     this.heat = f.heat;
     this.manifest = f.manifest.map(kind => ({ kind, got: false }));
@@ -552,6 +556,7 @@ export class Game {
     v.oxygen = Math.max(0, this.oxygen);
     v.o2Max = this.o2Max;
     v.tally = this.tally;
+    v.real = this.phase === 'lobby' ? this.allReal : !!this.real; // no lookalikes in this mission (the consoles leave out NOT THIS and DUD)
     const rovers = {};
     for (const [id, r] of Object.entries(this.rovers)) rovers[id] = { x: r.x, z: r.z, ry: r.ry, v: r.v };
     const all = role === 'all';

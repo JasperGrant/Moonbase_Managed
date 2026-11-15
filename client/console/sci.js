@@ -198,8 +198,7 @@ export function guide(g, s, bx, by, bw, bh) {
     drawSample(g, T.look, 92, y + 66, 92, SAMPLE_COL, PAL.foilGold);
     for (const [fx, x] of [[pictoSize, 196], [pictoWhere, 276], [pictoTell, 356]]) { pictoFrame(g, x, y + 62); fx(g, x, y + 62, fx === pictoWhere ? T.where : T.look, T.look); }
     label(g, 'SIZE', 196, y + 112, 9, PAL.inkDial); label(g, 'WHERE', 276, y + 112, 9, PAL.inkDial); label(g, 'TELL', 356, y + 112, 9, PAL.inkDial);
-    dud(g, T.dud, 470, y + 61, 74, 68);
-    label(g, 'NOT THIS', 470, y + 112, 9, PAL.inkDial);
+    if (!s.real) { dud(g, T.dud, 470, y + 61, 74, 68); label(g, 'NOT THIS', 470, y + 112, 9, PAL.inkDial); } // no lookalikes, no NOT THIS
     manifest.filter(m => m.kind === kind).forEach((m, i) => jewel(g, 40 + i * 26, y + cardH - 20, 8, 'green', m.got));
   });
   assay(g, s, 14, need - 70, W - 28);
@@ -220,7 +219,7 @@ function assay(g, s, x, y, w, h = 60) {
   const a = s.assay, cy = y + h / 2;
   if (a) { drawSample(g, a.look, x + 140, cy, h * 0.75, SAMPLE_COL, PAL.foilGold); if (a.kind !== 'dud') drawGlyph(g, SAMPLES[a.kind].glyph, x + 190, cy, 18, PAL.amber); }
   tile(g, x + w - 150, cy, h * 0.6, 'banked', 'green', a && a.kind !== 'dud' ? 1 : 0);
-  tile(g, x + w - 70, cy, h * 0.6, 'dud', 'amber', a && a.kind === 'dud' ? 1 : 0);
+  if (!s.real) tile(g, x + w - 70, cy, h * 0.6, 'dud', 'amber', a && a.kind === 'dud' ? 1 : 0);
 }
 // The 2-player desk's guide: one row per kind, its glyph, its picture, the lookalike struck through, a lamp per
 // piece wanted. No pictograms: one player has the whole base to run.
@@ -231,7 +230,7 @@ export function guideRows(g, s, x, y, w, rowH) {
     g.fillStyle = PAL.dial; g.fillRect(x, yy + 3, w, rowH - 6);
     drawGlyph(g, T.glyph, x + 20, cy, 16, PAL.inkDial);
     photo(g, x + 40 + ph * 0.6, cy, ph * 1.2, ph); drawSample(g, T.look, x + 40 + ph * 0.6, cy, ph * 0.9, SAMPLE_COL, PAL.foilGold);
-    dud(g, T.dud, x + 60 + ph * 1.8, cy, ph * 1.1, ph);
+    if (!s.real) dud(g, T.dud, x + 60 + ph * 1.8, cy, ph * 1.1, ph);
     manifest.filter(m => m.kind === kind).forEach((m, i) => jewel(g, x + w - 24 - i * 22, cy, 7, 'green', m.got));
   });
   return kinds.length;

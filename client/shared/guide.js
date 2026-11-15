@@ -10,7 +10,7 @@ import { CFG } from './config.js';
 export const BRIEFINGS = {
   astronaut: {
     title: 'ASTRONAUT',
-    story: 'You are the only person on the Moon. The base stands on the ridge between Shackleton and de Gerlache craters at the south pole, built by people who learned their trade on Gemini. Mission Control is 384,000 km away and can see everything except what is in front of you.',
+    story: 'You are the only person on the Moon. The base stands on the ridge between Shackleton and de Gerlache craters at the south pole. Mission Control is 384,000 km away and can see everything except what is in front of you.',
     job: `Bring ${CFG.sample.manifest} rock samples home. Mission Ops tells you which rock and where, and a beacon marks the spot. When something breaks you are the only one with hands: take the right tool off its rack, go out, and fix it. Get inside before a meteor shower, or crouch beside the Hauler. Your oxygen refills inside.`,
     controls: {
       headset: [
@@ -52,14 +52,14 @@ export const BRIEFINGS = {
       ['GO', 'GO under the astronaut in the lobby, then READY for yourself'],
       ['BEACON', 'Click a tool on the TOOL BOARD to light a beacon over it; click it again to put it out'],
       ['DESK', 'HANDS: what they hold. TOOL BOARD: the bay each tool lies in. SAMPLES: hand, tray, banked, and the drill. The tape: what has happened'],
-      ['LIGHTS', 'The square lamps along the top light when something happens: alarm, fixed, meteor hit, base dark, power back, banked, dud, no link'],
+      ['LIGHTS', 'The square lamps along the top light when something happens: alarm, fixed, meteor hit, base dark, power back, banked, no link'],
     ],
     talk: 'Everyone. You are the only seat that talks to the astronaut.',
   },
   tech: {
     title: 'TECHNICIAN',
     story: 'You drive two robots across the Moon from a chair in Houston: the Scout, a quick prospector, and the Hauler, the big rover the astronaut rides. You have no map: two camera screens, a compass and a needle that points home.',
-    job: 'Take the Scout where the Scientist asks, so the chart fills in and samples show up. Bring the Hauler to the astronaut, wait for the RIDER lamp, and drive them out and back gently. You alone get the meteor warning: tell Ops at once, so the astronaut gets inside or crouches by a stopped Hauler.',
+    job: 'Take the Scout where the Scientist asks, so the chart fills in and samples show up. Bring the Hauler to the astronaut, and drive them out and back gently. You alone get the meteor warning: tell Ops at once, so the astronaut gets inside.',
     controls: [
       ['SCOUT', 'W A S D. Let go and it stops'],
       ['HAULER', 'Arrow keys, at the same time'],
@@ -71,11 +71,11 @@ export const BRIEFINGS = {
   },
   sci: {
     title: 'SCIENTIST',
-    story: 'You are the geologist, with an orbital survey of the ridge and a field guide to what the mission came for: anorthosite, the Moon\'s oldest crust; basalt, pitted with gas holes; the orange glass of old fire fountains; ice, from craters the sun never touches. Each one has a lookalike.',
-    job: 'Read the chart: bright ground may hold samples. Send the Technician\'s Scout there; the chart sharpens wherever a rover drives, and samples appear on it. Describe the right rock from your field guide so Ops can tell the astronaut. When something breaks, its symbol blinks on the chart: tell Ops what it is and which tool fixes it.',
+    story: 'You are the geologist, with an orbital survey of the ridge and a field guide to what the mission came for: anorthosite, the Moon\'s oldest crust; basalt, pitted with gas holes; the orange glass of old fire fountains; ice, from craters the sun never touches.',
+    job: 'Read the chart: bright ground may hold samples. Send the Technician\'s Scout there; the chart sharpens wherever a rover drives, and samples appear on it. When something breaks, its symbol blinks on the chart: tell Ops what it is and which tool fixes it.',
     controls: [
       ['SURVEY', 'The round chart, always on. R: range. E: centre on the base, the Scout or the Hauler. Click it to stand a beacon there'],
-      ['1 GUIDE', 'A card for each wanted sample: what it looks like, where it lies, its telltale, and NOT THIS. ASSAY: FOUND or DUD'],
+      ['1 GUIDE', 'A card for each wanted sample: what it looks like, where it lies and its telltale. ASSAY: the last rock banked'],
       ['2 POWER', 'The battery and the solar panels\' charge, with a recorder of the last minute'],
       ['3 AIR', 'Oxygen, drain and the LEAK lamp, with a recorder of the last minute'],
     ],

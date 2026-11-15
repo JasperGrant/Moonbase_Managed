@@ -119,7 +119,8 @@ export function pushOut(x, z, r, list = OBSTACLES, bound = R) {
 // wanted sample 45 m north-east, in the brightest block, so the first run is short.
 const DEMO_SPOTS = [{ x: 33, z: -32 }, { x: -58, z: 52 }, { x: 72, z: 50 }, { x: -70, z: -66 }];
 export const DEMO_MANIFEST = ['anor', 'anor', 'ice', 'glass'];
-export function layField(rng, mode) {
+// fakes: false lays no lookalikes (the admin's "all samples real").
+export function layField(rng, mode, { fakes = true } = {}) {
   const demo = mode === 'demo';
   const rnd = demo ? seeded(7311) : rng;
   const types = Object.keys(SAMPLES);
@@ -172,7 +173,7 @@ export function layField(rng, mode) {
   if (demo) reals.splice(reals.indexOf('anor'), 1); // s0 is one of them
   reals.forEach((kind, n) => place(kind, spots[(n + (demo ? 1 : 0)) % spots.length], 14));
   // Lookalikes: one for each real sample, most in the clusters, some on their own out in the field.
-  reals.forEach((kind, n) => {
+  if (fakes) reals.forEach((kind, n) => {
     if (rnd() < 0.65) place(kind, spots[(n + 2) % spots.length], 18, true);
     else { const a = rnd() * Math.PI * 2, d = 45 + rnd() * 60; place(kind, { x: Math.cos(a) * d, z: Math.sin(a) * d }, 10, true); }
   });

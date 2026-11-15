@@ -310,6 +310,12 @@ const kit = (g, tool) => {
   assert.equal(new Game(rng).roverFaults, false, 'rover faults are off by default');
   assert.deepEqual(demoOrder(true).slice(0, 3), ['dust', 'wheel', 'meteor'], 'the demo breaks the same things in the same order');
   assert.ok(!demoOrder(false).includes('wheel'), 'with rover faults off, no wheel ever breaks');
+  // Lookalikes: in the field unless the admin makes every sample real, from the next mission.
+  const field = allReal => { const d = new Game(rng); d.setAllReal(allReal); d.start(); return d; };
+  assert.ok(field(false).samples.some(x => x.kind === 'dud'), 'lookalikes lie in the field by default');
+  const real = field(true);
+  assert.ok(!real.samples.some(x => x.kind === 'dud') && real.view('sci').real === true, 'all samples real: no lookalikes, and the consoles are told');
+  assert.ok(real.manifest.every(m => real.samples.some(x => x.kind === m.kind)), 'all samples real: every wanted kind still lies in the field');
 }
 
 // ---------- meteors: a warning, cover, and nothing left broken ----------
@@ -561,7 +567,7 @@ const kit = (g, tool) => {
   const g = fresh();
   g.break('dust'); g.break('hull'); g.break('suit'); // (the test forces what the director never would)
   const only = (role, allowed) => { for (const k of Object.keys(g.view(role))) assert.ok(allowed.includes(k), `${role} sees ${k}`); };
-  const common = ['t', 'n', 'phase', 'mode', 'crew', 'score', 'result', 'powered', 'ev', 'timeLeft', 'oxygen', 'o2Max', 'tally'];
+  const common = ['t', 'n', 'phase', 'mode', 'crew', 'score', 'result', 'powered', 'ev', 'timeLeft', 'oxygen', 'o2Max', 'tally', 'real'];
   only('astronaut', [...common, 'hands', 'tools', 'scene', 'suit', 'rovers', 'riding', 'carry', 'waypoint']);
   only('ops', [...common, 'hands', 'tools', 'carry', 'tray', 'waypoint', 'drill']);
   only('tech', [...common, 'rovers', 'rider', 'scene', 'astro', 'meteor', 'tools']);
