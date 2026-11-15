@@ -2,20 +2,21 @@
 // so nobody can disagree about the rules.
 
 export const CFG = {
-  roundSeconds: 180,          // judges get a few minutes: 3:00 of play
+  roundSeconds: 360,          // 6:00: two or three sample runs, and four or five faults one at a time
   delayMs: 1300,              // Earth-Moon one-way light time, about 1.3 s
   tickMs: 100,                // server simulation step
 
   o2Start: 100,
-  o2DrainPerSec: 0.28,        // suit oxygen drain (about 100x faster than a real EVA)
-  leakMultiplier: 3,          // a leak drains oxygen this many times faster; two leaks at once, five times
+  o2DrainPerSec: 0.35,        // suit oxygen drain: a full tank is 286 s outside, one long run
+  o2RefillPerSec: 3,          // inside the base, while it has power, the suit tops up (less any leak)
+  leakMultiplier: 3,          // a leak drains oxygen this many times faster
   meteorHit: 20,              // oxygen lost when caught in the open
   fixPoints: 100,             // score per fault fixed
 
   batterySeconds: 60,         // 100% to 0% while a power fault is active
   rechargeSeconds: 20,        // 0% to 100% with no power fault
-  blackoutEndsAt: 10,         // battery % at which a blackout lifts
-  generatorSeconds: 25,       // power from one pull of the backup generator
+  blackoutEndsAt: 10,         // battery % at which a flat battery is counted as charged again
+  generatorSeconds: 25,       // lights and oxygen refill from one pull of the backup generator
 
   tireRestockSeconds: 30,     // a new space tire turns up at the cargo end of the hall this long after one is fitted
 
@@ -26,9 +27,15 @@ export const CFG = {
   roverCoverRadius: 2.2,      // metres from the rover's centre (about 1.5 m from its side)
 
   reach: 4.5,                 // metres: the server refuses work on a fixture further away than this
-  roverSpeed: 2.7,            // m/s, about 6 mph (crewed lunar terrain vehicle class)
-  bounds: 45,                 // metres from the habitat that players and rover may go
+  bounds: 120,                // metres from the habitat that players and rovers may go: the field
+  pad: 22,                    // the graded pad round the base, where every base fault is
   habRadius: 2.9,
+  teleportRecharge: 2.5,      // seconds between hand-tracked teleport hops
+  rover: { rampSeconds: 0.6 },// rovers ease up to speed and down to a stop
+  ride: { snapYaw: false, mountReach: 2.5 }, // riding the Hauler: turn with it (or hold heading and snap), how near to get on
+  survey: { known: 30 },      // metres round the base that start explored on the Scientist's chart
+  // Samples: what the mission is for. Four on the manifest, a tray of four cups on the Hauler.
+  sample: { manifest: 4, tray: 4, wanted: 250, extra: 100, dud: 0, drawRadius: 45, reach: 3, portReach: 2.5 },
   // The astronaut starts inside the hall (room coordinates, see client/interior.js), facing up it, with
   // the tools lying round. The server sees them at door S until they go out.
   spawn: { inside: true, x: 0, z: -1.3, door: 'S' },
@@ -36,11 +43,12 @@ export const CFG = {
   // hisses, the other hatch swings open.
   airlock: { dwell: 0.3, close: 1.0, repress: 1.2, open: 1.0, abort: 0.6 },
 
-  // Free play: after the scripted opening, random faults and showers.
-  freeFaultEvery: [25, 35],   // seconds between random faults
-  freeMaxFaults: 3,
-  freeMeteorEvery: [50, 70],  // seconds between showers
-  freeHullChance: 0.5,        // chance a shower cracks the hull
+  // One thing goes wrong at a time. A fault or a shower starts only when nothing is broken and no shower is
+  // under way, and after each fix there is a breather of faultGapSeconds before the next.
+  firstFaultSeconds: 30,      // the quiet start: read the chart, send the Scout out, find a tool
+  faultGapSeconds: 20,
+  freeMaxFaults: 1,
+  freeMeteorChance: 0.25,     // free play: the chance the next event is a shower rather than a fault
 
   // The lobby: every role is picked and ready, then a short countdown starts the mission.
   // requireFullCrew: false lets one developer ready up alone (or run the server with SOLO=1).
@@ -119,29 +127,54 @@ export const PLACES = {
   restock: 8, // a new tire turns up here
   panels: [{ x: 9, z: 8 }, { x: 9, z: 11 }, { x: 9, z: 14 }],
   cracks: CRACK_ANGLES.map(deg => { const a = deg * Math.PI / 180; return { a, x: Math.cos(a) * 2.52, z: Math.sin(a) * 2.52 }; }),
-  rover:  { x: 4, z: 9 },
+  rover:  { x: 4, z: 9 },                 // the Hauler's start (kept under this name for the scenery code)
+  rovers: { hauler: { x: 4, z: 9 }, scout: { x: -4, z: 8 } },
+  // The sample port: a hopper on the habitat's outside wall beside door S, at waist height.
+  port:   { x: 1.6, z: 2.32, ry: Math.atan2(1.6, 2.32) },
   // Scenery only: nothing to fix here.
   depot:  { x: -9, z: -5 },
   dish:   { x: 10, z: -6 },
   drill:  { x: -7, z: 10 },
 };
 
-// The director plays one of these. `at` is seconds into the round. A meteor entry is the moment
-// the radar warning starts; impacts begin CFG.meteorWarnSeconds later and `after` lists what the
-// shower breaks when it ends.
+// The director plays one of these, in order, one at a time: each event waits until nothing is broken, no
+// shower is under way, and CFG.faultGapSeconds have passed since the last fix (CFG.firstFaultSeconds for
+// the first). A meteor entry is the moment the warning starts; impacts begin CFG.meteorWarnSeconds later.
+// A shower breaks nothing itself: caught in the open, the astronaut's suit starts leaking.
 export const SCRIPTS = {
-  // The same every time, for judges.
+  // The same things in the same order every time, for judges.
   demo: [
-    { at: 5,   ev: 'dust' },
-    { at: 45,  ev: 'wheel' },
-    { at: 85,  ev: 'meteor', after: ['dust', 'hull'] },
-    { at: 150, ev: 'suit' },
+    { ev: 'dust' },
+    { ev: 'wheel', which: 'scout' },
+    { ev: 'meteor' },
+    { ev: 'hull' },
+    { ev: 'suit' },
   ],
   // One scripted opener, then random.
   free: [
-    { at: 5, ev: 'dust' },
+    { ev: 'dust' },
   ],
 };
+
+// The two rovers. The Technician drives both at once: the Scout with W A S D, the Hauler with the arrows.
+// reveal: metres round it that the Scientist's chart develops as it drives. radius: its body, for bumping.
+export const ROVERS = {
+  scout:  { name: 'Scout',  speed: 6,   turn: 1.8, reveal: 16, radius: 0.9 },
+  hauler: { name: 'Hauler', speed: 4.5, turn: 1.2, riderTurn: 0.7, reveal: 8, radius: 1.6 },
+};
+// Where the rider stands on the Hauler (its own frame: +z is forward), and the tray's four cups.
+export const HAULER = { plate: { x: 0, y: 0.45, z: -1.55, hw: 0.45, hd: 0.25 }, cups: [-0.45, -0.15, 0.15, 0.45].map(x => ({ x, y: 1.02, z: -0.98 })) };
+
+// The rock samples. Each type has one look, and one lookalike (a dud) that differs in a way you can say
+// out loud. Only the Scientist's field guide shows which is which.
+//   where: rim | shadow | flat | patch. tell: flecks | holes | beads | frost. glyph: the chart's mark.
+export const SAMPLES = {
+  anor:   { name: 'Anorthosite',     look: 'pale-flecked', dud: 'pale-plain',  glyph: 'diamond', where: 'rim',    tell: 'flecks' },
+  basalt: { name: 'Vesicular basalt', look: 'dark-pitted', dud: 'dark-smooth', glyph: 'dots',    where: 'flat',   tell: 'holes' },
+  glass:  { name: 'Orange glass',    look: 'ochre-beads',  dud: 'foil-scrap',  glyph: 'triangle', where: 'patch',  tell: 'beads' },
+  ice:    { name: 'Ice-bearing clod', look: 'frost-blue',  dud: 'dusty-pale',  glyph: 'star',    where: 'shadow', tell: 'frost' },
+};
+export const LOOKS = Object.values(SAMPLES).flatMap(t => [t.look, t.dud]);
 export const MODES = { demo: 'Demo mission', free: 'Free play' };
 
 export const ROLES = {

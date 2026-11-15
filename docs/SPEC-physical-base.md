@@ -179,6 +179,8 @@ Each game tool gets a compound collider of two or three primitives and a real ma
 
 ### Picking up, carrying, dropping: one tool at a time
 
+> **Overridden** by [design/hands-and-avatar.md](design/hands-and-avatar.md) (merged with this spec): the astronaut has two hands and holds **one tool in each**, taken with the trigger (or grip) and let go when it is released. The server keeps `hands: [left, right]` instead of `held`; Mission Ops gets a HANDS panel above the tool log, which names the hand. The rest of this section (physics, drop, throw, rest, the tool log) stands.
+
 **Decided (Sevan): the astronaut holds one tool at a time.** The belt goes. You carry a tool in your hand, and to take another you put the first one down (or throw it). That makes every trip into the hall a choice of which one tool to bring, which replaces the belt's weight puzzle (welder + brush + patch kit fill it, the tire or generator means leaving something). The heavy tools stay heavy in physics: the tire rolls, the generator barely moves when knocked, and both swing slowly in the hand.
 
 - **Grab** (`stations.js` `nearest()` 265-279 and `grab()` 290-305): with nothing in either hand, a loose tool within `GRAB_LOOSE` (0.2 m; 0.35 for the tire and generator) of a hand gets the ring. Closing the hand sends `{ take: id }` and makes the body kinematic in that hand (`phys.hold`). If the other hand already holds a tool, the ring is red, closing the hand buzzes twice and nothing happens. The other hand stays free for the work: pulling the wheel, plugs, the generator cord.

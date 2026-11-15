@@ -2,11 +2,15 @@
 // see the same place. Everything is procedural: terrain, rocks, textures, Earth, stars. Nothing
 // is downloaded, so the page works offline and on Cloudflare as is. Swap in real models here
 // later without touching the game logic.
-import { CFG, PLACES, DUST_COLS, DUST_ROWS, CRACK_POINTS } from '/shared/config.js';
+import { CFG, PLACES, DUST_COLS, DUST_ROWS, CRACK_POINTS, HAULER, LOOKS } from '/shared/config.js';
+import { CRATERS, BOULDERS as FIELD_BOULDERS, LANDMARKS } from '/shared/field.js';
+import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { HORIZON, TERRAIN, SUN_AZ_DEG } from '/shared/horizon.js';
-import { PAL } from '/shared/palette.js';
+import { PAL, SAMPLE_COL, FONT, nixie } from '/shared/palette.js';
 import { buildDust } from '/dust.js';
 import { loadPeriod, loadModel } from '/shared/assets.js';
+import { buildAvatar } from '/avatar.js';
 import { buildAirlock, CHAMBER } from '/airlock.js';
 
 // The base sits on the Connecting Ridge between Shackleton and de Gerlache craters at the lunar
@@ -88,6 +92,13 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
     sun.shadow.normalBias = 0.03;
   }
   scene.add(sun, sun.target);
+  // The shadow box (64 m) follows whoever is looking, a metre at a time, so the far field has shadows too.
+  const follow = (x, z) => {
+    const fx = Math.round(x), fz = Math.round(z);
+    if (sun.target.position.x === fx && sun.target.position.z === fz) return;
+    sun.target.position.set(fx, 0, fz); sun.position.copy(sunDir).multiplyScalar(90).add(sun.target.position);
+    sun.target.updateMatrixWorld();
+  };
   scene.add(new THREE.HemisphereLight(0x4a5560, 0x2a2620, 0.25));
 
   // Environment map from a stand-in scene (bright ground, black sky, a hot sun) so metal,
@@ -210,7 +221,6 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
   const dark = new THREE.MeshStandardMaterial({ color: PAL.hex.consoleDeep, roughness: 0.85, metalness: 0.2 });
   const steel = new THREE.MeshStandardMaterial({ color: PAL.hex.aluminium, roughness: 0.42, metalness: 0.85 });
   const solar = new THREE.MeshStandardMaterial({ map: solarTex, roughness: 0.22, metalness: 0.55 });
-  const visor = new THREE.MeshStandardMaterial({ color: 0xc89a3e, metalness: 1, roughness: 0.12 });
   const orange = new THREE.MeshStandardMaterial({ color: PAL.hex.orange, roughness: 0.75 });
   const warmGlow = new THREE.MeshBasicMaterial({ color: 0xe8b872, toneMapped: false });
   const windowGlow = new THREE.MeshBasicMaterial({ color: 0xe8b872, toneMapped: false });
@@ -242,29 +252,18 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
     return (H[j * n + i] * (1 - fu) + H[j * n + i + 1] * fu) * (1 - fv) + (H[(j + 1) * n + i] * (1 - fu) + H[(j + 1) * n + i + 1] * fu) * fv;
   };
   const ramp = (v, a, b) => { const k = Math.min(1, Math.max(0, (v - a) / (b - a))); return k * k * (3 - 2 * k); };
-  const sfdCount = (dMin, dMax, areaKm2) => SFD_A * (Math.pow(dMin / 1000, -SFD_B) - Math.pow(dMax / 1000, -SFD_B)) * areaKm2;
-  const sfdDraw = (dMin, dMax) => dMin * Math.pow(1 - rnd() * (1 - Math.pow(dMax / dMin, -SFD_B)), -1 / SFD_B);
-  const FIELD = 760, CELL = 20, NC = Math.ceil(2 * FIELD / CELL);
+  // The small craters come from client/shared/field.js, so the Scientist's chart draws the same ones.
+  const FIELD_EXT = 760, CELL = 20, NC = Math.ceil(2 * FIELD_EXT / CELL);
   const craterGrid = Array.from({ length: NC * NC }, () => []);
-  const craters = [];
-  function addCraters(rMin, rMax, dMin, dMax) {
-    const count = Math.round(sfdCount(dMin, dMax, Math.PI * (rMax * rMax - rMin * rMin) / 1e6));
-    for (let i = 0; i < count; i++) {
-      const a = rnd() * Math.PI * 2, r = Math.sqrt(rMin * rMin + rnd() * (rMax * rMax - rMin * rMin));
-      const D = sfdDraw(dMin, dMax), fresh = Math.pow(rnd(), 2.2);
-      const c = { x: Math.cos(a) * r, z: Math.sin(a) * r, R: D / 2, depth: D * (0.05 + 0.13 * fresh), rim: D * (0.015 + 0.025 * fresh) };
-      craters.push(c);
-      const reach = c.R * 3;
-      for (let gx = Math.floor((c.x - reach + FIELD) / CELL); gx <= Math.floor((c.x + reach + FIELD) / CELL); gx++)
-        for (let gz = Math.floor((c.z - reach + FIELD) / CELL); gz <= Math.floor((c.z + reach + FIELD) / CELL); gz++)
-          if (gx >= 0 && gz >= 0 && gx < NC && gz < NC) craterGrid[gz * NC + gx].push(c);
-    }
+  for (const c of CRATERS) {
+    const reach = c.R * 3;
+    for (let gx = Math.floor((c.x - reach + FIELD_EXT) / CELL); gx <= Math.floor((c.x + reach + FIELD_EXT) / CELL); gx++)
+      for (let gz = Math.floor((c.z - reach + FIELD_EXT) / CELL); gz <= Math.floor((c.z + reach + FIELD_EXT) / CELL); gz++)
+        if (gx >= 0 && gz >= 0 && gx < NC && gz < NC) craterGrid[gz * NC + gx].push(c);
   }
-  addCraters(0, 130, 3, 100);      // the mesh is fine enough for 3 m craters near the base
-  addCraters(130, 1080, 10, 100);  // further out, 10 m and up; anything over 100 m is already in the DEM
   const r0 = 7.9; // the graded pad round the base, metres
   function craterHeight(x, z, r) {
-    const gx = Math.floor((x + FIELD) / CELL), gz = Math.floor((z + FIELD) / CELL);
+    const gx = Math.floor((x + FIELD_EXT) / CELL), gz = Math.floor((z + FIELD_EXT) / CELL);
     if (gx < 0 || gz < 0 || gx >= NC || gz >= NC) return 0;
     let h = 0;
     for (const c of craterGrid[gz * NC + gx]) {
@@ -278,7 +277,7 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
   // Under and round each airlock chamber the ground is dug a few centimetres below its grate floor
   // (y = 0.004): the fine undulation used to come up through the floor in patches of regolith.
   const chamberMid = Object.values(PLACES.doors).map(d => { const k = CHAMBER.outset + CHAMBER.depth / 2; return { x: d.x + Math.sin(d.ry) * k, z: d.z + Math.cos(d.ry) * k }; });
-  function height(x, z) {
+  function heightRaw(x, z) {
     const r = Math.hypot(x, z);
     let h = ramp(r, 18, 70) * demAt(x, z);                      // real ground, blended in past the pad
     h += (0.03 + 0.17 * ramp(r, 15, 40)) * N.fbm(x * 0.6, z * 0.6, 2, 3); // fine undulation
@@ -288,44 +287,70 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
     const k = ramp(near, 1.4, 3.0);
     return h * k - 0.05 * (1 - k);
   }
-  void craters;
-  // Vertices are packed toward the base with a power curve: about 0.4 m apart at the habitat,
-  // 1 m at 10 m out and 2.4 m at the edge of the 45 m play area.
-  const SIZE = 1500, SEG = 300, POW = 2.2, HALF = SIZE / 2, ROW = SEG + 1;
-  const remap = t => Math.sign(t) * Math.pow(Math.abs(t), POW) * HALF; // grid coordinate (-1..1) -> metres
-  const gridX = Float32Array.from({ length: ROW }, (_, i) => remap(2 * i / SEG - 1));
-  const hgrid = new Float32Array(ROW * ROW);
+  // The ground you can stand on is a square lattice at 2 m over the whole field (and 10 m past it), and
+  // height(x, z) reads that lattice triangle for triangle: exactly the surface that is drawn, so feet, rovers,
+  // rocks and samples sit on what you see. Past it, a coarser ring out to the skyline.
+  const IN = CFG.bounds + 10, STEP = 2, NI = Math.round(2 * IN / STEP), W1 = NI + 1;
+  const lattice = new Float32Array(W1 * W1);
+  for (let j = 0; j <= NI; j++) for (let i = 0; i <= NI; i++) lattice[j * W1 + i] = heightRaw(-IN + i * STEP, -IN + j * STEP);
+  function height(x, z) {
+    const u = (x + IN) / STEP, v = (z + IN) / STEP;
+    if (!(u >= 0 && v >= 0 && u < NI && v < NI)) return heightRaw(x, z);
+    const i = Math.floor(u), j = Math.floor(v), fx = u - i, fz = v - j;
+    const ha = lattice[j * W1 + i], hd = lattice[j * W1 + i + 1], hb = lattice[(j + 1) * W1 + i], hc = lattice[(j + 1) * W1 + i + 1];
+    return fx + fz <= 1 ? ha + (hd - ha) * fx + (hb - ha) * fz : hc + (hb - hc) * (1 - fx) + (hd - hc) * (1 - fz);
+  }
+  // The ground's slope at (x, z), as a unit normal.
+  function normalAt(x, z, out) {
+    const e = 0.6, hx = height(x + e, z) - height(x - e, z), hz = height(x, z + e) - height(x, z - e);
+    return out.set(-hx / (2 * e), 1, -hz / (2 * e)).normalize();
+  }
+  const SIZE = 1500;
+  const tone = (x, z) => 0.86 + 0.18 * N.fbm(x * 0.02 + 40, z * 0.02, 5, 3) + 0.06 * N.fbm(x * 0.15, z * 0.15, 6, 2); // broad bright/dark patches break up the tiling
+  {
+    // The field: (i, j) -> (x, z), two triangles a cell, the diagonal from (i, j+1) to (i+1, j), as height() reads it.
+    const pos = new Float32Array(W1 * W1 * 3), col = new Float32Array(W1 * W1 * 3), uv = new Float32Array(W1 * W1 * 2), idx = [];
+    for (let j = 0; j <= NI; j++) for (let i = 0; i <= NI; i++) {
+      const k = j * W1 + i, x = -IN + i * STEP, z = -IN + j * STEP, t = tone(x, z);
+      pos.set([x, lattice[k], z], k * 3); col.set([t, t, t * 0.985], k * 3); uv.set([x / SIZE + 0.5, z / SIZE + 0.5], k * 2);
+      if (i < NI && j < NI) { const a = k, b = k + W1, c = k + W1 + 1, d = k + 1; idx.push(a, b, d, b, c, d); }
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+    g.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+    g.setIndex(idx);
+    g.computeVertexNormals();
+    const field = new THREE.Mesh(g, regolithMat);
+    field.name = 'Ground_Field'; field.receiveShadow = true;
+    scene.add(field);
+  }
+  const SEG = 160;
+  const groundAt = height; // the height of the ground as drawn: the lattice mesh is exactly what height() reads
   const groundGeo = new THREE.PlaneGeometry(SIZE, SIZE, SEG, SEG);
   groundGeo.rotateX(-Math.PI / 2);
   {
-    const gp = groundGeo.attributes.position, col = new Float32Array(gp.count * 3), uv = groundGeo.attributes.uv;
+    const gp = groundGeo.attributes.position, col = new Float32Array(gp.count * 3), uv = groundGeo.attributes.uv, inside = new Uint8Array(gp.count);
     for (let i = 0; i < gp.count; i++) {
-      const x = gridX[i % ROW], z = gridX[Math.floor(i / ROW)];
-      const h = height(x, z);
-      hgrid[i] = h;
-      gp.setXYZ(i, x, h, z);
+      // Denser vertices near the base: remap the regular grid with a power curve.
+      const u = gp.getX(i) / (SIZE / 2), v = gp.getZ(i) / (SIZE / 2);
+      const x = Math.sign(u) * Math.pow(Math.abs(u), 2.0) * (SIZE / 2), z = Math.sign(v) * Math.pow(Math.abs(v), 2.0) * (SIZE / 2);
+      inside[i] = Math.abs(x) < IN && Math.abs(z) < IN ? 1 : 0;
+      gp.setXYZ(i, x, heightRaw(x, z) - (inside[i] ? 0.5 : 0), z); // under the field's own lattice, out of sight
       uv.setXY(i, x / SIZE + 0.5, z / SIZE + 0.5);
-      // Vertex colour breaks up texture tiling: broad bright/dark patches.
-      const tone = 0.86 + 0.18 * N.fbm(x * 0.02 + 40, z * 0.02, 5, 3) + 0.06 * N.fbm(x * 0.15, z * 0.15, 6, 2);
-      col[i * 3] = tone; col[i * 3 + 1] = tone; col[i * 3 + 2] = tone * 0.985;
+      const t = tone(x, z);
+      col[i * 3] = t; col[i * 3 + 1] = t; col[i * 3 + 2] = t * 0.985;
     }
     groundGeo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+    const old = groundGeo.index.array, keep = [];
+    for (let n = 0; n < old.length; n += 3) if (!(inside[old[n]] && inside[old[n + 1]] && inside[old[n + 2]])) keep.push(old[n], old[n + 1], old[n + 2]);
+    groundGeo.setIndex(keep);
     groundGeo.computeVertexNormals();
   }
   const ground = new THREE.Mesh(groundGeo, regolithMat);
+  ground.name = 'Ground_Far';
   ground.receiveShadow = true;
   scene.add(ground);
-  // The height of the ground as drawn (the mesh, not the formula behind it), so feet, wheels and tools
-  // sit on what you see even where a crater is smaller than the mesh spacing.
-  const cellOf = v => { // index of the grid cell holding v, and how far across it
-    const t = Math.sign(v) * Math.pow(Math.min(1, Math.abs(v) / HALF), 1 / POW);
-    const i = Math.min(SEG - 1, Math.max(0, Math.floor((t + 1) / 2 * SEG)));
-    return [i, Math.min(1, Math.max(0, (v - gridX[i]) / (gridX[i + 1] - gridX[i])))];
-  };
-  function groundAt(x, z) {
-    const [i, fx] = cellOf(x), [j, fz] = cellOf(z), a = j * ROW + i;
-    return (hgrid[a] * (1 - fx) + hgrid[a + 1] * fx) * (1 - fz) + (hgrid[a + ROW] * (1 - fx) + hgrid[a + ROW + 1] * fx) * fz;
-  }
 
   // The skyline: the real 360-degree horizon seen from the site (LOLA, out to 290 km, with the
   // Moon's curvature). A band of ground runs from the edge of the terrain mesh out to a ring at
@@ -354,8 +379,9 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
 
   // ---------- rocks ----------
   // Two shapes (jagged, rounded), each displaced by noise, instanced many times.
-  const SITES = [...Object.values(PLACES.doors).map(d => ({ x: d.x + Math.sin(d.ry) * 2, z: d.z + Math.cos(d.ry) * 2 })), ...PLACES.panels, PLACES.rover, PLACES.depot, PLACES.dish, PLACES.drill];
-  const keepClear = (x, z, m) => Math.hypot(x, z) > 4.5 + m && SITES.every(s => Math.hypot(x - s.x, z - s.z) > 2.8 + m);
+  const SITES = [...Object.values(PLACES.doors).map(d => ({ x: d.x + Math.sin(d.ry) * 2, z: d.z + Math.cos(d.ry) * 2 })), ...PLACES.panels, ...Object.values(PLACES.rovers), PLACES.depot, PLACES.dish, PLACES.drill, PLACES.port];
+  const SOLIDS = [...FIELD_BOULDERS.map(b => ({ x: b.x, z: b.z, r: b.r })), ...LANDMARKS];
+  const keepClear = (x, z, m) => Math.hypot(x, z) > 4.5 + m && SITES.every(s => Math.hypot(x - s.x, z - s.z) > 2.8 + m) && SOLIDS.every(o => Math.hypot(x - o.x, z - o.z) > o.r + m + 0.5);
   // A rock: a sphere pushed about by noise (low-frequency lumps plus ridged creases), stretched to its
   // own proportions, then cut by random fracture planes so it has flat broken faces like a boulder
   // that spalled off a crater rim. Normalised to a radius of about 1, centred.
@@ -406,8 +432,8 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
   function scatter(geo, count, rMin, rMax, sMin, sMax, { bury = 0.25, tilt = 0.5 } = {}) {
     const im = new THREE.InstancedMesh(geo, rockMat, count);
     for (let i = 0; i < count; i++) {
-      let x, z, s;
-      do { const a = rnd() * Math.PI * 2, r = rMin + Math.pow(rnd(), 1.4) * (rMax - rMin); x = Math.cos(a) * r; z = Math.sin(a) * r; s = sMin + rnd() * rnd() * (sMax - sMin); } while (!keepClear(x, z, s) || (s > 0.6 && Math.hypot(x, z) < CFG.bounds + 1)); // nothing you could walk through inside the play area
+      let x, z, s, n = 0;
+      do { const a = rnd() * Math.PI * 2, r = rMin + Math.pow(rnd(), 1.4) * (rMax - rMin); x = Math.cos(a) * r; z = Math.sin(a) * r; s = sMin + rnd() * rnd() * (sMax - sMin); } while ((!keepClear(x, z, s) || (s > 0.6 && Math.hypot(x, z) < CFG.bounds + 4)) && ++n < 50); // nothing you could walk through inside the play area
       e.set((rnd() - 0.5) * 2 * tilt, rnd() * Math.PI * 2, (rnd() - 0.5) * 2 * tilt, 'YXZ');
       sc.set(s * (0.65 + rnd() * 0.75), s * (0.55 + rnd() * 0.6), s * (0.65 + rnd() * 0.75));
       m4.compose(v3.set(x, groundAt(x, z) - geo.userData.bottom * sc.y * (1 - bury), z), q.setFromEuler(e), sc);
@@ -419,23 +445,44 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
     scene.add(im);
     return im;
   }
-  // Eight shapes. Boulders (outside the play area): angular blocks, slabs, many-faceted chunks, knobbly
-  // breccia and two weathered rounded ones. Pebbles (everywhere): three small, sharp shapes.
-  const BOULDERS = [
+  // Eight shapes. Boulders: angular blocks, slabs, many-faceted chunks, knobbly breccia and a weathered
+  // rounded one. Pebbles: three small, sharp shapes. Out in the field only knee-high rocks are walked through;
+  // every big one is a solid BOULDER (client/shared/field.js) so nothing blocks you that you cannot see.
+  const ROCKS = [
     rockGeo(3, 101, { amp: 0.30, cuts: 9, squash: [1.25, 0.80, 0.90] }),
     rockGeo(3, 202, { amp: 0.32, cuts: 6, squash: [1.60, 0.55, 0.90] }),
     rockGeo(3, 303, { amp: 0.26, cuts: 13, depth: [0.45, 0.75], squash: [0.95, 1.00, 1.10] }),
     rockGeo(3, 404, { amp: 0.50, cuts: 4, squash: [1.10, 0.75, 1.35], ridged: 1.6 }),
     rockGeo(2, 505, { amp: 0.24, cuts: 2, depth: [0.7, 0.9], squash: [1.00, 0.70, 1.15], ridged: 0.3 }),
   ];
+  const TOOTH = rockGeo(2, 909, { amp: 0.30, cuts: 6, squash: [0.7, 1.5, 0.8] });
   const PEBBLES = [
     rockGeo(1, 606, { amp: 0.30, cuts: 5, squash: [1.30, 0.70, 0.90] }),
     rockGeo(1, 707, { amp: 0.35, cuts: 4, squash: [0.90, 0.60, 1.20] }),
     rockGeo(1, 808, { amp: 0.25, cuts: 7, squash: [1.10, 0.85, 1.00] }),
   ];
-  [24, 18, 18, 16, 0].forEach((n, i) => n && scatter(BOULDERS[i], n, 6, 120, 0.3, 2.6, { bury: 0.3, tilt: 0.45 }));     // big, mostly far
-  [20, 14, 16, 18, 22].forEach((n, i) => scatter(BOULDERS[i], n, 5, 90, 0.25, 1.6, { bury: 0.35, tilt: 0.6 }));        // medium
-  [240, 230, 230].forEach((n, i) => scatter(PEBBLES[i], n, 2.5, 80, 0.05, 0.3, { bury: 0.2, tilt: Math.PI }));          // small, any way up
+  [24, 18, 18, 16, 0].forEach((n, i) => n && scatter(ROCKS[i], n * 3, CFG.bounds + 6, 400, 0.6, 2.6, { bury: 0.3, tilt: 0.45 }));  // big, past the field
+  [20, 14, 16, 18, 22].forEach((n, i) => scatter(ROCKS[i], n * 3, 3, CFG.bounds + 6, 0.25, 0.6, { bury: 0.35, tilt: 0.6 }));    // knee-high, over the field
+  [400, 380, 380].forEach((n, i) => scatter(PEBBLES[i], n, 2.5, CFG.bounds + 6, 0.05, 0.3, { bury: 0.2, tilt: Math.PI }));      // small, any way up
+  // The field's boulders: solid, on the chart, and how people give directions.
+  {
+    const shapes = { jagged: ROCKS[0], rounded: ROCKS[4], tooth: TOOTH }, by = { jagged: [], rounded: [], tooth: [] };
+    for (const b of FIELD_BOULDERS) by[b.shape].push(b);
+    for (const [shape, list] of Object.entries(by)) {
+      if (!list.length) continue;
+      const geo = shapes[shape], im = new THREE.InstancedMesh(geo, rockMat, list.length);
+      im.name = 'Boulders_' + shape;
+      list.forEach((b, i) => {
+        const tilt = Math.sin(b.x * 3.1 + b.z) * 0.12, s = b.s * 0.5;
+        m4.compose(v3.set(b.x, groundAt(b.x, b.z) - geo.userData.bottom * s * 0.75, b.z), q.setFromEuler(e.set(tilt, b.ry, -tilt * 0.6, 'YXZ')), sc.set(s * 1.1, s, s));
+        im.setMatrixAt(i, m4);
+        const t = 0.78 + Math.abs(Math.sin(b.x * 7.7 + b.z * 3.3)) * 0.25;
+        im.setColorAt(i, c3.setRGB(t, t * 0.99, t * 0.95));
+      });
+      im.castShadow = im.receiveShadow = true;
+      scene.add(im);
+    }
+  }
 
   // ---------- sky ----------
   {
@@ -747,48 +794,286 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
   }
   const hash = (a, b) => { const s = Math.sin(a * 127.1 + b * 311.7) * 43758.5453; return s - Math.floor(s); };
 
-  // ---------- rover (model faces +z). Its lights are what the astronaut follows in the dark. ----------
-  const rover = new THREE.Group();
-  {
-    mesh(new THREE.BoxGeometry(1.5, 0.12, 2.4), whitePlain, 0, 0.62, 0, rover);                   // chassis floor
-    mesh(new THREE.BoxGeometry(1.5, 0.3, 0.4), gold, 0, 0.83, -1.0, rover);                       // aft equipment bay
-    mesh(new THREE.BoxGeometry(1.1, 0.5, 0.7), gold, 0, 0.93, -0.35, rover);
-    for (const x of [-0.45, 0.45]) { mesh(new THREE.BoxGeometry(0.5, 0.08, 0.5), dark, x, 0.72, 0.5, rover); mesh(new THREE.BoxGeometry(0.5, 0.5, 0.08), dark, x, 1.0, 0.25, rover); } // seats
-    mesh(new THREE.BoxGeometry(0.5, 0.3, 0.05), dark, 0, 1.05, 0.95, rover);                       // console
-    mesh(new THREE.BoxGeometry(0.3, 0.12, 0.02), new THREE.MeshBasicMaterial({ color: PAL.hex.phosphor, toneMapped: false }), 0, 1.08, 0.98, rover);
-    tube(steel, [0, 0.9, 0.95], [0, 1.3, 1.1], 0.02, rover);                                        // hand controller stalk
-    for (const [x, z] of [[-0.85, 0.85], [0.85, 0.85], [-0.85, -0.85], [0.85, -0.85]]) {
-      const wg = new THREE.Group(); wg.position.set(x, 0.4, z); rover.add(wg);
-      mesh(new THREE.TorusGeometry(0.32, 0.09, 10, 24), dark, 0, 0, 0, wg).rotation.y = Math.PI / 2; // wire-mesh wheel
-      for (let i = 0; i < 6; i++) { const sp = tube(steel, [0, 0, 0], [0, Math.cos(i) * 0.3, Math.sin(i) * 0.3], 0.012, wg); sp.castShadow = false; }
-      const hub = mesh(new THREE.CylinderGeometry(0.1, 0.1, 0.22, 10), steel, x, 0.4, z, rover); hub.rotation.z = Math.PI / 2;
-      const fender = mesh(new THREE.CylinderGeometry(0.45, 0.45, 0.26, 12, 1, true, 0, Math.PI), orange, x, 0.42, z, rover); fender.rotation.z = Math.PI / 2; fender.material = new THREE.MeshStandardMaterial({ color: 0xd9662b, roughness: 0.6, side: THREE.DoubleSide });
-      tube(steel, [x * 0.6, 0.6, z], [x, 0.4, z], 0.03, rover);
-      if (x > 0 && z > 0) { // the front right wheel is the one that breaks and comes off
-        rover.userData.wheel = wg;
-        rover.userData.hub = new THREE.Object3D(); rover.userData.hub.position.set(x + 0.1, 0.4, z); rover.add(rover.userData.hub);
-        const warn = new THREE.Mesh(new THREE.SphereGeometry(0.05, 10, 8), new THREE.MeshBasicMaterial({ color: PAL.hex.red, toneMapped: false }));
-        warn.position.set(x, 0.95, z); warn.visible = false; rover.add(warn);
-        rover.userData.warn = warn;
+  // ---------- the two rovers (each faces +z). Their lights are what the astronaut follows in the dark. ----------
+  // The Hauler is the crewed LRV: two seats, a footplate and a rail at the back for a rider who stands, and a
+  // tray of four sample cups on the aft bay. The Scout is a small prospecting robot in the VIPER mould: it
+  // goes ahead and surveys for the Scientist's chart. Each has one wheel that can break and come off.
+  const rbox = (w, h, d, r = 0.03) => new RoundedBoxGeometry(w, h, d, 2, Math.min(r, w / 2 - 0.001, h / 2 - 0.001, d / 2 - 0.001));
+  const stencil = (text, base) => canvasTexture(THREE, 256, 128, (d, w, h, g) => { // painted steel with seams, rivets and a stencilled name
+    g.fillStyle = base; g.fillRect(0, 0, w, h);
+    g.strokeStyle = 'rgba(36,34,30,0.45)'; g.lineWidth = 2; g.strokeRect(6, 6, w - 12, h - 12); g.beginPath(); g.moveTo(w / 2, 6); g.lineTo(w / 2, h - 6); g.stroke();
+    g.fillStyle = 'rgba(36,34,30,0.5)'; for (const [x, y] of [[14, 14], [w - 14, 14], [14, h - 14], [w - 14, h - 14]]) { g.beginPath(); g.arc(x, y, 3, 0, 7); g.fill(); }
+    if (text) { g.fillStyle = 'rgba(36,34,30,0.75)'; g.font = `bold 34px ${FONT.label}`; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(text, w * 0.27, h / 2 + 2); }
+    g.globalAlpha = 0.12; for (let i = 0; i < 60; i++) { g.fillStyle = i % 2 ? '#24221e' : '#8f8a78'; g.fillRect((i * 97) % w, (i * 41) % h, 2 + i % 4, 1 + i % 2); } // a little wear
+  });
+  // Merge the static meshes directly under a group into one mesh per material (the Quest is the budget: a rover
+  // of a hundred parts is a handful of draw calls). Parts that move or light up are not put under it.
+  function mergeStatic(parent) {
+    const by = new Map(), drop = [];
+    for (const o of parent.children) if (o.isMesh && !Array.isArray(o.material)) { o.updateMatrix(); (by.get(o.material) || by.set(o.material, []).get(o.material)).push(o); drop.push(o); }
+    for (const [mat, list] of by) {
+      const geos = list.map(o => { const g = o.geometry.index ? o.geometry.toNonIndexed() : o.geometry.clone(); for (const k of Object.keys(g.attributes)) if (!['position', 'normal', 'uv'].includes(k)) g.deleteAttribute(k); if (!g.attributes.uv) g.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(g.attributes.position.count * 2), 2)); g.applyMatrix4(o.matrix); return g; });
+      const m = new THREE.Mesh(mergeGeometries(geos), mat); m.castShadow = m.receiveShadow = true; parent.add(m);
+    }
+    for (const o of drop) parent.remove(o);
+  }
+  const wheelGeo = new THREE.TorusGeometry(0.32, 0.09, 10, 24); wheelGeo.rotateY(Math.PI / 2);
+  const hubGeo = new THREE.CylinderGeometry(0.1, 0.1, 0.22, 10); hubGeo.rotateZ(Math.PI / 2);
+  function buildRover(kind) {
+    const rover = new THREE.Group(); rover.name = kind === 'scout' ? 'Rover_Scout' : 'Rover_Hauler';
+    const body = new THREE.Group(); body.name = 'Body'; rover.add(body);
+    const k = kind === 'scout' ? 0.68 : 1, W = kind === 'scout' ? 0.62 : 0.85, L = kind === 'scout' ? 0.52 : 0.85, wy = 0.4 * k;
+    const wheels = {};
+    for (const [x, z, id] of [[-W, L, 'FL'], [W, L, 'FR'], [-W, -L, 'RL'], [W, -L, 'RR']]) {
+      const wg = new THREE.Group(); wg.name = 'Wheel_' + id; wg.position.set(x, wy, z); wg.scale.setScalar(k); rover.add(wg);
+      mesh(wheelGeo, dark, 0, 0, 0, wg); // wire-mesh tyre
+      if (kind === 'hauler') for (let i = 0; i < 6; i++) { const sp = tube(steel, [0, 0, 0], [0, Math.cos(i) * 0.3, Math.sin(i) * 0.3], 0.012, wg); sp.castShadow = false; }
+      else mesh(new THREE.CylinderGeometry(0.2, 0.2, 0.1, 12), gold, 0, 0, 0, wg).rotation.z = Math.PI / 2;
+      mesh(hubGeo, steel, x, wy, z, rover).scale.setScalar(k);
+      mergeStatic(wg);
+      wheels[id] = wg;
+    }
+    // The front right wheel is the one that breaks and comes off.
+    const fr = wheels.FR;
+    rover.userData.wheel = fr;
+    rover.userData.wheelRest = fr.position.clone();
+    rover.userData.hub = new THREE.Object3D(); rover.userData.hub.name = 'Hub_FR'; rover.userData.hub.position.set(W + 0.1 * k, wy, L); rover.add(rover.userData.hub);
+    const warn = new THREE.Mesh(new THREE.SphereGeometry(0.05, 10, 8), new THREE.MeshBasicMaterial({ color: PAL.hex.red, toneMapped: false }));
+    warn.name = 'Lamp_Wheel'; warn.position.set(W, wy + 0.55 * k, L); warn.visible = false; rover.add(warn);
+    rover.userData.warn = warn;
+    const beacon = new THREE.Mesh(new THREE.SphereGeometry(0.07, 10, 8), new THREE.MeshBasicMaterial({ color: PAL.hex.amber, toneMapped: false }));
+    beacon.name = 'Lamp_Beacon'; rover.add(beacon);
+    rover.userData.beacon = beacon;
+    if (kind === 'hauler') {
+      const deck = new THREE.MeshStandardMaterial({ map: stencil('HAULER', PAL.enamel), roughness: 0.8, metalness: 0.1, bumpMap: regolithBump, bumpScale: 0.03 });
+      mesh(rbox(1.5, 0.12, 2.4, 0.04), deck, 0, 0.62, 0, body);                                 // chassis floor
+      mesh(rbox(1.5, 0.3, 0.45, 0.05), gold, 0, 0.83, -1.0, body);                             // aft equipment bay, the tray on top
+      mesh(rbox(1.1, 0.5, 0.7, 0.06), gold, 0, 0.93, -0.35, body);
+      for (const x of [-0.45, 0.45]) { mesh(rbox(0.5, 0.08, 0.5, 0.03), dark, x, 0.72, 0.5, body); mesh(rbox(0.5, 0.5, 0.08, 0.03), dark, x, 1.0, 0.25, body); } // seats
+      mesh(rbox(0.5, 0.3, 0.06, 0.02), dark, 0, 1.05, 0.95, body);                              // console
+      mesh(new THREE.PlaneGeometry(0.3, 0.12), new THREE.MeshBasicMaterial({ color: PAL.hex.phosphor, toneMapped: false }), 0, 1.08, 0.985, body);
+      tube(steel, [0, 0.9, 0.95], [0, 1.3, 1.1], 0.02, body);                                     // hand controller stalk
+      for (const [x, z] of [[-W, L], [W, L], [-W, -L], [W, -L]]) {
+        const fender = mesh(new THREE.CylinderGeometry(0.45, 0.45, 0.26, 12, 1, true, 0, Math.PI), new THREE.MeshStandardMaterial({ color: PAL.hex.orange, roughness: 0.65, metalness: 0.1, side: THREE.DoubleSide }), x, 0.42, z, body);
+        fender.rotation.z = Math.PI / 2;
+        tube(steel, [x * 0.6, 0.6, z], [x, 0.4, z], 0.03, body);
+      }
+      tube(steel, [0.5, 1.1, -1.0], [0.5, 2.2, -1.0], 0.025, body);
+      const lrvDish = mesh(new THREE.LatheGeometry(Array.from({ length: 8 }, (_, i) => new THREE.Vector2(i * 0.05, (i * 0.05) ** 2 * 0.6)), 16), silverFoil, 0.5, 2.25, -1.0, body);
+      lrvDish.rotation.x = -0.9;
+      beacon.position.set(-0.6, 1.75, -0.8);
+      tube(steel, [-0.6, 1.1, -0.8], [-0.6, 1.7, -0.8], 0.02, body);
+      // The rider's footplate and the hoop rail in front of it: stand on the plate, hold the rail.
+      const P = HAULER.plate;
+      const plate = mesh(rbox(P.hw * 2, 0.05, P.hd * 2, 0.02), new THREE.MeshStandardMaterial({ color: PAL.hex.consoleDeep, roughness: 0.7, metalness: 0.5, bumpMap: foilBump, bumpScale: 0.15 }), P.x, P.y - 0.025, P.z, rover);
+      plate.name = 'Footplate';
+      for (const x of [-0.35, 0.35]) tube(steel, [x, 0.6, -1.15], [x, P.y - 0.02, P.z + 0.1], 0.025, rover);
+      const railPath = new THREE.CatmullRomCurve3([[-0.42, 0.66, -1.24], [-0.42, 1.3, -1.3], [-0.3, 1.42, -1.3], [0.3, 1.42, -1.3], [0.42, 1.3, -1.3], [0.42, 0.66, -1.24]].map(p => new THREE.Vector3(...p)), false, 'catmullrom', 0.1);
+      const rail = mesh(new THREE.TubeGeometry(railPath, 24, 0.022, 8), new THREE.MeshStandardMaterial({ color: PAL.hex.hazard, roughness: 0.55, metalness: 0.3 }), 0, 0, 0, rover);
+      rail.name = 'Rail_Rider';
+      rover.userData.rail = new THREE.Object3D(); rover.userData.rail.position.set(0, 1.42, -1.3); rover.add(rover.userData.rail);
+      rover.userData.plate = new THREE.Object3D(); rover.userData.plate.position.set(P.x, P.y, P.z); rover.add(rover.userData.plate);
+      // The tray: four open sample cups on the aft bay.
+      const tray = new THREE.Group(); tray.name = 'Tray'; rover.add(tray);
+      mesh(rbox(1.3, 0.04, 0.32, 0.015), dark, 0, 1.0, HAULER.cups[0].z, tray);
+      const cupGeo = new THREE.LatheGeometry([[0.0, 0], [0.09, 0], [0.1, 0.02], [0.11, 0.14], [0.125, 0.15], [0.115, 0.155], [0.1, 0.03], [0.0, 0.03]].map(([x, y]) => new THREE.Vector2(x, y)), 18);
+      const cupMat = new THREE.MeshStandardMaterial({ color: PAL.hex.aluminium, roughness: 0.45, metalness: 0.8, side: THREE.DoubleSide });
+      rover.userData.cups = HAULER.cups.map((c, i) => { const m = mesh(cupGeo, cupMat, c.x, c.y, c.z, tray); m.name = 'Cup_' + i; m.castShadow = false; return m; });
+      for (const x of [-0.5, 0.5]) {
+        const h = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.09, 0.08, 12), new THREE.MeshBasicMaterial({ color: PAL.hex.white, toneMapped: false }));
+        h.position.set(x, 0.8, 1.22); h.rotation.x = Math.PI / 2; h.name = 'Lamp_Head'; rover.add(h);
+      }
+      const head = new THREE.SpotLight(PAL.hex.incandescent, 30, 18, 0.55, 0.6, 1.2);
+      head.position.set(0, 0.9, 1.2); head.target.position.set(0, 0.2, 7);
+      rover.add(head, head.target);
+    } else {
+      const shell = new THREE.MeshStandardMaterial({ map: stencil('SCOUT', PAL.enamel), roughness: 0.78, metalness: 0.12, bumpMap: regolithBump, bumpScale: 0.03 });
+      mesh(rbox(1.15, 0.38, 1.35, 0.09), shell, 0, 0.72, 0, body);                       // the body, top at 0.9 m
+      mesh(rbox(1.25, 0.12, 1.45, 0.04), gold, 0, 0.5, 0, body);                           // foil skirt
+      mesh(rbox(0.9, 0.08, 1.0, 0.03), dark, 0, 0.94, -0.05, body);                        // radiator plate on top
+      const drill = mesh(new THREE.CylinderGeometry(0.09, 0.11, 0.3, 12), grey, 0, 0.36, 0.1, body); drill.name = 'Drill';
+      for (const x of [-W, W]) tube(steel, [x * 0.6, 0.55, 0], [x, wy, 0], 0.03, body), tube(steel, [x, wy, -L], [x, wy, L], 0.025, body);
+      tube(steel, [0.3, 0.92, 0.42], [0.3, 1.72, 0.42], 0.035, body);                       // the mast
+      const camHead = new THREE.Group(); camHead.name = 'Camera_Head'; camHead.position.set(0.3, 1.8, 0.42); rover.add(camHead);
+      mesh(rbox(0.32, 0.16, 0.2, 0.03), grey, 0, 0, 0, camHead);
+      for (const x of [-0.09, 0.09]) mesh(new THREE.CylinderGeometry(0.035, 0.035, 0.05, 12), new THREE.MeshBasicMaterial({ color: PAL.hex.bakelite }), x, 0, 0.11, camHead).rotation.x = Math.PI / 2;
+      for (const x of [-0.42, 0.42]) {
+        const l = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.06, 0.06, 12), new THREE.MeshBasicMaterial({ color: PAL.hex.white, toneMapped: false }));
+        l.position.set(x, 0.75, 0.69); l.rotation.x = Math.PI / 2; l.name = 'Lamp_Work'; rover.add(l);
+      }
+      beacon.position.set(0.3, 2.0, 0.42); beacon.scale.setScalar(0.8);
+      tube(steel, [0.3, 1.88, 0.42], [0.3, 1.96, 0.42], 0.015, body);
+    }
+    mergeStatic(body);
+    return rover;
+  }
+  const rovers = { hauler: buildRover('hauler'), scout: buildRover('scout') };
+  for (const [id, r] of Object.entries(rovers)) {
+    const p = PLACES.rovers[id];
+    r.position.set(p.x, height(p.x, p.z), p.z);
+    r.userData.yaw = r.rotation.y = 0; r.userData.v = 0; // parked facing out, away from the base
+    scene.add(r);
+  }
+  const rover = rovers.hauler; // the one the scenery and the older code mean by "the rover"
+
+  // Rooster tails: each moving wheel throws a slow fan of dust that hangs and falls at lunar gravity.
+  const DUSTN = 320, dustPos = new Float32Array(DUSTN * 3), dustVel = new Float32Array(DUSTN * 3), dustAge = new Float32Array(DUSTN).fill(9);
+  const dustGeo = new THREE.BufferGeometry(); dustGeo.setAttribute('position', new THREE.BufferAttribute(dustPos, 3));
+  const dustPts = new THREE.Points(dustGeo, new THREE.PointsMaterial({ color: PAL.hex.regolith, size: 0.07, transparent: true, opacity: 0.55, depthWrite: false }));
+  dustPts.name = 'Dust_Wheels'; dustPts.frustumCulled = false;
+  scene.add(dustPts);
+  let dustNext = 0, dustT = 0;
+  const kick = (x, y, z, vx, vy, vz) => {
+    const n = dustNext++ % DUSTN;
+    dustPos.set([x, y, z], n * 3); dustVel.set([vx, vy, vz], n * 3); dustAge[n] = 0;
+  };
+  const wp = new THREE.Vector3();
+  function stepDust(dt) {
+    for (const r of Object.values(rovers)) {
+      const v = Math.abs(r.userData.v || 0);
+      if (v < 0.4) continue;
+      const fx = Math.sin(r.userData.yaw), fz = Math.cos(r.userData.yaw), per = v * dt * 5;
+      r.userData.dustAcc = (r.userData.dustAcc || 0) + per;
+      while (r.userData.dustAcc >= 1) {
+        r.userData.dustAcc -= 1;
+        const wheel = Object.values(r.children).filter(o => o.name.startsWith('Wheel_'))[Math.floor(Math.random() * 4)];
+        if (!wheel || !wheel.visible) continue;
+        wheel.getWorldPosition(wp);
+        const back = -Math.sign(r.userData.v) * v * (0.5 + Math.random() * 0.4);
+        kick(wp.x, wp.y - 0.2, wp.z, fx * back + (Math.random() - 0.5) * 0.8, 1.0 + Math.random() * v * 0.35, fz * back + (Math.random() - 0.5) * 0.8);
       }
     }
-    tube(steel, [0.5, 1.1, -1.0], [0.5, 2.2, -1.0], 0.025, rover);
-    const lrvDish = mesh(new THREE.LatheGeometry(Array.from({ length: 8 }, (_, i) => new THREE.Vector2(i * 0.05, (i * 0.05) ** 2 * 0.6)), 16), silverFoil, 0.5, 2.25, -1.0, rover);
-    lrvDish.rotation.x = -0.9;
-    const beacon = new THREE.Mesh(new THREE.SphereGeometry(0.08, 10, 8), new THREE.MeshBasicMaterial({ color: PAL.hex.amber, toneMapped: false }));
-    beacon.position.set(-0.5, 1.7, -1.0); rover.add(beacon);
-    tube(steel, [-0.5, 1.1, -1.0], [-0.5, 1.65, -1.0], 0.02, rover);
-    rover.userData.beacon = beacon;
-    for (const x of [-0.5, 0.5]) {
-      const h = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.09, 0.08, 12), new THREE.MeshBasicMaterial({ color: PAL.hex.white, toneMapped: false }));
-      h.position.set(x, 0.8, 1.22); h.rotation.x = Math.PI / 2; rover.add(h);
+    for (let n = 0; n < DUSTN; n++) {
+      if (dustAge[n] > 3) { dustPos[n * 3 + 1] = -100; continue; }
+      dustAge[n] += dt;
+      dustVel[n * 3 + 1] -= 1.62 * dt;
+      dustPos[n * 3] += dustVel[n * 3] * dt; dustPos[n * 3 + 1] += dustVel[n * 3 + 1] * dt; dustPos[n * 3 + 2] += dustVel[n * 3 + 2] * dt;
+      if (dustPos[n * 3 + 1] < height(dustPos[n * 3], dustPos[n * 3 + 2])) dustAge[n] = 9; // no air: it lands, it does not drift
     }
-    const head = new THREE.SpotLight(PAL.hex.incandescent, 30, 18, 0.55, 0.6, 1.2);
-    head.position.set(0, 0.9, 1.2); head.target.position.set(0, 0.2, 7);
-    rover.add(head, head.target);
-    rover.position.set(PLACES.rover.x, 0, PLACES.rover.z);
+    dustGeo.attributes.position.needsUpdate = true;
   }
-  scene.add(rover);
+
+  // ---------- the sample port: a hopper on the habitat wall beside door S ----------
+  const port = new THREE.Group(); port.name = 'Port_Sample';
+  {
+    const P = PLACES.port;
+    port.position.set(P.x, 0, P.z); port.rotation.y = P.ry;
+    const bezelMat = new THREE.MeshStandardMaterial({ color: PAL.hex.bezel, roughness: 0.45, metalness: 0.75 });
+    mesh(rbox(0.5, 1.6, 0.12, 0.03), grey, 0, 0.85, -0.2, port).name = 'Bracket';                  // against the wall
+    tube(steel, [0, 0, -0.08], [0, 0.82, -0.08], 0.04, port);
+    const hopper = mesh(new THREE.LatheGeometry([[0.06, 0], [0.08, 0.02], [0.2, 0.2], [0.22, 0.22], [0.2, 0.23]].map(([x, y]) => new THREE.Vector2(x, y)), 24), new THREE.MeshStandardMaterial({ color: PAL.hex.console, roughness: 0.7, metalness: 0.3, side: THREE.DoubleSide }), 0, 0.8, 0.02, port);
+    hopper.name = 'Hopper';
+    const collar = mesh(new THREE.TorusGeometry(0.215, 0.025, 8, 28), bezelMat, 0, 1.03, 0.02, port); collar.rotation.x = Math.PI / 2;
+    for (let i = 0; i < 8; i++) { const a = i * Math.PI / 4; mesh(new THREE.CylinderGeometry(0.014, 0.014, 0.02, 6), steel, Math.cos(a) * 0.215, 1.055, 0.02 + Math.sin(a) * 0.215, port).castShadow = false; }
+    const hinge = new THREE.Group(); hinge.name = 'Hinge_Lid'; hinge.position.set(0, 1.05, -0.2); port.add(hinge);
+    const lid = mesh(new THREE.CylinderGeometry(0.22, 0.22, 0.025, 24), bezelMat, 0, 0, 0.22, hinge); lid.name = 'Port_Lid';
+    hinge.rotation.x = -1.25; // standing open
+    const lampP = new THREE.Mesh(new THREE.SphereGeometry(0.035, 12, 8), new THREE.MeshBasicMaterial({ color: PAL.hex.greenOff, toneMapped: false }));
+    lampP.name = 'Lamp_Port'; lampP.position.set(0.19, 1.56, -0.12); port.add(lampP);
+    // Banked and wanted on a pair of Nixie tubes above it.
+    const cv = document.createElement('canvas'); cv.width = 256; cv.height = 96;
+    const tex = new THREE.CanvasTexture(cv); tex.colorSpace = THREE.SRGBColorSpace;
+    const plateM = new THREE.Mesh(new THREE.PlaneGeometry(0.34, 0.13), new THREE.MeshBasicMaterial({ map: tex, toneMapped: false }));
+    plateM.name = 'Counter_Port'; plateM.position.set(-0.05, 1.56, -0.135); port.add(plateM);
+    port.userData = { hinge, lamp: lampP, cv, tex, mouth: new THREE.Vector3(0, 1.06, 0.02), key: '', flashUntil: 0, flash: '', lastN: 0 };
+    scene.add(port);
+  }
+  function drawPort(banked, wanted) {
+    const u = port.userData, key = banked + '/' + wanted;
+    if (u.key === key) return; u.key = key;
+    const g = u.cv.getContext('2d');
+    g.fillStyle = PAL.consoleDeep; g.fillRect(0, 0, 256, 96);
+    g.strokeStyle = PAL.bezel; g.lineWidth = 6; g.strokeRect(3, 3, 250, 90);
+    nixie(g, String(banked), 74, 48, 56);
+    g.fillStyle = PAL.inkDim; g.font = `22px ${FONT.label}`; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText('OF', 128, 50);
+    nixie(g, String(wanted), 182, 48, 56);
+    u.tex.needsUpdate = true;
+  }
+  drawPort(0, CFG.sample.manifest);
+
+  // ---------- the samples: rocks out on the field, one instanced batch per look ----------
+  // Bigger than life (15 to 30 cm) so a camera can pick one out at 10 m. Every page sees only the look.
+  const sampleGeo = {
+    'pale-flecked': rockGeo(1, 41, { amp: 0.35, cuts: 8, squash: [1.1, 0.8, 0.9] }),                      // angular
+    'pale-plain': rockGeo(2, 43, { amp: 0.1, cuts: 1, depth: [0.8, 0.95], squash: [1, 0.8, 1], ridged: 0 }), // rounded and plain
+    'dark-pitted': rockGeo(2, 47, { amp: 0.16, cuts: 2, depth: [0.75, 0.9], ridged: 0.3 }),
+    'dark-smooth': rockGeo(2, 53, { amp: 0.08, cuts: 2, depth: [0.7, 0.9], squash: [1.3, 0.45, 1], ridged: 0 }), // a slab
+    'ochre-beads': rockGeo(1, 59, { amp: 0.32, cuts: 2, squash: [1, 0.6, 1], ridged: 0.2 }),
+    'foil-scrap': rockGeo(1, 61, { amp: 0.55, cuts: 5, squash: [1.2, 0.35, 1], ridged: 1.4 }),
+    'frost-blue': rockGeo(2, 67, { amp: 0.2, cuts: 3, ridged: 0.4 }),
+    'dusty-pale': rockGeo(2, 71, { amp: 0.18, cuts: 4 }),
+  };
+  for (const g of Object.values(sampleGeo)) g.scale(0.5, 0.5, 0.5); // rockGeo is two metres across: the samples are 15 to 30 cm
+  const sampleTex = (base, spot, kind) => canvasTexture(THREE, 128, 64, (d, w, h, g) => {
+    g.fillStyle = base; g.fillRect(0, 0, w, h);
+    const r = seededDots(kind);
+    for (const [x, y, s] of r) {
+      if (kind === 'flecks') { g.fillStyle = spot; g.fillRect(x * w, y * h, 2 + s * 4, 1 + s * 2); }
+      else if (kind === 'holes') { g.fillStyle = spot; g.beginPath(); g.arc(x * w, y * h, 1.5 + s * 3.5, 0, 7); g.fill(); g.strokeStyle = 'rgba(120,115,105,0.6)'; g.lineWidth = 1; g.stroke(); }
+      else if (kind === 'beads') { g.fillStyle = spot; g.beginPath(); g.arc(x * w, y * h, 1.5 + s * 2.5, 0, 7); g.fill(); g.fillStyle = 'rgba(255,240,200,0.5)'; g.fillRect(x * w - 1, y * h - 1, 1.5, 1.5); }
+      else if (kind === 'frost') { g.fillStyle = spot; g.fillRect(x * w, y * h, 1 + s * 2, 1 + s * 2); }
+      else if (kind === 'grain') { g.fillStyle = spot; g.globalAlpha = 0.35; g.fillRect(x * w, y * h, 1 + s * 3, 1 + s * 2); g.globalAlpha = 1; }
+    }
+  });
+  function seededDots(kind) { const out = []; let a = kind.length * 977; const r = () => { a = (a * 16807) % 2147483647; return a / 2147483647; }; for (let i = 0; i < 90; i++) out.push([r(), r(), r()]); return out; }
+  const S = SAMPLE_COL;
+  const sampleMat = {
+    'pale-flecked': new THREE.MeshStandardMaterial({ map: sampleTex(S.anor, S.fleck, 'flecks'), roughness: 0.9, metalness: 0 }),
+    'pale-plain': new THREE.MeshStandardMaterial({ map: sampleTex(S.anor, S.anorDust, 'grain'), roughness: 0.92, metalness: 0 }),
+    'dark-pitted': new THREE.MeshStandardMaterial({ map: sampleTex(S.basalt, S.pit, 'holes'), roughness: 0.85, metalness: 0.05 }),
+    'dark-smooth': new THREE.MeshStandardMaterial({ map: sampleTex(S.basalt, S.basaltLight, 'grain'), roughness: 0.6, metalness: 0.05 }),
+    'ochre-beads': new THREE.MeshStandardMaterial({ map: sampleTex(S.glass, S.bead, 'beads'), roughness: 0.55, metalness: 0.1 }),
+    'foil-scrap': new THREE.MeshStandardMaterial({ color: PAL.hex.foilGold, metalness: 1, roughness: 0.35, bumpMap: foilBump, bumpScale: 0.8 }),
+    'frost-blue': new THREE.MeshStandardMaterial({ map: sampleTex(S.ice, S.frost, 'frost'), roughness: 0.45, metalness: 0.05 }),
+    'dusty-pale': new THREE.MeshStandardMaterial({ map: sampleTex(S.dusty, S.anorDust, 'grain'), roughness: 0.95, metalness: 0 }),
+  };
+  const SAMPLE_MAX = 16;
+  const sampleIM = {};
+  for (const look of LOOKS) {
+    const im = new THREE.InstancedMesh(sampleGeo[look], sampleMat[look], SAMPLE_MAX);
+    im.name = 'Samples_' + look; im.count = 0; im.castShadow = true; im.receiveShadow = true; im.frustumCulled = false;
+    scene.add(im); sampleIM[look] = im;
+  }
+  // The orange soil sits on a stained patch of ground.
+  const stainTex = canvasTexture(THREE, 128, 128, (d, w, h, g) => {
+    const grd = g.createRadialGradient(64, 64, 4, 64, 64, 64);
+    grd.addColorStop(0, 'rgba(185,118,58,0.85)'); grd.addColorStop(0.6, 'rgba(185,118,58,0.4)'); grd.addColorStop(1, 'rgba(185,118,58,0)');
+    g.fillStyle = grd; g.fillRect(0, 0, w, h);
+  });
+  const stainGeo = new THREE.CircleGeometry(0.3, 20); stainGeo.rotateX(-Math.PI / 2);
+  const stains = new THREE.InstancedMesh(stainGeo, new THREE.MeshStandardMaterial({ map: stainTex, transparent: true, depthWrite: false, roughness: 1, metalness: 0, polygonOffset: true, polygonOffsetFactor: -2 }), SAMPLE_MAX);
+  stains.name = 'Samples_Stain'; stains.count = 0; stains.frustumCulled = false; stains.receiveShadow = true;
+  scene.add(stains);
+  const hashId = id => { let h = 7; for (const c of id) h = (h * 31 + c.charCodeAt(0)) % 9973; return h / 9973; };
+  const sampleSize = id => 0.17 + hashId(id) * 0.12;
+  const sPos = new THREE.Vector3(), sQ = new THREE.Quaternion(), sE = new THREE.Euler(), sS = new THREE.Vector3(), sM = new THREE.Matrix4(), nrm = new THREE.Vector3(), UPV = new THREE.Vector3(0, 1, 0);
+  let sampleOverride = null; // (id) => a world position for a sample in a hand or falling, or null to hide it
+  let lastSamples = [];
+  function drawSamples(list) {
+    lastSamples = list || [];
+    const counts = {}; for (const l of LOOKS) counts[l] = 0;
+    let stainN = 0;
+    for (const s of lastSamples) {
+      const im = sampleIM[s.look]; if (!im || counts[s.look] >= SAMPLE_MAX) continue;
+      const size = sampleSize(s.id), h = hashId(s.id + 'r');
+      let place = null;
+      const o = sampleOverride ? sampleOverride(s.id) : null;
+      if (o) place = sPos.copy(o);
+      else if (s.at === 'ground') place = sPos.set(s.x, height(s.x, s.z) + size * 0.3, s.z);
+      else if (s.at === 'tray' && rover.userData.cups[s.slot]) { rover.userData.cups[s.slot].getWorldPosition(sPos); sPos.y += 0.09; place = sPos; }
+      if (!place) continue;
+      sE.set(h * 0.6, h * 6.28, (h - 0.5) * 0.5);
+      sM.compose(place, sQ.setFromEuler(sE), sS.setScalar(s.at === 'tray' && !o ? Math.min(size, 0.13) : size));
+      im.setMatrixAt(counts[s.look]++, sM);
+      if (s.look === 'ochre-beads' && s.at === 'ground' && !o) {
+        normalAt(s.x, s.z, nrm); sQ.setFromUnitVectors(UPV, nrm);
+        sM.compose(sPos.set(s.x, height(s.x, s.z) + 0.01, s.z), sQ, sS.setScalar(1 + h));
+        stains.setMatrixAt(stainN++, sM);
+      }
+    }
+    for (const l of LOOKS) { sampleIM[l].count = counts[l]; sampleIM[l].instanceMatrix.needsUpdate = true; }
+    stains.count = stainN; stains.instanceMatrix.needsUpdate = true;
+  }
 
   // ---------- a lander on the horizon, with its flag ----------
   {
@@ -820,22 +1105,11 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
     scene.add(F);
   }
 
-  // ---------- astronaut figure, shown in the rover camera ----------
-  const avatar = new THREE.Group();
-  {
-    mesh(new THREE.CapsuleGeometry(0.27, 0.7, 4, 12), whitePlain, 0, 1.0, 0, avatar);
-    for (const s of [-1, 1]) { mesh(new THREE.CapsuleGeometry(0.1, 0.55, 4, 8), whitePlain, s * 0.36, 1.1, 0, avatar).rotation.z = s * 0.25; mesh(new THREE.CapsuleGeometry(0.12, 0.7, 4, 8), whitePlain, s * 0.15, 0.4, 0, avatar); }
-    mesh(new THREE.SphereGeometry(0.25, 16, 12), whitePlain, 0, 1.72, 0, avatar);
-    mesh(new THREE.SphereGeometry(0.19, 16, 12, 0, Math.PI * 2, 0, Math.PI * 0.6), visor, 0, 1.72, 0.1, avatar).rotation.x = Math.PI / 2 - 0.3;
-    mesh(new THREE.BoxGeometry(0.5, 0.65, 0.3), whitePlain, 0, 1.2, -0.32, avatar);
-    mesh(new THREE.BoxGeometry(0.3, 0.14, 0.06), new THREE.MeshBasicMaterial({ color: PAL.hex.phosphor, toneMapped: false }), 0, 1.25, 0.29, avatar);
-    mesh(new THREE.BoxGeometry(0.1, 0.1, 0.1), orange, 0, 1.55, -0.5, avatar);
-  }
+  // ---------- astronaut figure, shown in the rover camera: it walks, crouches and reaches (client/avatar.js) ----------
+  const figure = buildAvatar(THREE, { shadows, ground: (x, z) => groundAt(x, z) });
+  const avatar = figure.group;
   avatar.visible = false;
   scene.add(avatar);
-  // The NASA astronaut replaces the capsules (unrigged, in a T-pose: fine at rover-camera distance).
-  loadPeriod(THREE, 'astronaut', { merge: true, cast: shadows, rough: 0.85 }).then(m => { avatar.clear(); avatar.add(m); })
-    .catch(e => console.warn('astronaut', e));
 
   // ---------- scenery from the NASA set: an old Viking lander, cargo at the fuel depot ----------
   const props = new THREE.Group(); props.name = 'Scenery';
@@ -845,18 +1119,37 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
   }).catch(e => console.warn(id, e));
   prop('viking-lander', props, 16, -15, 2.3, { merge: true, cast: false, by: { blinn4SG: { color: PAL.hex.enamel }, blinn11SG: { color: PAL.hex.enamel } } });
   prop('spectrograph-crate', depot, 2.5, -0.5, 0.25);
+  // Further out, landmarks to steer by: a crashed probe half sunk in a crater, and cargo dropped from a lander.
+  for (const l of LANDMARKS) if (l.model) {
+    prop(l.model, props, l.x, l.z, l.x * 0.13, { merge: true, cast: false, rough: 0.8, sat: 0.3 }).then(m => {
+      if (!m) return;
+      if (l.model === 'ladee-probe') { m.rotation.z = 0.42; m.position.y -= 0.7; } // nose down where it hit
+      else m.rotation.x = 0.08;
+    });
+  }
   prop('support-cradle', depot, -2.6, -1.0, -0.2, { by: { spstob_fss_1: { rough: 0.7 } } });
 
-  let lastUpdate = null;
   return {
-    rover, avatar, sun, height, hab, ground: groundAt, // ground(x, z): the height of the ground as drawn
+    rover, rovers, avatar, figure, sun, height, hab, port, follow, normalAt, ground: groundAt, // ground(x, z): the height of the ground as drawn
     // Handles for the astronaut's hands (stations.js). Vectors are local to their fixture group.
-    doors, height,
-    fixtures: { dustCells, dust, crack, crackPts, wheel: rover.userData.wheel, hub: rover.userData.hub },
+    doors,
+    fixtures: { dustCells, dust, crack, crackPts, wheel: rover.userData.wheel, hub: rover.userData.hub,
+      wheels: Object.fromEntries(Object.entries(rovers).map(([id, r]) => [id, { wheel: r.userData.wheel, hub: r.userData.hub }])),
+      rail: rover.userData.rail, plate: rover.userData.plate, cups: rover.userData.cups, portMouth: port.userData.mouth },
+    // A puff of dust kicked up at a point (boots landing, a rock picked up).
+    puff(p, n = 10, speed = 0.6) { for (let i = 0; i < n; i++) { const a = Math.random() * 6.28; kick(p.x, p.y + 0.05, p.z, Math.cos(a) * speed * Math.random(), 0.3 + Math.random() * speed, Math.sin(a) * speed * Math.random()); } },
+    // Where a sample in a hand (or falling) is drawn: (id) => world position, or null to leave it to the server's word.
+    set sampleOverride(fn) { sampleOverride = fn; },
+    redrawSamples() { drawSamples(lastSamples); },
+    drawSamples,
     // Call every frame.
     update(time) {
-      const dt = Math.min(0.1, Math.max(0, time - (lastUpdate ?? time))); lastUpdate = time;
+      const dt = Math.min(0.1, Math.max(0, time - dustT)); dustT = time;
+      stepDust(dt);
       dust.update(dt, time);
+      // The port's lid drops shut on each banked sample, and opens again; its lamp says FOUND or DUD.
+      { const u = port.userData, closed = time < u.flashUntil - 1.6; u.hinge.rotation.x += ((closed ? 0 : -1.25) - u.hinge.rotation.x) * Math.min(1, dt * 14);
+        u.lamp.material.color.setHex(time < u.flashUntil ? (u.flash === 'dud' ? PAL.hex.amber : PAL.hex.green) : PAL.hex.greenOff); }
       earth.userData.clouds.rotation.y = time * 0.004;
       if (hab.userData.turntable) hab.userData.turntable.rotation.y = Math.sin(time * 0.05) * 0.4; // a tracking antenna, slowly hunting
     },
@@ -873,16 +1166,25 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
       // Dust: the brushed cells' leftovers slump off the panel (client/dust.js).
       dust.apply(s.dust);
 
-      // Rover wheel: 0 fine, 1 broken and hanging off, 2 pulled off and lying beside the rover.
-      const w = rover.userData.wheel, broken = s.wheel > 0;
-      if (!w.userData.held) {
-        if (s.wheel === 0) { w.position.set(0.85, 0.4, 0.85); w.rotation.set(0, 0, 0); }
-        if (s.wheel === 1) { w.position.set(0.97, 0.33, 0.85); w.rotation.set(0, 0.25, -0.5); }
-        if (s.wheel === 2) { w.position.set(1.75, 0.1, 0.6); w.rotation.set(0, 0, -Math.PI / 2); }
+      // Rover wheels: 0 fine, 1 broken and hanging off, 2 pulled off and lying beside the rover.
+      for (const [id, r] of Object.entries(rovers)) {
+        const state = s.wheels ? s.wheels[id] || 0 : 0, w = r.userData.wheel, rest = r.userData.wheelRest, broken = state > 0;
+        if (!w.userData.held) {
+          if (state === 0) { w.position.copy(rest); w.rotation.set(0, 0, 0); }
+          if (state === 1) { w.position.set(rest.x + 0.12, rest.y - 0.07, rest.z); w.rotation.set(0, 0.25, -0.5); }
+          if (state === 2) { w.position.set(rest.x + 0.9, 0.1, rest.z - 0.25); w.rotation.set(0, 0, -Math.PI / 2); }
+        }
+        r.userData.warn.visible = broken && blink;
+        // The hazard light flashes fast while the rover is stuck.
+        r.userData.beacon.material.color.setHex((broken ? Math.floor(time * 6) % 2 : Math.floor(time * 2 + (id === 'scout' ? 0.5 : 0)) % 2) ? PAL.hex.amber : PAL.hex.amberOff);
       }
-      rover.userData.warn.visible = broken && blink;
-      // The hazard light flashes fast while the rover is stuck.
-      rover.userData.beacon.material.color.setHex((broken ? Math.floor(time * 6) % 2 : Math.floor(time * 2) % 2) ? PAL.hex.amber : PAL.hex.amberOff);
+      // The port's counter, and a flash for each new assay.
+      if (s.port) {
+        drawPort(s.port.banked, s.port.wanted);
+        const a = s.port.assay, u = port.userData;
+        if (a && a.n !== u.lastN) { if (u.lastN) { u.flash = a.kind === 'dud' ? 'dud' : 'found'; u.flashUntil = time + 3; } u.lastN = a.n; }
+      }
+      drawSamples(s.samples);
 
       // Hull crack, weld beads and the vapour jet.
       crack.visible = !!s.hull;
@@ -921,14 +1223,19 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
         }
       });
     },
-    // Ease the rover toward the server's position.
-    moveRover(r, k = 0.2) {
-      rover.position.x += (r.x - rover.position.x) * k;
-      rover.position.z += (r.z - rover.position.z) * k;
-      rover.position.y = groundAt(rover.position.x, rover.position.z);
-      let d = r.ry - rover.rotation.y;
+    // Ease a rover toward the server's position, sat on the ground and tipped to its slope (drawing only).
+    moveRover(r, k = 0.2, id = 'hauler') {
+      const g = rovers[id]; if (!g || !r) return;
+      g.position.x += (r.x - g.position.x) * k;
+      g.position.z += (r.z - g.position.z) * k;
+      let d = r.ry - g.userData.yaw;
       d = Math.atan2(Math.sin(d), Math.cos(d));
-      rover.rotation.y += d * k;
+      g.userData.yaw += d * k;
+      g.userData.v = r.v || 0;
+      g.position.y = height(g.position.x, g.position.z);
+      normalAt(g.position.x, g.position.z, nrm);
+      g.quaternion.setFromUnitVectors(UPV, nrm).multiply(sQ.setFromAxisAngle(UPV, g.userData.yaw));
     },
+    moveRovers(rs, k = 0.2) { if (!rs) return; for (const id in rovers) if (rs[id]) this.moveRover(rs[id], k, id); },
   };
 }

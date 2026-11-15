@@ -337,10 +337,11 @@ export function buildArm(THREE) {
   function draw(info) {
     const s = info.state;
     const o2 = s ? Math.round(s.oxygen) : null, t = s ? Math.max(0, Math.ceil(s.timeLeft)) : null, alarms = info.alarms || 0;
-    const held = info.held || '';
+    const held = Array.isArray(info.held) ? info.held : [null, info.held || null]; // [left, right]
     const level = info.zoom > 1.01 ? Math.max(1, Math.min(5, Math.round(info.zoom - 1))) : 0;
     const debrief = !!info.debrief;
-    const k = [o2, s && s.o2Max, t, alarms, info.radio, level, info.status, held, debrief].join('|');
+    const sm = info.samples;
+    const k = [o2, s && s.o2Max, t, alarms, info.radio, level, info.status, held, debrief, sm ? sm.banked + '/' + sm.wanted : ''].join('|');
     if (k === key) return;
     key = k;
 
@@ -393,11 +394,22 @@ export function buildArm(THREE) {
     if (info.radio === 'rx') speaker(506, 196, BLUE);
     else microphone(506, 198, radio ? radio[1] : PAL.inkDim, info.radio === 'tx', info.radio === 'dead' ? RED : info.radio === 'nomic' ? AMBER : null);
 
-    // The hand: one jewel lamp, lit while a tool is held, and that tool's silhouette beside it (a decoy is
-    // just the lamp: it is not one of the five).
-    jewel(g, 470, 330, 11, 'green', !!held);
-    if (['brush', 'patch', 'welder', 'tire', 'gen'].includes(held)) drawTool(g, held, 520, 326, 40, PAL.ink);
-    for (let i = 0; i < 2; i++) at(592, 96 + i * 72, 0.78, () => warning(0, 0, i < alarms));
+    // The hands, left and right: a jewel lamp each, lit while that hand holds something, and the tool's
+    // silhouette beside it (a decoy lights the lamp and shows nothing). Icons only on the cuff.
+    held.forEach((id, n) => {
+      const x = 452 + n * 82;
+      jewel(g, x, 330, 10, 'green', !!id);
+      if (['brush', 'patch', 'welder', 'tire', 'gen'].includes(id)) drawTool(g, id, x + 36, 326, 34, PAL.ink);
+    });
+    at(592, 96, 0.78, () => warning(0, 0, alarms > 0)); // one thing goes wrong at a time
+    // The samples: a rock, and one pip for each the mission wants, lit as each is banked.
+    if (sm) {
+      g.fillStyle = PAL.dial; g.strokeStyle = PAL.inkDial; g.lineWidth = 3;
+      g.beginPath(); [[-22, 6], [-14, -12], [4, -18], [20, -8], [22, 8], [6, 16], [-12, 14]].forEach(([x, y], n) => g[n ? 'lineTo' : 'moveTo'](592 + x, 168 + y)); g.closePath(); g.fill(); g.stroke();
+      g.fillStyle = PAL.inkDial; for (const [x, y] of [[-6, -4], [8, 2], [-2, 8]]) g.fillRect(592 + x, 168 + y, 4, 3);
+      const n = Math.max(1, sm.wanted), w = Math.min(17, 70 / n);
+      for (let i = 0; i < n; i++) jewel(g, 592 - (n - 1) * w / 2 + i * w, 204, 5.5, 'green', i < sm.banked);
+    }
     at(594, 258, 0.88, () => magnifier(0, 0, level));
 
     tex.needsUpdate = true;

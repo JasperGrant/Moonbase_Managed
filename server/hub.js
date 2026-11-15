@@ -10,6 +10,13 @@ import { CFG, ROLES, CREW, PLAYERS, covers } from '../client/shared/config.js';
 
 const isControl = role => role === 'ops' || role === 'all';
 
+// One hand from a pose message: [x, y, z] in metres, within reach of the body, or null.
+function arm(a) {
+  if (!Array.isArray(a) || a.length !== 3 || !a.every(Number.isFinite)) return null;
+  const [x, y, z] = a;
+  return Math.abs(x) <= 1.2 && y >= -0.2 && y <= 2.6 && Math.abs(z) <= 1.2 ? [x, y, z] : null;
+}
+
 export class Hub {
   constructor(game = new Game(), opts = {}) {
     this.game = game;
@@ -134,9 +141,6 @@ export class Hub {
     return { ...this.game.view('all', who), ready: [...this.ready], countdown: this.countdown, suited: this.suited, players: this.players, admin: { seats: this.seats(), connections, keyed: !!this.adminKey, delay: this.delayOn } };
   }
 
-  // True while the base is blacked out: no radio, no commands.
-  silent() { return this.game.phase === 'run' && !this.game.powered; }
-
   // The delay only applies while a mission is running, so the lobby stays snappy.
   lag() { return this.delayOn && this.game.phase === 'run' ? CFG.delayMs : 0; }
   radioLag() { return this.delayOn ? CFG.delayMs : 0; }
@@ -152,9 +156,9 @@ export class Hub {
     if (!ws.role && isBinary) return;
 
     // Binary frames are radio audio. Astronaut <-> Mission Ops only, delayed only if the admin turned the delay on.
-    // A blackout kills the radio in both directions.
+    // Comms always work, even with the base dark.
     if (isBinary) {
-      if (data.byteLength > 64000 || this.silent()) return;
+      if (data.byteLength > 64000) return;
       const to = ws.role === 'astronaut' ? ['ops', 'all'] : isControl(ws.role) ? ['astronaut'] : [];
       for (const c of this.live()) if (c !== ws && to.includes(c.role)) this.later(this.radioLag(), () => { if (c.open) c.send(data); });
       return;
@@ -211,19 +215,22 @@ export class Hub {
 
     if (ws.role === 'astronaut') {
       // h is the head height in metres: crouching is how you take cover beside the rover.
-      if (m.t === 'pose' && [m.x, m.z, m.ry].every(Number.isFinite)) game.astro = { x: m.x, z: m.z, ry: m.ry, h: Number.isFinite(m.h) ? m.h : 1.65, inside: !!m.inside, door: typeof m.door === 'string' ? m.door.slice(0, 2) : null };
+      // arms: where each hand is in the body's frame (x right, y up from the floor, z forward), for the
+      // rover cameras' figure. Anything that is not three sensible numbers is a hand not being tracked.
+      if (m.t === 'pose' && [m.x, m.z, m.ry].every(Number.isFinite)) game.setPose({ x: m.x, z: m.z, ry: m.ry, h: Number.isFinite(m.h) ? m.h : 1.65, inside: !!m.inside, door: typeof m.door === 'string' ? m.door.slice(0, 2) : null, arms: [0, 1].map(i => arm(m.arms?.[i])) });
       else if (m.t === 'do') game.act(m.a);
-      else if (m.t === 'ptt' && (!m.on || !this.silent())) this.sendTo(['ops', 'all'], { t: 'ptt', from: 'astronaut', on: !!m.on }, this.radioLag());
+      else if (m.t === 'ptt') this.sendTo(['ops', 'all'], { t: 'ptt', from: 'astronaut', on: !!m.on }, this.radioLag());
       return;
     }
 
     // Everything below comes from Earth: with the delay on, it reaches the Moon one light-delay later.
-    // Nothing from Earth gets through a blackout except a released talk key and starting over.
-    if (this.silent() && m.t !== 'reset' && !(m.t === 'ptt' && !m.on)) return;
     if (m.t === 'rover' && (ws.role === 'tech' || ws.role === 'all')) {
+      // Two rovers: the Scout (W A S D) and the Hauler (arrows). No id is the Hauler, as before.
+      const id = m.id === undefined ? 'hauler' : m.id;
+      if (!Object.hasOwn(game.rovers, id)) return;
       const throttle = Math.max(-1, Math.min(1, Number(m.throttle) || 0));
       const steer = Math.max(-1, Math.min(1, Number(m.steer) || 0));
-      this.later(this.lag(), () => { if (game.phase === 'run') Object.assign(game.rover, { throttle, steer }); });
+      this.later(this.lag(), () => { if (game.phase === 'run') Object.assign(game.rovers[id], { throttle, steer }); });
     } else if (isControl(ws.role)) {
       if (m.t === 'mode') game.setMode(m.mode);
       else if (m.t === 'start' && !this.requireFullCrew) game.start(); // normally the crew starts it by readying up

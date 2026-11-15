@@ -260,6 +260,19 @@ body.period { background:var(--p-bakelite); }
 .period #ptt::before { left:1em; background:var(--p-red-off); } .period #ptt::after { left:2.2em; background:var(--p-blue-off); }
 .period #ptt.tx { background:var(--p-console); color:var(--p-ink); } .period #ptt.tx::before { background:radial-gradient(circle at 35% 35%, #fff3d6, var(--p-red) 45%); box-shadow:0 0 0 2px var(--p-bezel), 0 0 8px var(--p-red); }
 .period #ptt.rx { background:var(--p-console); color:var(--p-ink); } .period #ptt.rx::after { background:radial-gradient(circle at 35% 35%, #fff3d6, var(--p-blue) 45%); box-shadow:0 0 0 2px var(--p-bezel), 0 0 8px var(--p-blue); }
+.period .camwrap { position:relative; }
+.period #cam { aspect-ratio:8/3; margin-top:0; } .period #cam { cursor:pointer; }
+.period #camHud { position:absolute; inset:2px; width:calc(100% - 4px); height:calc(100% - 4px); pointer-events:none; }
+.period #run .panel.tech { grid-column:span 2; }
+.period #run.all { grid-template-columns:minmax(250px, .8fr) minmax(440px, 1.6fr) minmax(320px, 1fr); }
+.period #run.all .panel.tech { grid-column:auto; }
+.period #surveyCv { cursor:pointer; }
+.period #run .panel.sci .tabs { gap:4px; }
+.period #run .panel.sci .tabs button { font-size:10px; letter-spacing:.08em; padding:.8em .2em .8em 1.6em; min-width:0; }
+.period #run .panel.sci .tabs button::before { left:.5em; }
+.log .sym { width:20px; flex:none; } .log .sym img { width:18px; height:18px; vertical-align:middle; }
+.log .found { color:var(--p-green); } .log .dud { color:var(--p-amber); }
+.period #toast.found { color:var(--p-green); } .period #toast.dud, .period #toast.blackout { color:var(--p-amber); }
 .period #run::before { content:''; position:fixed; inset:0; z-index:-1; pointer-events:none; opacity:.09; background:url(/assets/textures/mission-control-room.webp) center/cover no-repeat; filter:sepia(.4); }
 .period .verdict { font-family:var(--p-label); font-weight:400; letter-spacing:.2em; font-size:26px; }
 .period .verdict.won { color:var(--p-green); } .period .verdict.lost { color:var(--p-red); }

@@ -69,6 +69,17 @@ The puzzle needs four cable colours that are told apart at a glance; the socket 
 
 Check them side by side in the wiring diagram and on the cable plugs in the headset after changing them.
 
+### Samples (gameplay: each must be told from its lookalike)
+
+The rock samples of [SPEC-sample-run.md](SPEC-sample-run.md). In code: `SAMPLE_COL` in `client/shared/palette.js`, used by the 3D rocks (`client/world.js`) and the Scientist's field guide (`drawSample` in `client/shared/icons.js`). Each type differs from its lookalike by shape and marks as well as colour, so it can be said out loud.
+
+| Sample | Base | Marks | Its lookalike |
+| --- | --- | --- | --- |
+| Anorthosite | `dial` `#e3d9bf`, angular | `ink-dial` flecks | the same pale, rounded and plain (`#b5ad9b` grain) |
+| Vesicular basalt | `#34322e`, rounded | dark pits `#161513` | a smooth dark slab (`#4a4741` grain) |
+| Orange glass | `#b9763a`, a lumpy clod on a stained patch | beads `#d39a55` | a crumpled scrap of `foil-gold` |
+| Ice-bearing clod | `#9fb0b8`, in a crater's bowl | frost `#d6dbd8` | a pale dusty rock `#b9b4a8` out in the open |
+
 ## Typography
 
 Self-host every font under `client/fonts/` as `.woff2` (the Quest and the venue Wi-Fi may be offline; no Google Fonts link). All three below are under the SIL Open Font License.

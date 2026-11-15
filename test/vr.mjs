@@ -143,7 +143,7 @@ async function grabTool(side, tool, near = null) {
     await v.frames(2);
     const ring = v.ring(side);
     v.grip(side, true);
-    await v.until(s => s.held === tool, 3);
+    await v.until(s => s.hands.includes(tool), 3);
     await v.frames(2);
     return { ring, held: v.holding(side)?.id || null, parent: v.parentOf(tool) };
   }, { side, tool, near });
@@ -160,18 +160,18 @@ async function letGo(side) {
 }
 const HALL_X = 500; // ROOM.origin.x in client/interior.js: room x + this = world x
 const stand = (x, z, tx, tz, h) => P(([x, z, tx, tz, h]) => window.vr.stand(x, z, tx, tz, h), [x, z, tx, tz, h]);
-// Put one tool in a hand for the next test without going through the motions again (or empty both hands).
+// Empty both hands, then put one tool in one hand, for the next test without going through the motions again.
 const kit = async (tool = null, side = 'right') => {
-  if (g.held && g.held !== tool) { const t = g.tools[g.held]; Object.assign(t, { at: 'loose', inside: !!g.astro.inside, x: g.astro.x, y: 0, z: g.astro.z }); }
-  g.held = tool;
-  if (tool) g.tools[tool].at = 'hand';
-  await P(({ tool, side }) => { const v = window.vr; window.moonbase.fx.give(tool, v.index(side)); }, { tool, side });
-  await P(tool => window.vr.until(s => s.held === tool, 3), tool);
+  for (const t of g.hands) if (t && t !== tool) Object.assign(g.tools[t], { at: 'loose', inside: !!g.astro.inside, x: g.astro.x, y: 0, z: g.astro.z });
+  g.hands = [null, null];
+  if (tool) { g.tools[tool].at = 'hand'; g.hands[side === 'left' ? 0 : 1] = tool; }
+  await P(({ tool, side }) => { const v = window.vr; window.moonbase.fx.give(null); if (tool) window.moonbase.fx.give(tool, v.index(side)); }, { tool, side });
+  await P(tool => window.vr.until(s => tool ? s.hands.includes(tool) : s.hands.every(h => !h), 3), tool);
   await P(() => window.vr.frames(3));
 };
 // Lay a tool loose somewhere (world coordinates outside, room coordinates inside), on the server's word.
 const lay = async (tool, inside, x, z, y = 0) => {
-  if (g.held === tool) g.held = null;
+  g.hands = g.hands.map(h => h === tool ? null : h);
   g.tools[tool] = { at: 'loose', inside, x, y, z, area: inside ? 'HALL' : 'OUTSIDE' };
   await P(({ tool, x, z }) => window.vr.until(() => { const p = window.moonbase.fx.toolState(tool); return p && p.state === 'loose' && Math.hypot(p.x - x, p.z - z) < 0.3; }, 5), { tool, x, z });
   await P(() => window.vr.frames(4));
@@ -242,8 +242,8 @@ try {
   await P(() => window.vr.frames(5));
   check(await P(() => window.moonbase.fx.gloves.every(gl => gl.visible)), 'no gloves are drawn on the controllers');
 
-  // ---------- 1. tools found in the hall, one at a time ----------
-  step('1. tools lying in the hall: pick up, drop, throw, one at a time');
+  // ---------- 1. tools found in the hall, one in each hand ----------
+  step('1. tools lying in the hall: pick up, drop, throw, one in each hand');
   check(await P(() => window.moonbase.where()) === 'in', 'start: the mission did not start inside the hall');
   const bodies = await P(() => window.moonbase.calls());
   console.log(`        physics: ${bodies.bodies} bodies, last step ${bodies.physicsMs.toFixed(2)} ms`);
@@ -252,25 +252,27 @@ try {
   await stand(HALL_X + brushSpot.x, brushSpot.z + 0.75, HALL_X + brushSpot.x, brushSpot.z);
   let r = await grabTool('right', 'brush');
   check(r.ring === PAL.green, 'hall: no green ring on the brush before grabbing it: ' + r.ring);
-  check(g.held === 'brush' && g.tools.brush.at === 'hand', 'hall: gripping the brush on the bench did not put it in the hand on the server');
+  check(g.hands[1] === 'brush' && g.tools.brush.at === 'hand', 'hall: gripping the brush on the bench did not put it in the hand on the server');
   check(r.held === 'brush' && r.parent === 'hand:right', 'hall: the brush should be in the right hand: ' + JSON.stringify(r));
   let buzz = await P(() => window.vr.haptics());
   check(buzz.some(b => b.side === 'right' && b.strength >= 0.5), 'hall: no buzz in the hand that grabbed: ' + JSON.stringify(buzz));
-  // One at a time: with the brush in the right hand, the left cannot take the welder.
+  // Two hands: with the brush in the right hand, the left takes the welder with its trigger, holds it while
+  // the trigger is held, and lets go of it the moment the trigger is released.
   await lay('welder', true, brushSpot.x - 0.5, brushSpot.z + 0.45);
   r = await P(async () => {
-    const v = window.vr, mb = window.moonbase;
+    const v = window.vr, mb = window.moonbase, X = window.fakeXR;
     await v.move('left', v.wp(mb.fx.tools.welder).add(v.V(0, 0.03, 0)), 6); await v.frames(2);
     const ring = v.ring('left');
-    v.haptics();
-    v.grip('left', true); await v.frames(3); await v.sleep(400);
-    const out = { ring, held: v.holding('left'), buzz: v.haptics() };
-    v.grip('left', false); await v.frames(2);
+    X.trigger('left', true); await v.frames(3);
+    await v.until(s => s.hands[0] === 'welder', 3); await v.frames(2);
+    const out = { ring, held: v.holding('left')?.id || null, parent: v.parentOf('welder') };
+    X.trigger('left', false); await v.frames(2);
+    out.after = v.holding('left')?.id || null;
     return out;
   });
-  check(r.ring === PAL.red, 'one at a time: the ring on a second tool should be red while the other hand holds one: ' + r.ring);
-  check(!r.held && g.held === 'brush' && g.tools.welder.at === 'loose', 'one at a time: the left hand took the welder with the brush in the right: ' + JSON.stringify(r.held));
-  check(r.buzz.filter(b => b.strength === 1).length >= 1, 'one at a time: no warning buzz when the second tool was refused');
+  check(r.ring === PAL.green, 'two hands: the ring on a second tool should be green with the other hand full: ' + r.ring);
+  check(r.held === 'welder' && r.parent === 'hand:left' && g.hands[1] === 'brush', 'two hands: the left trigger did not take the welder with the brush in the right: ' + JSON.stringify(r));
+  check(!r.after && await serverUntil(() => g.hands[0] === null && g.tools.welder.at === 'loose', 3), 'two hands: releasing the trigger did not let go of the welder: ' + JSON.stringify(r));
   // Drop it: it falls to the floor, comes to rest, and the server (and Mission Ops' tool log) hears where.
   const dropAt = await P(async () => {
     const v = window.vr, mb = window.moonbase, at = v.wp(mb.camera).add(v.V(0.45, -0.6, -0.1).applyQuaternion(mb.rig.quaternion));
@@ -282,7 +284,7 @@ try {
     return { x: p.x, y: p.y, z: p.z, asleep: p.asleep, place: p.place };
   });
   check(dropAt.asleep && dropAt.place === 'hall' && dropAt.y < 0.15, 'drop: the brush did not fall to the hall floor and settle: ' + JSON.stringify(dropAt));
-  check(await serverUntil(() => g.held === null && g.tools.brush.at === 'loose' && g.tools.brush.inside && Math.hypot(g.tools.brush.x - dropAt.x, g.tools.brush.z - dropAt.z) < 0.05, 3),
+  check(await serverUntil(() => !g.has('brush') && g.tools.brush.at === 'loose' && g.tools.brush.inside && Math.hypot(g.tools.brush.x - dropAt.x, g.tools.brush.z - dropAt.z) < 0.05, 3),
     'drop: the server did not hear where the brush came to rest: ' + JSON.stringify(g.tools.brush));
   check(!!g.tools.brush.area, 'drop: the brush has no area for the tool log');
   // Throw it: grab, swing the hand up the hall and let go mid-swing. It flies, lands and rolls on.
@@ -417,7 +419,7 @@ try {
   delete g.faults.dust; g.battery = 100;
   check(await P(async () => { for (let i = 0; i < 120 && window.moonbase.interior.phase !== 'main'; i++) await window.vr.sleep(50); return window.moonbase.interior.phase; }) === 'main', 'blackout: the roof lights did not come back with the power');
   await stand(HALL_X, -6, HALL_X, -8); // out of airlock S's chamber and up the hall, so the airlocks are armed again
-  check(sheltered(g.astro, g.rover), 'inside the habitat should count as cover from a meteor shower');
+  check(sheltered(g.astro, g.rovers.hauler), 'inside the habitat should count as cover from a meteor shower');
   // And out again through the east door: the twin on the hall's east wall comes out at the long module's end.
   r = await P(async () => {
     const v = window.vr, mb = window.moonbase, ch = mb.interior.doors.E;
@@ -433,13 +435,13 @@ try {
 
   // ---------- 5. pulling the wheel, fitting the tire ----------
   step('5. pulling the wheel');
-  g.rover.x = 6; g.rover.z = 12; g.rover.ry = 0; g.rover.throttle = 0;
+  Object.assign(g.rovers.hauler, { x: 6, z: 12, ry: 0, v: 0, throttle: 0 });
   await page.waitForTimeout(400);
-  await P(async () => { const mb = window.moonbase; for (let i = 0; i < 40; i++) { mb.world.moveRover(mb.state().rover, 1); await window.vr.frames(1); } });
-  g.break('wheel');
-  await P(() => window.vr.until(s => s.scene.wheel === 1, 3));
+  await P(async () => { const mb = window.moonbase; for (let i = 0; i < 40; i++) { mb.world.moveRovers(mb.state().rovers, 1); await window.vr.frames(1); } });
+  g.break('wheel', false, 'hauler');
+  await P(() => window.vr.until(s => s.scene.wheels.hauler === 1, 3));
   await P(() => window.vr.frames(3));
-  const hubAt = await P(() => { const v = window.vr, mb = window.moonbase; const h = v.wp(mb.world.fixtures.hub), c = v.wp(mb.world.rover); const out = h.clone().sub(c).setY(0).normalize(); return { x: h.x, z: h.z, ox: out.x, oz: out.z }; });
+  const hubAt = await P(() => { const v = window.vr, mb = window.moonbase; const h = v.wp(mb.world.fixtures.hub), c = v.wp(mb.world.rovers.hauler); const out = h.clone().sub(c).setY(0).normalize(); return { x: h.x, z: h.z, ox: out.x, oz: out.z }; });
   // Beside the wheel, bent to it: its hub is 0.4 m off the ground.
   await stand(hubAt.x + hubAt.ox * 0.6, hubAt.z + hubAt.oz * 0.6, hubAt.x, hubAt.z, 1.35);
   check(await P(() => window.moonbase.scene.children.some(o => o.isSprite && o.visible && o.scale.x < 1)), 'wheel: no outline of the missing tool (the tire) over the broken wheel');
@@ -452,9 +454,9 @@ try {
     v.grip('left', true); await v.frames(2);
     const held = v.holding('left')?.kind;
     await v.move('left', top.clone().add(v.V(ox * 0.2, 0, oz * 0.2)), 6);
-    const early = mb.state().scene.wheel;
+    const early = mb.state().scene.wheels.hauler;
     await v.move('left', top.clone().add(v.V(ox * 0.36, 0, oz * 0.36)), 6);
-    await v.until(s => s.scene.wheel === 2, 2);
+    await v.until(s => s.scene.wheels.hauler === 2, 2);
     v.grip('left', false); await v.frames(3);
     return { ring, held, early, buzz: v.haptics().length, lying: v.wp(F.wheel).y };
   }, hubAt);
@@ -479,11 +481,11 @@ try {
     const off = v.wp(mb.fx.tools.tire).sub(v.where('right'));
     await v.move('right', hub.clone().sub(off).add(v.V(0, 0.4, 0)), 6);
     await v.move('right', hub.clone().sub(off), 8);
-    for (let i = 0; i < 30 && mb.state().scene.wheel !== 0; i++) await v.frames(1);
+    for (let i = 0; i < 30 && mb.state().scene.wheels.hauler !== 0; i++) await v.frames(1);
     v.grip('right', false); await v.frames(2);
   });
   check(await serverUntil(() => !g.faults.wheel), 'tire: offering the tire up to the bare hub did not fit it');
-  check(g.tools.tire.at === 'gone' && !g.held && await P(() => window.vr.parentOf('tire')) === 'nowhere', 'tire: once fitted it should be gone from the hand and the world');
+  check(g.tools.tire.at === 'gone' && !g.has('tire') && await P(() => window.vr.parentOf('tire')) === 'nowhere', 'tire: once fitted it should be gone from the hand and the world');
   await reachOk('fitting the tire');
 
   // ---------- 6. the generator cord ----------
@@ -493,7 +495,7 @@ try {
   await lay('gen', false, 0.35, 8.45); // set down at the work
   g.break('dust'); g.battery = 0;
   check(await serverUntil(() => g.blackout && !g.powered), 'generator: could not black the base out for the test');
-  check(await P(() => window.vr.until(s => !s.powered, 3).then(() => window.moonbase.radioState().shown)) === 'dead', 'blackout: the radio should read NO SIGNAL');
+  check(await P(() => window.vr.until(s => !s.powered, 3).then(() => window.moonbase.radioState().shown)) !== 'dead', 'blackout: comms never fail, so the radio must not read NO SIGNAL');
   await P(() => window.vr.haptics());
   r = await P(async () => {
     const v = window.vr, mb = window.moonbase;
@@ -611,7 +613,7 @@ try {
   // A shower whose near impacts have already begun, for `seconds`.
   // (The test holds the mission clock, so the shower is ended by hand.)
   const shower = async seconds => { g.meteor = { start: g.elapsed - CFG.meteorGraceSeconds - 0.1, end: g.elapsed + 600, hit: false, falling: true, after: [] }; await new Promise(r => setTimeout(r, seconds * 1000)); g.meteor = null; await new Promise(r => setTimeout(r, 250)); };
-  const beside = [g.rover.x + 1.5, g.rover.z, g.rover.x, g.rover.z];
+  const beside = [g.rovers.hauler.x + 1.5, g.rovers.hauler.z, g.rovers.hauler.x, g.rovers.hauler.z];
   let hits = g.stats.hits;
   await stand(...beside);              // standing beside the rover, 1.7 m tall
   await shower(1);
