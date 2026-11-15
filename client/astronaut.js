@@ -751,7 +751,9 @@ function choosePortal(now) {
 }
 const isShown = m => { for (let o = m; o; o = o.parent) if (!o.visible) return false; return true; };
 // After the main draw: the other place, through the chosen glass.
-const rigWas = { p: new THREE.Vector3(), q: new THREE.Quaternion() };
+// Saved as an Euler, not a quaternion: copying a quaternion back makes three.js rewrite the rig's Euler, and a
+// yaw past 90 degrees comes back as (pi, pi - yaw, pi), which turns the mouse and the keys round backwards.
+const rigWas = { p: new THREE.Vector3(), r: new THREE.Euler() };
 function renderPortal() {
   if (!chosen) return;
   const p = chosen, other = p.to, mats = matsOf[other];
@@ -762,7 +764,7 @@ function renderPortal() {
   tmpV.set(0, 0, p.clipZ).applyMatrix4(p.far.matrixWorld);
   clip.setFromNormalAndCoplanarPoint(p.clipZ > 0 ? nrm.negate() : nrm, tmpV);
   // Move the rig (and the eyes) by the pair's transform; hide everything that rides on it.
-  rigWas.p.copy(rig.position); rigWas.q.copy(rig.quaternion);
+  rigWas.p.copy(rig.position); rigWas.r.copy(rig.rotation);
   rig.updateMatrix(); tmpM.multiplyMatrices(pM, rig.matrix); tmpM.decompose(rig.position, rig.quaternion, tmpV);
   rig.updateMatrixWorld(true);
   const riding = [...rig.children.filter(o => o !== camera), ...camera.children.filter(o => !o.isLight)];
@@ -787,7 +789,7 @@ function renderPortal() {
   outdoors.forEach((o, i) => { o.visible = shownOut[i]; }); interior.group.visible = hallShown; board.visible = boardShown;
   p.hide.forEach((o, i) => { o.visible = shownHide[i]; });
   riding.forEach((o, i) => { o.visible = shownRide[i]; });
-  rig.position.copy(rigWas.p); rig.quaternion.copy(rigWas.q); rig.updateMatrixWorld(true);
+  rig.position.copy(rigWas.p); rig.rotation.copy(rigWas.r); rig.updateMatrixWorld(true);
 }
 
 function renderScope() {
