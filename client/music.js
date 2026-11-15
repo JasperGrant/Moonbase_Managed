@@ -6,6 +6,7 @@
 // first click, tap or key press, whatever that click was for.
 //
 //   music.mood('calm' | 'run')   how loud: full in the lobby and on the results, under the game during a mission
+//   music.setEnabled(on)         the MUSIC checkbox in the corner of every page; it is remembered in this browser
 //   music.duck(reason, on)       drop it further while the radio is on ('tx', 'rx'), so voices come through
 //
 // Where it is in the song follows the clock, not the page: position = time of day modulo the loop.
@@ -20,6 +21,7 @@ const SRC = '/assets/audio/theme.m4a';
 const FADE = 3;                          // seconds the end of the song overlaps its start
 const LEVEL = { calm: 0.5, run: 0.22 };  // during a mission it sits under the alarms, the leak hiss and the radio
 const DUCK = 0.3;                        // and drops to this share of that while anyone is on the radio
+const STORE = 'moonbase.music';          // localStorage key: 'off' when this browser has the music turned off
 const SMOOTH = 0.6;                      // seconds for a change of level to mostly happen
 
 class Music {
@@ -33,6 +35,9 @@ class Music {
     this.playing = false;
     this.last = performance.now();
     this.retried = 0;
+    this.enabled = true;     // the MUSIC checkbox: local to this browser, and it does not touch anyone else's sound
+    try { this.enabled = localStorage.getItem(STORE) !== 'off'; } catch {}
+    if (typeof document !== 'undefined') this.box();
     if (typeof Audio === 'undefined') return;
     this.load();
   }
@@ -116,7 +121,7 @@ class Music {
   step() {
     const now = performance.now(), dt = Math.min(1, (now - this.last) / 1000);
     this.last = now;
-    const want = this.target * (this.ducks.size ? DUCK : 1);
+    const want = this.enabled ? this.target * (this.ducks.size ? DUCK : 1) : 0;
     this.gain += (want - this.gain) * (1 - Math.exp(-dt * 3 / SMOOTH));
     if (!this.playing || !this.length) return;
     const a = this.players[this.cur], b = this.players[1 - this.cur], end = this.length;
@@ -135,12 +140,40 @@ class Music {
     }
   }
 
+  // Turn the theme on or off for this browser only. It keeps playing silently while off, so turning it back on is in step.
+  setEnabled(on) {
+    this.enabled = !!on;
+    try { localStorage.setItem(STORE, on ? 'on' : 'off'); } catch {}
+    if (this.input) this.input.checked = this.enabled;
+  }
+
+  // A small engraved MUSIC switch in the corner of every page.
+  box() {
+    const make = () => {
+      const st = document.createElement('style');
+      st.textContent = `#musicBox{position:fixed;left:10px;bottom:10px;z-index:2147483000;display:flex;align-items:center;gap:7px;padding:4px 8px;background:#2b3230;border:1px solid #8b887d;color:#d6ccb4;font:8px "Michroma","Eurostile","Arial Narrow",sans-serif;letter-spacing:.18em;cursor:pointer;user-select:none;opacity:.8}
+#musicBox:hover{opacity:1}#musicBox input{margin:0;accent-color:#8fb05a;cursor:pointer}`;
+      const label = document.createElement('label');
+      label.id = 'musicBox';
+      label.title = 'Theme music, on this device only';
+      const input = document.createElement('input');
+      input.type = 'checkbox';
+      input.checked = this.enabled;
+      input.addEventListener('change', () => this.setEnabled(input.checked));
+      label.append(input, document.createTextNode('MUSIC'));
+      document.head.append(st);
+      document.body.append(label);
+      this.input = input;
+    };
+    if (document.body) make(); else addEventListener('DOMContentLoaded', make, { once: true });
+  }
+
   mood(name) { if (LEVEL[name] !== undefined) this.target = LEVEL[name]; }
   duck(reason, on) { if (on) this.ducks.add(reason); else this.ducks.delete(reason); }
   // For the tests: what is playing, and how loud.
   get status() {
     const a = this.players[this.cur];
-    return { playing: this.playing && !!a && !a.paused, at: a ? a.currentTime : 0, length: this.length, volume: a ? a.volume : 0, gain: this.gain, target: this.target, ducked: this.ducks.size > 0 };
+    return { playing: this.playing && !!a && !a.paused, at: a ? a.currentTime : 0, length: this.length, volume: a ? a.volume : 0, gain: this.gain, target: this.target, ducked: this.ducks.size > 0, enabled: this.enabled };
   }
 }
 const clamp = v => Math.max(0, Math.min(1, v));
