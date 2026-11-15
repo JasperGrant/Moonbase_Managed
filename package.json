@@ -17,6 +17,8 @@
     "assets:shots": "ASSET_SHOTS=1 node test/assets.mjs",
     "avatar": "node test/avatar.mjs",
     "avatar:shots": "AVATAR_SHOTS=1 node test/avatar.mjs",
+    "camviews": "node test/camviews.mjs",
+    "camviews:shots": "CAMVIEW_SHOTS=1 node test/camviews.mjs",
     "bake": "node scripts/bake-assets.mjs",
     "dev:cf": "wrangler dev",
     "deploy": "wrangler deploy",

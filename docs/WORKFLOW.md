@@ -77,3 +77,4 @@ A change that is in scope of an existing design doc goes through that doc: edit 
 | Feature | Spec | Design | Status |
 | --- | --- | --- | --- |
 | Hands, throwing and an animated astronaut | [specs/hands-and-avatar.md](specs/hands-and-avatar.md) | [design/hands-and-avatar.md](design/hands-and-avatar.md) | Implemented |
+| First- and third-person rover cameras | [specs/rover-camera-views.md](specs/rover-camera-views.md) | [design/rover-camera-views.md](design/rover-camera-views.md) | Implemented |

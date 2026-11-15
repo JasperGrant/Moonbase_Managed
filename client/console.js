@@ -25,7 +25,7 @@ const C = { bg: PAL.consoleDeep, line: PAL.rule, ink: PAL.ink, dim: PAL.inkDim, 
 
 const BRIEF = {
   ops: '<b>You are the voice, the kit and the tally.</b> The only voice the astronaut hears: hold SPACE to talk. The astronaut holds one thing in each hand (a tool or a rock sample): your HANDS panel shows which. The mission is to bring rock samples home. Your TOOL LOG says roughly where each tool lies; your SAMPLE LOG says what is in hand, in the tray and banked. When they are suited up, you call them GO.',
-  tech: '<b>You have the EYES and the WHEELS.</b> Two rovers, two cameras, both at once: the Scout on W A S D, the Hauler on the arrows. The astronaut rides the Hauler. You have no map: the Scientist does.',
+  tech: '<b>You have the EYES and the WHEELS.</b> Two rovers, two cameras, both at once: the Scout on W A S D, the Hauler on the arrows. C and / switch each camera between first and third person. The astronaut rides the Hauler. You have no map: the Scientist does.',
   sci: '<b>You have the CHART and the FIELD GUIDE.</b> Only you know what a sample looks like. The chart sharpens wherever a rover drives. POWER and AIR say how bad a fault is.',
 };
 
@@ -388,6 +388,8 @@ function drawTech(s) {
   label(g, 'METEOR', 460, 96, 10, C.dim);
   nixie(g, m ? (m.falling ? '00' : String(Math.ceil(m.eta)).padStart(2, '0')) : '  ', 460, 140, 32, { lit: !!m });
 }
+let camApi = null; // the rover cameras (client/rovercam.js): their views, switched with C and /
+const VIEW_KEYS = { KeyC: 'scout', Slash: 'hauler' }; // under the hand that drives each rover
 // Over each camera: a compass tape, a reticle with clock marks ("rock at two o'clock"), and the rover's name.
 function drawCamHud(s) {
   const cv = $('camHud'), cam = $('cam'); if (!cv || !cam || cam.hidden) return;
@@ -418,6 +420,9 @@ function drawCamHud(s) {
     g.beginPath(); g.moveTo(cx - 6, cy); g.lineTo(cx + 6, cy); g.moveTo(cx, cy - 6); g.lineTo(cx, cy + 6); g.stroke();
     // the name, and a stuck rover's warning
     g.font = `11px ${FONT.label}`; g.textAlign = 'left'; g.fillStyle = phos(0.85); g.fillText(id === 'scout' ? 'SCOUT' : 'HAULER', x0 + 10, h - 12);
+    // which view this screen is in, and the key that changes it
+    const key = id === 'scout' ? 'C' : '/';
+    g.textAlign = 'center'; g.fillStyle = phos(0.7); g.fillText(`${camApi?.view(id) === 'third' ? '3RD' : '1ST'} PERSON  [${key}]`, cx, h - 12);
     if ((s.scene?.wheels?.[id] || 0) > 0 && blinkOn()) { g.fillStyle = PAL.amber; g.textAlign = 'right'; g.fillText('WHEEL', x0 + cw - 10, h - 12); }
     g.restore();
   });
@@ -695,7 +700,14 @@ if (has('tech')) {
   addEventListener('keydown', e => { if (!ALL.has(e.code) || e.target.closest?.('input, textarea')) return; e.preventDefault(); if (!keys.has(e.code)) { keys.add(e.code); sendDrive(which(e.code)); } });
   addEventListener('keyup', e => { if (keys.delete(e.code)) sendDrive(which(e.code)); });
   addEventListener('blur', () => { if (keys.size) { keys.clear(); sendDrive('scout'); sendDrive('hauler'); } });
-  import('/rovercam.js').then(m => m.startRoverCam($('cam'), () => state)).catch(err => {
+  // The camera view: C for the Scout, / for the Hauler (under the hand that drives each), or a click on that
+  // camera's screen. The wheel over a screen moves its chase camera nearer or further.
+  const half = e => { const r = $('cam').getBoundingClientRect(); return e.clientX - r.left < r.width / 2 ? 'scout' : 'hauler'; };
+  addEventListener('keydown', e => { const id = VIEW_KEYS[e.code]; if (!id || e.repeat || e.ctrlKey || e.metaKey || e.altKey || e.target.closest?.('input, textarea')) return; e.preventDefault(); camApi?.toggle(id); });
+  $('cam').addEventListener('click', e => camApi?.toggle(half(e)));
+  $('cam').addEventListener('wheel', e => { if (!camApi) return; const id = half(e); if (camApi.view(id) !== 'third') return; e.preventDefault(); camApi.zoom(id, e.deltaY); }, { passive: false });
+  $('camHint').textContent = 'C / click left screen: Scout view. / or click right screen: Hauler view. Wheel: chase distance.';
+  import('/rovercam.js').then(m => { camApi = m.startRoverCam($('cam'), () => state); }).catch(err => {
     console.warn(err);
     $('cam').hidden = true;
     $('camHint').textContent = 'ROVER CAMERAS UNAVAILABLE';
