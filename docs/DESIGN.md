@@ -30,6 +30,7 @@ Use these names in code. CSS gets them as custom properties in `client/style.css
 | `bezel` | `#8b887d` | Brushed aluminium bezels, frames, dividers. |
 | `rule` | `#55605b` | Hairlines, grid lines, unlit outlines. Replaces `--line #243240`. |
 | `dial` | `#e3d9bf` | Instrument faces, paper, placards. The only near-white surface. |
+| `keycap` | `#4a4a44` | The face of an unlit key on a Mission Control keyset. |
 | `enamel` | `#d8d2c2` | Painted habitat walls and exterior white paint (warm, not `#f5f2ec`). |
 | `foil-gold` | `#b8913f` | Kapton / gold foil insulation. |
 | `regolith` | `#a8a397` | Ground tint (already close, keep it warm grey). |

@@ -2,7 +2,7 @@
 
 Spec: [../specs/mission-control-consoles.md](../specs/mission-control-consoles.md). Process: [../WORKFLOW.md](../WORKFLOW.md). Look: [../DESIGN.md](../DESIGN.md).
 
-Status: **for review. No game code has been written.** The "proposed" pictures below are mock-ups: stills drawn by [mission-control-consoles/mock.js](mission-control-consoles/mock.js) with the game's own palette, fonts and icon functions. Nothing under `client/` loads that file.
+Status: **built.** Reviewed and accepted with three changes (section 9: A1 to A3): a gap between the Scientist's scope and its switches, desks that fit every common laptop shape, and a simpler 2-player desk on one screen. The pictures in section 6 are the consoles as built; the mock-ups they were drawn from ([mission-control-consoles/mock.js](mission-control-consoles/mock.js)) are kept in section 6 for comparison.
 
 ## 0. Where we are, and what a real control room does
 
@@ -68,7 +68,7 @@ What we do **not** take: the walls of tabular numbers on a real flight controlle
 
 | | Decision | Why | Overturn → |
 | --- | --- | --- | --- |
-| D1 | **A fixed design size of 1366 x 768 per console, scaled uniformly to the window** (letterboxed on `bakelite`), drawn at `devicePixelRatio`. Layout is in design pixels, as the mock-ups are. | A console is a physical desk: it does not reflow. One coordinate system for layout, hit tests and tests. Fixes the scroll and the blur in one move. | A responsive CSS grid of separate canvases. More work, and instruments move about between laptops. |
+| D1 | **A fixed design width of 1366 per console, scaled uniformly to the window**, drawn at `devicePixelRatio`. The height follows the screen between 768 (16:9) and 911 (3:2), so 16:9, 16:10 and 3:2 laptops are filled exactly (A2); only wider or taller windows are letterboxed on `bakelite`. Layout is in design pixels. | A console is a physical desk: it does not reflow. One coordinate system for layout, hit tests and tests. Fixes the scroll and the blur in one move. | A responsive CSS grid of separate canvases. More work, and instruments move about between laptops. |
 | D2 | The status strip is **one canvas**, not DOM. The DOM header (`#clock`, `#o2`, `#score`, `#samples`, `#crew`) stays in the page, visually hidden, still updated, as the accessible text (R13) and so nothing that reads those ids breaks. | Nixie tubes, an edgewise meter and jewel lamps are canvas drawings already (`nixie`, `jewel` in `palette.js`). | Keep the DOM header and restyle it with CSS only. Cheaper; the oxygen meter and lamps stay flat. |
 | D3 | **Eight event lights, fixed order:** alarm, fixed, meteor hit, base dark, power back, sample banked, dud, no link. A light is full-on for 6 s after its event, blinking at 1.5 Hz for the first 3 s if it is red, then off. The last event's light stays at half brightness until the next one. | The eight are exactly the `TOAST` kinds every seat already receives in `s.ev`, plus the link warning. Half-bright "last event" keeps what the toast line gave: you can look up late and still see what you missed. | Light only while the condition holds. That needs the server to say what is active, which tells seats things they do not know today (R14). |
 | D4 | The generator-running event (`gen`) lights the **power back** lamp in amber instead of green. No ninth lamp. | Eight fit the strip at 30 px; the two are the same idea (the lights are on) with a caveat. | A ninth lamp. |
@@ -81,7 +81,7 @@ What we do **not** take: the walls of tabular numbers on a real flight controlle
 | D11 | The recorder samples at **2 Hz into a 120-point ring buffer** (60 s), in the page. Paper moves left; the pen is at the right edge. The red band on the paper is the same limit as the dial's red arc. | Enough to see a leak's change of slope within about five seconds. Costs nothing between samples. | A longer window (the whole mission). Flatter slopes, harder to see a change. |
 | D12 | The Scientist's scope is permanent; **GUIDE, POWER and AIR share the second display**, chosen by three lit push-buttons (keys 1, 2, 3). The push-buttons carry **no attention lamp**: nothing tells the Scientist that air needs looking at. | SPEC-v2 wants players to "go looking". This keeps the looking for the three pages that are diagnosis, and stops the chart (which the whole crew navigates by) from disappearing while the Scientist checks a gauge. | (a) Keep four tabs as now. (b) Add an amber lamp on a push-button whose page is out of limits: more realistic (a master caution), but it gives the diagnosis away. |
 | D13 | The scope's RANGE and CENTRE knobs gain keys (**R** and **E**), shown on the keyset. Clicking a knob still works. | The Scientist's hands are otherwise idle; the keyset should not be empty. | Click only. |
-| D14 | **The all-in-one seat (`/control`, 2-player mode) shows one console at a time**, switched with F1, F2, F3 or three seat keys at the left of the keyset. The status strip, the event lights, the talk key and both rovers' drive keys work whichever console is up. | Three 1366 x 768 desks do not fit one laptop, and scrolling is what this pass removes. | Three consoles side by side at one-third scale on screens 1920 px and wider, switching below that. |
+| D14 | **The all-in-one seat (`/control`, 2-player mode) has its own, simpler desk on one screen** (A3, 6.7): hands, tools and samples on the left; the two cameras one over the other in the middle; the scope and a one-row-per-sample guide on the right. No switching between consoles. | One player runs the whole base, so everything must be in view at once, and there is less of it to read than the three 4-player desks put together. | Switch between the three full desks with F1 to F3 (the first version of this decision). |
 | D15 | Seat names on the strip are the short forms **EVA, OPS, TECH, SCI**; the seat's own plate has its picture and its short name. | They are what the crew says on the loop. | Pictures only. |
 | D16 | The score keeps a **star** as its picture. | It is the one header item with no physical object behind it. | A plate reading PTS. |
 
@@ -231,7 +231,9 @@ All three are 1366 x 768 design pixels. Palette names are from DESIGN.md. Panels
 
 ### 6.2 Mission Ops
 
-![Mission Ops, proposed](mission-control-consoles/mock-ops.png)
+![Mission Ops, as built, 1366 x 768](mission-control-consoles/built-ops.png)
+
+The mock-up it was built from: [mock-ops.png](mission-control-consoles/mock-ops.png).
 
 - **Left wing, HANDS and VOICE LOOP.** Two wells, each with a glove outline (left hand mirrored); the tool's silhouette or a rock is drawn over the palm in `ink`; a `lamp-green` jewel under it is lit while the hand is full. Below, the talk key: a wide keycap with the microphone and a SPACE outline, a `lamp-red` transmit lamp over the headset icon, a `lamp-blue` receive lamp over the helmet icon, a cream level meter between them.
 - **Centre, TOOL BOARD.** A plan of the hall as eight bays (BENCH is double width, HALL is the open floor). A bay with a tool in it is outlined in `lamp-amber` with the silhouette in `lamp-amber`. Under it a row of four OUTSIDE bays (HAB, SOLAR, ROVER, FIELD: the server's `OUTSIDE …` areas; a named landmark shows in FIELD with its name on the bay). Under that the roster: five silhouettes with a jewel each, green in a hand, amber lying somewhere, dark used up or fitted.
@@ -240,7 +242,9 @@ All three are 1366 x 768 design pixels. Palette names are from DESIGN.md. Panels
 
 ### 6.3 Technician
 
-![Technician, proposed](mission-control-consoles/mock-tech.png)
+![Technician, as built, 1366 x 768](mission-control-consoles/built-tech.png)
+
+On a 16:10 screen (1440 x 900) the desk is 854 high and the extra goes to the monitors: [built-tech-16x10.png](mission-control-consoles/built-tech-16x10.png). The mock-up: [mock-tech.png](mission-control-consoles/mock-tech.png).
 
 - **Two monitors**, 572 x 396, each a `bezel` frame, a `bakelite` inner lip and glass with 22 px corners; the live `rovercam.js` view shows through; a faint raster over it. On the glass in `phosphor`: the compass tape and the clock reticle as now; bottom left the rover's silhouette and its letter (S, H); bottom right the eye and the chase icons (the one in use bright) and the view key in a box.
 - **Under each monitor**, that rover's panel: the HOME dial (the needle now carries a small base on its tip, so it needs no plate), the range on Nixie beside a base icon, a speed edgewise meter beside a speedometer icon, a WHEEL event tile (`lamp-red`, blinking, when its wheel is broken), and on the Hauler a RIDER tile (`lamp-green` while the astronaut is aboard).
@@ -249,9 +253,9 @@ All three are 1366 x 768 design pixels. Palette names are from DESIGN.md. Panels
 
 ### 6.4 Scientist
 
-![Scientist, proposed, AIR](mission-control-consoles/mock-sci-air.png)
+![Scientist, as built, AIR, 1366 x 768](mission-control-consoles/built-sci.png)
 
-![Scientist, proposed, POWER](mission-control-consoles/mock-sci-power.png)
+The scope's bezel now stops 15 px short of the switches' stops (A1); in the mock-ups ([AIR](mission-control-consoles/mock-sci-air.png), [POWER](mission-control-consoles/mock-sci-power.png)) the CENTRE switch's base icon overlapped the heat map. On a 3:2 screen (1500 x 1000): [built-sci-3x2.png](mission-control-consoles/built-sci-3x2.png).
 
 - **Left, the scope:** `drawSurvey` unchanged in content, radius 276. The rovers and the astronaut wear their icons in place of the letters S, H and EVA; the base wears the base icon. To its right, top to bottom: RANGE knob (numerals stay), CENTRE knob with base, Scout and Hauler icons at its stops, the surveyed percentage on Nixie, and the four fault symbols as a 2 x 2 block of event tiles (the legend, without its captions).
 - **Right, the auxiliary display:** three push-buttons down the left edge (card, battery, bottle; the one in use is lit `dial`), numbered 1 to 3. The display itself is a `console-deep` face in a well.
@@ -280,6 +284,30 @@ Rules for anyone adding one: a 100-unit box centred on the origin; filled shapes
 | Field guide | SIZE, WHERE, TELL, NOT THIS | Plates of pictures |
 
 Everything else on a mission screen today is removed or becomes a picture: 5 header captions, 4 seat names, the toast words, the talk-key sentence, HANDS / TRAY / BANKED / OF, tool names and LEFT HAND / RIGHT HAND / USED / FITTED, SCOUT / HAULER, HOME, METRES, WHEEL, RIDER, METEOR, W A S D and ARROWS plates, the camera hint sentence, `1ST PERSON [C]`, SURVEY / GUIDE / POWER / AIR, RANGE M, CENTRE, SURVEYED %, the four legend names, LOW, CHARGE, DRAIN, LEAK, PERCENT.
+
+### 6.7 The 2-player desk (`/control`)
+
+![The 2-player desk, as built, 1366 x 768](mission-control-consoles/built-2p.png)
+
+One player runs the whole base, so this desk is the three 4-player desks cut down to what one person can watch at once, all on one screen (D14, A3):
+
+- **Left:** HANDS (two gloves, a lamp each); TOOLS, one row per tool: its silhouette, its lamp (green in a hand, amber lying, dark used up) and the bay it lies in as a word, or L or R in a hand; and the samples on their way home (hands, tray, bank) as three compact rows.
+- **Middle:** the two rover cameras, one over the other, each with a strip of instruments under it: the HOME dial, the range, speed, the WHEEL lamp and, on the Hauler, the RIDER lamp.
+- **Right:** the survey scope (radius 140) with RANGE and CENTRE beside it, the four fault lamps and the surveyed percentage under it, then the field guide as one row per kind of sample (its glyph, its picture, its lookalike struck through, a lamp per piece wanted) and the ASSAY strip.
+- **Keyset:** SPACE with the transmit and receive lamps, W A S D and C for the Scout, the arrows and / for the Hauler, R and E for the scope, and the meteor warning (lamp, seconds, TAKE COVER) at the right end.
+
+Left out against the 4-player desks: the tool board's plan of the hall, the mission tape, the voice-loop panel, the POWER and AIR pages (the scope's blinking fault symbol and the fault lamps say which fault it is; the status strip has the oxygen) and the guide's SIZE, WHERE and TELL pictograms. On a 3:2 screen the guide rows grow: [built-2p-3x2.png](mission-control-consoles/built-2p-3x2.png).
+
+### 6.8 Laptop screens
+
+| Screen | Examples | Desk (design px) |
+| --- | --- | --- |
+| 16:9 | 1366 x 768, 1920 x 1080, 2560 x 1440 | 1366 x 768 |
+| 16:10 | 1280 x 800, 1440 x 900, 1680 x 1050, 2560 x 1600 (MacBook) | 1366 x 854 |
+| 3:2 | 1500 x 1000, 2256 x 1504 (Surface, Framework) | 1366 x 911 |
+| wider than 16:9 or taller than 3:2 | ultrawide, a window dragged narrow | letterboxed on `bakelite` |
+
+Every desk is checked with no scroll at 1366 x 768, 1440 x 900, 1500 x 1000 and 1920 x 1080.
 
 ## 7. Implementation considerations
 
@@ -340,7 +368,12 @@ Everything else on a mission screen today is removed or becomes a picture: 5 hea
 
 ## 9. Amendments made while coding
 
-None yet.
+- **A1** (sci.js): the scope's radius is at most 262 (the mock-up had 276) and the switches sit at x 620, so there is a 15 px gap between the scope's bezel and the nearest switch stop. In the mock-up the CENTRE switch's base icon overlapped the heat map.
+- **A2** (desk.js, D1): the desk's height follows the screen: `H = clamp(1366 x innerHeight / innerWidth, 768, 911)`. 16:9 (1366 x 768, 1920 x 1080) gives 768, 16:10 (1440 x 900, 1280 x 800, 2560 x 1600) 854, 3:2 (1500 x 1000, Surface and Framework laptops) 911. Every layout takes its height from `regionOf(H)` and puts the extra into the tool board, the cameras, the recorders and the guide rows.
+- **A3** (all.js, D14, 6.7): the 2-player seat gets its own desk rather than the three 4-player desks behind a switch.
+- **A4** (desk.js): no separate `frame.js`: the status strip and the event lights are in `desk.js`, and each seat draws its own keyset. The scope is redrawn every frame (as it was before) rather than cached; the idle frame rate is still 10.
+- **A5** (sci.js, D12): the Scientist's aux page is remembered in `localStorage` (`moonbase.sci.aux`), AIR by default.
+- **A6** (tech.js): the Hauler's tray lamps from the mock-up are dropped (the Technician is not sent the tray: section 4's open question), and so are the two small lamps under TAKE COVER.
 
 ## 10. Out of scope
 

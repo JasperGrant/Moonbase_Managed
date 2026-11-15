@@ -1,5 +1,6 @@
 // The Technician's two rover cameras: the same world as the astronaut's, seen from the Scout (left) and the
-// Hauler (right). One renderer, one copy of the world, drawn twice into the two halves of one canvas, at most
+// Hauler (right). One renderer, one copy of the world, drawn twice into one canvas (its two halves, or the two
+// rectangles a Mission Control desk gives it with setRects), at most
 // 30 frames a second: the 2-player seat runs this beside everything else. The astronaut is a figure that
 // walks, crouches and reaches (client/avatar.js), with the tools in their hands, and any tool lying out on
 // the surface lies where it came to rest.
@@ -85,6 +86,8 @@ export function startRoverCam(canvas, getState) {
     const e = smooth(v.blend);
     cam.position.copy(fpP).lerp(tpP, e); cam.quaternion.copy(fpQ).slerp(tpQ, e);
   }
+  let rects = null; // () => [{ x, y, w, h }] in CSS pixels from the top left, one per camera, or null for halves
+  api.setRects = fn => { rects = fn; };
   const tools = buildTools(THREE);
   let last = 0, lastT = 0;
   renderer.setAnimationLoop(ms => {
@@ -115,12 +118,14 @@ export function startRoverCam(canvas, getState) {
       if (g.parent !== scene) scene.add(g);
       layDown(THREE, g, id, at); g.visible = true;
     }
-    const half = Math.floor(w / 2);
+    const half = Math.floor(w / 2), given = rects?.();
     CAMS.forEach((id, n) => {
-      const cam = cams[id], x = n * half, cw = n ? w - half : half;
+      // Each camera's rectangle on the canvas: the one the desk gives (the glass of its monitor), or a half.
+      const r = given?.[n] || { x: n * half, y: 0, w: n ? w - half : half, h };
+      const cam = cams[id], cw = Math.max(1, Math.round(r.w)), ch = Math.max(1, Math.round(r.h)), x = Math.round(r.x), y = h - Math.round(r.y) - ch;
       pose(id, dt);
-      cam.aspect = cw / h; cam.updateProjectionMatrix();
-      renderer.setViewport(x, 0, cw, h); renderer.setScissor(x, 0, cw, h);
+      cam.aspect = cw / ch; cam.updateProjectionMatrix();
+      renderer.setViewport(x, y, cw, ch); renderer.setScissor(x, y, cw, ch);
       renderer.render(scene, cam);
     });
   });

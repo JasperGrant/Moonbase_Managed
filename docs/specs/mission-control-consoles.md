@@ -8,7 +8,8 @@ The three laptop seats (Mission Ops, Technician, Scientist) carry the right info
 
 ## Want
 
-- **One desk, one screen.** Each seat's console fits a 1366 x 768 laptop screen with no scrolling, and fills a bigger screen without blurring.
+- **One desk, one screen.** Each seat's console fits a laptop screen with no scrolling, whatever its shape: 16:9 (1366 x 768, 1920 x 1080), 16:10 (1440 x 900, MacBooks) and 3:2 (1500 x 1000), filling the screen rather than leaving bars, and it is sharp at any size.
+- **The 2-player game gets a simpler desk.** The one Mission Control player sees the essentials of all three consoles on one screen, with no switching: the hands, where each tool is, the samples on their way home, both rover cameras, the survey chart, the fault lamps and a cut-down field guide. The tool board's plan, the mission tape, the POWER and AIR pages and the guide's detail pictures are left out.
 - **The same frame on every desk**, so a player who changes seats is not lost:
   - a **status strip** along the top: whose desk it is, the mission clock, suit oxygen, samples banked, the score, and a lamp for each of the four seats;
   - a row of **event lights** in place of the line of alarm text: one square lamp with a picture for each thing that can happen (alarm, fixed, meteor hit, base dark, power back, sample banked, dud, no link). The same eight, in the same order, on every desk. A lamp lights when its event happens and fades back to dark after a few seconds;
@@ -34,7 +35,7 @@ The three laptop seats (Mission Ops, Technician, Scientist) carry the right info
 
 ## Done when
 
-- At 1366 x 768 each of `/ops`, `/tech` and `/sci` shows its whole console with no scroll bar, and at 1920 x 1080 nothing is blurred.
+- At 1366 x 768, 1440 x 900, 1500 x 1000 and 1920 x 1080 each of `/ops`, `/tech`, `/sci` and `/control` shows its whole console with no scroll bar and no bars at the sides, and nothing is blurred.
 - A screenshot of each console during a mission has no sentence on it, and no caption that is not either a word a player says aloud or a meter's plate.
 - A new player, shown the three consoles for one minute with the sound off, can point to: the time left, the oxygen, which tool is in which hand, where the welder is, which rover has a broken wheel, how long until the meteors, and whether the air is leaking.
 - The demo mission can still be won from the consoles, and every check that passes today still passes.
@@ -42,5 +43,6 @@ The three laptop seats (Mission Ops, Technician, Scientist) carry the right info
 ## Supersedes
 
 - [SPEC-v2.md](../SPEC-v2.md), "Views are switched with big tabs": the Scientist's survey chart is no longer behind a tab. The field guide, power and air still are.
+- The 2-player Mission Control seat's three panels side by side: replaced by the one simpler desk.
 - [SPEC-1960s-pass.md](../SPEC-1960s-pass.md), Phase 1, the rows for the header, `#crew`, `#toast` and `#ptt`: replaced by the status strip, the event lights and the keyset.
 - [SPEC-sample-run.md](../SPEC-sample-run.md), the layout of the Mission Ops tool log and sample log, and of the Technician's instrument strip. What they show is unchanged.

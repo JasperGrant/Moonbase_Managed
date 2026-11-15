@@ -266,7 +266,7 @@ try {
   await browsers.pop().close();
 
   step('opening Mission Control and the astronaut page');
-  const ctl = await openOwn('console', '/control', { width: 1280, height: 1400 });
+  const ctl = await openOwn('console', '/control', { width: 1366, height: 768 }); // a 16:9 laptop: the desk must fit with no scroll
   const astro = await openOwn('astronaut', '/astronaut');
   await astro.waitForTimeout(1000);
   await astro.click('#radioBtn');
@@ -297,6 +297,12 @@ try {
   await waitFor(astro, 'dust on the panels', s => s.phase === 'run' && s.scene.dust, 30);
   await ctl.waitForFunction(() => window.moonbase.state().power?.solar < 60, null, POLL).catch(() => problems.push('console: the Scientist\'s solar gauge should be low with dusty panels'));
   await ctl.waitForFunction(() => window.moonbase.state().tools?.brush?.area === 'TOOL RACK', null, POLL).catch(() => problems.push('console: the tool log does not have the brush on its rack'));
+  // The 2-player desk (client/console/all.js): one screen, no scroll, the alarm on its event light, the brush on its rack.
+  const desk = await ctl.evaluate(() => ({ scroll: document.scrollingElement.scrollHeight > innerHeight || document.scrollingElement.scrollWidth > innerWidth, shown: window.moonbase.desk.shown }));
+  if (desk.scroll) problems.push('console: the mission desk scrolls at 1366 x 768');
+  if (!(desk.shown.event || []).includes('alarm') && desk.shown.last !== 'alarm') problems.push('console: the alarm event light did not light: ' + JSON.stringify(desk.shown.event));
+  if (desk.shown.tools?.brush !== 'TOOL RACK') problems.push('console: the desk does not show the brush on its rack: ' + JSON.stringify(desk.shown.tools));
+  if (!/^\d:\d\d$/.test(desk.shown.clock || '')) problems.push('console: the status strip shows no mission clock: ' + JSON.stringify(desk.shown.clock));
   await shot(ctl, 'mission-control-dust');
   await act(astro, 'take the brush', () => window.smoke.carry('brush'));
   await act(astro, 'brush the panels', () => window.smoke.dust());
