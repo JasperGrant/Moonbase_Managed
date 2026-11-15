@@ -605,7 +605,7 @@ for (const i of [0, 1]) {
 
 // Where this hand's fingers are: the pinch point of a tracked hand, or the controller itself.
 function handPoint(i, out) { return controllers[i].userData.isHand ? pinchPoint(i, out) : controllers[i].getWorldPosition(out); }
-const handInfo = [0, 1].map(() => ({ obj: null, point: new THREE.Vector3(), side: '', tracked: false }));
+const handInfo = [0, 1].map(() => ({ obj: null, point: new THREE.Vector3(), side: '', tracked: false, squeeze: 0 }));
 
 // Draw each tracked joint as a small white ball: a glove, without loading a model.
 function drawHand(h) {
@@ -1466,6 +1466,10 @@ renderer.setAnimationLoop(() => {
   if (vr) for (const i of [0, 1]) {
     const h = handInfo[i], c = controllers[i];
     h.obj = c; h.side = c.userData.hand || ''; h.tracked = !!c.userData.isHand; handPoint(i, h.point);
+    // How far the trigger or the grip is pulled, 0 to 1: the glove's fingers close with it.
+    const src = !h.tracked && h.side && renderer.xr.getSession() && [...renderer.xr.getSession().inputSources].find(x => x.handedness === h.side);
+    const b = src?.gamepad?.buttons;
+    h.squeeze = b ? Math.max(b[0]?.value || 0, b[1]?.value || 0) : 0;
   }
   fx.update(dt, now, vr ? handInfo : [], vr);
   deskCue(now);

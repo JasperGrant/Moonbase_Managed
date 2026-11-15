@@ -447,7 +447,7 @@ export function buildFixtures(THREE, world, { rig, camera, send, sfx = () => {},
       fit.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(...GLOVE_FIT[side].map(a => new THREE.Vector3(...a))));
       g.add(fit); g.userData[side] = fit;
       loadGlove(THREE, { mirror: side === 'right', emissive: 0x0e0e0c }).then(m => {
-        m.position.x = -CUFF_BEHIND; fit.add(m);
+        m.position.x = -CUFF_BEHIND; fit.add(m); fit.userData.curl = m.userData.curl;
         // The tip of the longest finger: what a controller presses buttons with (the EXIT on the cuff).
         const box = new THREE.Box3().setFromObject(m, true);
         const tip = new THREE.Object3D(); tip.name = 'Tip_Index';
@@ -1165,6 +1165,9 @@ export function buildFixtures(THREE, world, { rig, camera, send, sfx = () => {},
         glove.visible = !hand.tracked && !!hand.side;
         glove.userData.left.visible = hand.side !== 'right'; glove.userData.right.visible = hand.side === 'right';
         const h = held[i], badge = badges[i];
+        // The fingers follow the trigger and the grip, and stay closed round whatever the hand holds.
+        const fit = glove.userData[hand.side === 'right' ? 'right' : 'left'], want = Math.max(hand.squeeze || 0, h ? 0.6 : 0);
+        if (fit.userData.curl) fit.userData.curl.value += (want - fit.userData.curl.value) * Math.min(1, dt * 22);
         if (h && !wasHeld[i]) { fistUntil[i] = now + 0.5; fistAt[i].copy(hand.point); } // the grab worked: the hand closes
         wasHeld[i] = h || null;
         let shown = null, at = null, name = null;

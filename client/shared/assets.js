@@ -148,8 +148,28 @@ export const GLOVE_LENGTH = 0.24;
 export async function loadGlove(THREE, { mirror = false, emissive = 0x000000 } = {}) {
   const model = await loadModel(THREE, 'glove');
   const k = GLOVE_LENGTH / MODELS.glove.size[0];
-  const cloth = new THREE.MeshStandardMaterial({ color: PAL.hex.enamel, roughness: 0.92, metalness: 0, emissive, side: THREE.DoubleSide });
-  model.traverse(o => { if (o.isMesh) { o.material = cloth; o.castShadow = false; } });
+  // The fingers close as the trigger or grip is squeezed (g.userData.curl.value, 0 open to 1 a fist). The model
+  // is one rigid shape, so the bend is done in the vertex shader: past the knuckles, each point turns toward the
+  // palm about the knuckle line, the further out the more, so the fingers roll up rather than fold flat.
+  const curl = { value: 0 };
+  const curlMaterial = mesh => {
+    mesh.geometry.computeBoundingBox();
+    const b = mesh.geometry.boundingBox, span = b.max.x - b.min.x; // the model's own axes: fingers +x, back of the hand +y
+    const m = new THREE.MeshStandardMaterial({ color: PAL.hex.enamel, roughness: 0.92, metalness: 0, emissive, side: THREE.DoubleSide });
+    // The fingers are the last quarter or so of the glove (most of its vertices); the knuckle line sits at their roots,
+    // a little toward the palm, so they roll down and in rather than through the back of the hand.
+    const U = { uCurl: curl, uKnuckle: { value: b.min.x + span * 0.72 }, uReach: { value: span * 0.28 }, uPivot: { value: b.min.y + (b.max.y - b.min.y) * 0.4 } };
+    const bend = v => `{ float t = smoothstep(0.0, 1.0, clamp((position.x - uKnuckle) / uReach, 0.0, 1.0)), a = uCurl * 1.15 * t, c = cos(a), s = sin(a); ${v} }`;
+    m.onBeforeCompile = sh => {
+      Object.assign(sh.uniforms, U);
+      sh.vertexShader = 'uniform float uCurl, uKnuckle, uReach, uPivot;\n' + sh.vertexShader
+        .replace('#include <beginnormal_vertex>', '#include <beginnormal_vertex>\n' + bend('objectNormal.xy = vec2(objectNormal.x * c + objectNormal.y * s, -objectNormal.x * s + objectNormal.y * c);'))
+        .replace('#include <begin_vertex>', '#include <begin_vertex>\n' + bend('vec2 d = transformed.xy - vec2(uKnuckle, uPivot); transformed.xy = vec2(uKnuckle, uPivot) + vec2(d.x * c + d.y * s, -d.x * s + d.y * c);'));
+    };
+    m.customProgramCacheKey = () => 'glove-curl';
+    return m;
+  };
+  model.traverse(o => { if (o.isMesh) { o.material = curlMaterial(o); o.castShadow = false; } });
   model.scale.set(k, k, mirror ? -k : k);
   model.rotation.x = Math.PI / 2;                     // the model's back of hand (+y) to +z
   // Centre the cuff opening on the origin: the curled fingers make the bounding box lopsided.
@@ -170,6 +190,7 @@ export async function loadGlove(THREE, { mirror = false, emissive = 0x000000 } =
   const opening = cuff.getSize(new THREE.Vector3());
   model.position.set(-xMin, -p.y, -p.z);
   const g = new THREE.Group(); g.name = 'Glove'; g.add(model);
+  g.userData.curl = curl;
   // Close the cuff opening with the dark of the sleeve inside, so an empty cuff does not show a hollow shell.
   const cap = new THREE.Mesh(new THREE.CircleGeometry(0.5, 20), new THREE.MeshBasicMaterial({ color: PAL.hex.bakelite, side: THREE.DoubleSide }));
   cap.name = 'Cuff_Opening'; cap.rotation.y = Math.PI / 2; cap.position.x = 0.004; cap.scale.set(opening.z * 0.92, opening.y * 0.92, 1);
