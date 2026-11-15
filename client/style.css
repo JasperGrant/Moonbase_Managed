@@ -67,7 +67,6 @@ main { padding:14px 16px; }
 .termrow input { flex:1; background:#000; color:var(--green); border:1px solid var(--line); border-radius:4px; padding:.5em; font:inherit; font-size:18px; letter-spacing:.2em; text-transform:uppercase; }
 
 #map { width:100%; max-width:640px; aspect-ratio:1; display:block; background:#000; border:1px solid var(--line); border-radius:4px; }
-#cam { width:100%; aspect-ratio:16/9; display:block; background:#000; border:1px solid var(--line); border-radius:4px; margin-top:10px; }
 .hint { color:var(--dim); font-size:12px; margin:.5em 0 0; }
 
 .manual details { border-top:1px solid var(--line); padding:6px 0; }
@@ -174,10 +173,6 @@ main { padding:14px 16px; }
 [hidden] { display:none !important; }
 
 /* Mission control pictures: tabs, gauges and the blackout static */
-.tabs { display:flex; gap:6px; margin-bottom:10px; }
-.tabs button { flex:1; background:transparent; color:var(--dim); border:1px solid var(--line); padding:.7em; font-size:15px; letter-spacing:.1em; }
-.tabs button.on { background:var(--line); color:var(--ink); border-color:var(--ink); }
-canvas.pic { width:100%; display:block; background:#05080a; border:1px solid var(--line); border-radius:4px; margin-bottom:10px; }
 #run { position:relative; }
 #static { position:absolute; inset:0; z-index:4; background:#000; border-radius:6px; overflow:hidden; }
 #static canvas { width:100%; height:100%; display:block; image-rendering:pixelated; }
@@ -249,27 +244,7 @@ body.period { background:var(--p-bakelite); }
   color:var(--p-ink-dial); background:var(--p-dial); padding:4px 12px; border-radius:1px; box-shadow:inset 0 0 0 1px rgba(0,0,0,.3); }
 .period #run h2 { font-family:var(--p-label); font-weight:400; font-size:9px; letter-spacing:.24em; color:var(--p-dim); }
 .period #run .hint { color:var(--p-dim); }
-.period #run .tabs button { background:var(--p-deep); color:var(--p-dim); border-color:var(--p-rule); padding:.8em .6em .8em 2.2em; position:relative; }
-.period #run .tabs button::before { content:''; position:absolute; left:.9em; top:50%; width:9px; height:9px; margin-top:-5px; border-radius:50%; background:var(--p-amber-off); box-shadow:0 0 0 2px var(--p-bezel); }
-.period #run .tabs button.on { background:var(--p-console); color:var(--p-ink); border-color:var(--p-bezel); }
-.period #run .tabs button.on::before { background:radial-gradient(circle at 35% 35%, #fff3d6, var(--p-amber) 45%); box-shadow:0 0 0 2px var(--p-bezel), 0 0 6px var(--p-amber); }
-.period canvas.pic, .period #map, .period #cam { background:var(--p-deep); border:2px solid var(--p-bezel); border-radius:2px; }
 .period #static { background:var(--p-bakelite); border-radius:2px; }
-.period #ptt { font-family:var(--p-label); font-size:12px; letter-spacing:.14em; padding:1.1em 1em 1.1em 3.2em; position:relative; background:var(--p-console); color:var(--p-ink); }
-.period #ptt::before, .period #ptt::after { content:''; position:absolute; top:50%; width:12px; height:12px; margin-top:-6px; border-radius:50%; box-shadow:0 0 0 2px var(--p-bezel); }
-.period #ptt::before { left:1em; background:var(--p-red-off); } .period #ptt::after { left:2.2em; background:var(--p-blue-off); }
-.period #ptt.tx { background:var(--p-console); color:var(--p-ink); } .period #ptt.tx::before { background:radial-gradient(circle at 35% 35%, #fff3d6, var(--p-red) 45%); box-shadow:0 0 0 2px var(--p-bezel), 0 0 8px var(--p-red); }
-.period #ptt.rx { background:var(--p-console); color:var(--p-ink); } .period #ptt.rx::after { background:radial-gradient(circle at 35% 35%, #fff3d6, var(--p-blue) 45%); box-shadow:0 0 0 2px var(--p-bezel), 0 0 8px var(--p-blue); }
-.period .camwrap { position:relative; }
-.period #cam { aspect-ratio:8/3; margin-top:0; } .period #cam { cursor:pointer; }
-.period #camHud { position:absolute; inset:2px; width:calc(100% - 4px); height:calc(100% - 4px); pointer-events:none; }
-.period #run .panel.tech { grid-column:span 2; }
-.period #run.all { grid-template-columns:minmax(250px, .8fr) minmax(440px, 1.6fr) minmax(320px, 1fr); }
-.period #run.all .panel.tech { grid-column:auto; }
-.period #surveyCv { cursor:pointer; }
-.period #run .panel.sci .tabs { gap:4px; }
-.period #run .panel.sci .tabs button { font-size:10px; letter-spacing:.08em; padding:.8em .2em .8em 1.6em; min-width:0; }
-.period #run .panel.sci .tabs button::before { left:.5em; }
 .log .sym { width:20px; flex:none; } .log .sym img { width:18px; height:18px; vertical-align:middle; }
 .log .found { color:var(--p-green); } .log .dud { color:var(--p-amber); }
 .period #toast.found { color:var(--p-green); } .period #toast.dud, .period #toast.blackout { color:var(--p-amber); }
@@ -290,13 +265,7 @@ body.period { background:var(--p-bakelite); }
 .period .log .mistake, .period .log .miss, .period .log .hit, .period .log .blackout { color:var(--p-red); }
 .period .log .spawn, .period .log .alarm, .period .log .meteor { color:var(--p-dim); }
 
-/* ---------- guidance (docs/SPEC-guidance.md) ---------- */
-/* The teletype strip: one line of what to do now, at the top of each console panel (one across the top in 2-player mode). */
-.teletype { display:flex; align-items:center; gap:10px; min-height:34px; margin:0 0 12px; padding:6px 12px; background:var(--p-deep); border:1px solid var(--p-bezel); border-radius:2px; box-shadow:inset 0 1px 3px rgba(0,0,0,.5); font-family:var(--p-type); font-weight:700; font-size:14px; letter-spacing:.06em; color:var(--p-ink); white-space:nowrap; overflow:hidden; }
-.teletype i { flex:none; width:10px; height:10px; border-radius:50%; background:var(--p-amber-off); border:2px solid var(--p-bezel); }
-.teletype.new i { background:var(--p-amber); box-shadow:0 0 5px rgba(224,163,71,.7); }
-.teletype span::after { content:'_'; opacity:.6; }
-#run > .teletype { grid-column:1 / -1; }
+/* ---------- guidance (docs/SPEC-guidance.md). The teletype line is drawn on the desk (client/console/desk.js). ---------- */
 /* The briefing card: a cream card with engraved headings, on the briefing sheet. */
 .brief-card { background:var(--p-dial); color:var(--p-ink-dial); border:1px solid var(--p-bezel); outline:3px solid var(--p-deep); padding:16px 20px; margin:0 0 14px; font-family:var(--p-type); font-size:14px; line-height:1.45; }
 .brief-card h4 { font-family:var(--p-label); font-weight:400; letter-spacing:.24em; font-size:15px; margin:0 0 8px; color:var(--p-ink-dial); }
@@ -305,3 +274,17 @@ body.period { background:var(--p-bakelite); }
 .brief-card table { border-collapse:collapse; width:100%; }
 .brief-card th { font-family:var(--p-label); font-weight:400; font-size:9px; letter-spacing:.14em; text-align:left; vertical-align:top; padding:3px 12px 3px 0; white-space:nowrap; color:var(--p-ink-dial); opacity:.72; }
 .brief-card td { padding:3px 0; border-bottom:1px dotted rgba(36,34,30,.25); }
+
+/* ---------- the Mission Control desks (client/console/desk.js, docs/design/mission-control-consoles.md) ----------
+   During a mission each seat is one canvas, fitted to the window; the rover cameras draw on a canvas under it and
+   show through holes in the desk. The header and the toast stay in the page, visually hidden, as the text a screen
+   reader reads; the desk draws the same things as instruments. */
+.sr, body.on-desk header, body.on-desk #toast { position:absolute !important; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; border:0; padding:0; margin:-1px; }
+body.on-desk { overflow:hidden; }
+body.on-desk main { padding:0; }
+#run #desk, #run #cam { position:fixed; display:block; }
+#run #cam { z-index:1; background:var(--p-bakelite); }
+#run #desk { z-index:2; touch-action:none; }
+body.period #run::before { display:none; }
+#run #cam[hidden] { display:none; }
+.legend { display:block; margin:.4em 0 1.2em; border:2px solid var(--p-bezel); }

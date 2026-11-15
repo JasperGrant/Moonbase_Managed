@@ -130,3 +130,48 @@ export function drawSample(g, look, x, y, size, col, foil = '#b8913f') {
   g.fillStyle = 'rgba(241,226,189,0.18)'; g.beginPath(); g.ellipse(x - r * 0.25, y - r * 0.2, r * 0.35, r * 0.18, -0.3, 0, 7); g.fill();
   g.restore();
 }
+
+// Pictures for Mission Control's consoles (docs/design/mission-control-consoles.md, 6.5): the status strip, the
+// event lights, the keyset and the plates. Same house style as the tools: a 100-unit box centred on (x, y),
+// one colour, filled shapes or 8-unit round strokes, readable at 16 px.
+export const ICONS = ['clock', 'o2', 'rock', 'score', 'helmet', 'headset', 'wheel', 'lens', 'link', 'mic', 'bell', 'fixed', 'meteor', 'bolt', 'dark',
+  'banked', 'dud', 'glove', 'home', 'rider', 'eye', 'chase', 'scout', 'hauler', 'cover', 'tray', 'port', 'scope', 'card', 'battery', 'speed'];
+export function drawIcon(g, name, x, y, size, color) {
+  const u = size / 100;
+  g.save(); g.translate(x, y); g.scale(u, u);
+  g.fillStyle = g.strokeStyle = color; g.lineCap = g.lineJoin = 'round'; g.lineWidth = 8;
+  const L = (...p) => { g.beginPath(); g.moveTo(p[0], p[1]); for (let i = 2; i < p.length; i += 2) g.lineTo(p[i], p[i + 1]); g.stroke(); };
+  const O = (cx, cy, r, fill) => { g.beginPath(); g.arc(cx, cy, r, 0, Math.PI * 2); fill ? g.fill() : g.stroke(); };
+  if (name === 'clock') { O(0, 0, 38); L(0, -22, 0, 0, 16, 10); }
+  else if (name === 'o2') { g.beginPath(); g.roundRect(-20, -26, 40, 70, 16); g.stroke(); g.fillRect(-9, -44, 18, 14); L(-22, -44, 22, -44); }
+  else if (name === 'rock') { g.beginPath(); g.moveTo(-36, 22); g.lineTo(-26, -18); g.lineTo(4, -34); g.lineTo(34, -8); g.lineTo(30, 26); g.closePath(); g.fill(); }
+  else if (name === 'score') { g.beginPath(); for (let i = 0; i < 10; i++) { const a = i * Math.PI / 5 - Math.PI / 2, r = i % 2 ? 17 : 40; g[i ? 'lineTo' : 'moveTo'](Math.cos(a) * r, Math.sin(a) * r); } g.closePath(); g.fill(); }
+  else if (name === 'helmet') { g.beginPath(); g.arc(0, -6, 34, Math.PI * 0.85, Math.PI * 2.15); g.closePath(); g.stroke(); g.beginPath(); g.roundRect(-20, -18, 40, 24, 10); g.fill(); L(-30, 34, 30, 34); }
+  else if (name === 'headset') { g.beginPath(); g.arc(0, 0, 32, Math.PI, 0); g.stroke(); g.fillRect(-42, -4, 16, 30); g.fillRect(26, -4, 16, 30); L(-34, 26, -34, 38, -6, 40); O(0, 40, 6, true); }
+  else if (name === 'wheel') { g.lineWidth = 14; O(0, 0, 32); g.lineWidth = 6; for (let i = 0; i < 6; i++) { const a = i * Math.PI / 3; L(0, 0, Math.cos(a) * 26, Math.sin(a) * 26); } O(0, 0, 8, true); }
+  else if (name === 'lens') { O(-8, -8, 26); g.lineWidth = 12; L(12, 12, 36, 36); }
+  else if (name === 'link') { L(0, 40, 0, -6); L(-18, 40, 18, 40); O(0, -12, 7, true); g.lineWidth = 6; for (const r of [22, 36]) { g.beginPath(); g.arc(0, -12, r, -Math.PI * 0.8, -Math.PI * 0.2); g.stroke(); } }
+  else if (name === 'mic') { g.beginPath(); g.roundRect(-14, -42, 28, 52, 14); g.fill(); g.beginPath(); g.arc(0, 0, 28, 0.1, Math.PI - 0.1); g.stroke(); L(0, 28, 0, 42); L(-16, 42, 16, 42); }
+  else if (name === 'bell') { g.beginPath(); g.moveTo(-34, 24); g.quadraticCurveTo(-26, 14, -24, -8); g.arc(0, -10, 24, Math.PI, 0); g.quadraticCurveTo(26, 14, 34, 24); g.closePath(); g.fill(); O(0, 36, 7, true); L(0, -42, 0, -34); }
+  else if (name === 'fixed') { g.lineWidth = 12; L(-34, 2, -10, 26, 36, -26); }
+  else if (name === 'meteor') { O(18, 18, 18, true); g.lineWidth = 7; L(-40, -40, 2, 2); L(-18, -42, 12, -12); L(-42, -18, -12, 12); }
+  else if (name === 'bolt') { g.beginPath(); g.moveTo(10, -44); g.lineTo(-22, 6); g.lineTo(-2, 6); g.lineTo(-12, 44); g.lineTo(24, -8); g.lineTo(4, -8); g.closePath(); g.fill(); }
+  else if (name === 'dark') { O(0, -8, 24); L(-10, 26, 10, 26); L(-8, 36, 8, 36); g.lineWidth = 9; L(-38, -40, 38, 36); }
+  else if (name === 'dud') { g.globalAlpha = 0.55; g.beginPath(); g.moveTo(-36, 22); g.lineTo(-26, -18); g.lineTo(4, -34); g.lineTo(34, -8); g.lineTo(30, 26); g.closePath(); g.fill(); g.globalAlpha = 1; g.lineWidth = 10; L(-34, -34, 34, 34); L(34, -34, -34, 34); }
+  else if (name === 'banked') { g.beginPath(); g.moveTo(-40, -6); g.lineTo(-30, -34); g.lineTo(-4, -40); g.lineTo(14, -22); g.lineTo(10, -4); g.closePath(); g.fill(); g.lineWidth = 9; L(-40, 12, -40, 40, 40, 40, 40, 12); L(8, 14, 20, 26, 40, -2); }
+  else if (name === 'glove') { g.beginPath(); g.roundRect(-26, -8, 44, 46, 10); g.stroke(); for (let i = 0; i < 4; i++) { g.beginPath(); g.roundRect(-26 + i * 11, -40 + Math.abs(i - 1.5) * 4, 9, 34, 4); g.stroke(); } g.beginPath(); g.roundRect(20, 0, 10, 26, 5); g.stroke(); }
+  else if (name === 'home') { g.beginPath(); g.arc(0, 14, 34, Math.PI, 0); g.closePath(); g.fill(); g.fillRect(-6, -40, 4, 22); g.beginPath(); g.moveTo(-2, -40); g.lineTo(16, -34); g.lineTo(-2, -28); g.fill(); }
+  else if (name === 'rider') { O(0, -30, 11, true); g.lineWidth = 10; L(0, -16, 0, 12); L(0, -6, 18, 2); g.lineWidth = 8; L(-40, 18, 40, 18); O(-24, 32, 9); O(24, 32, 9); }
+  else if (name === 'eye') { g.beginPath(); g.moveTo(-40, 0); g.quadraticCurveTo(0, -36, 40, 0); g.quadraticCurveTo(0, 36, -40, 0); g.stroke(); O(0, 0, 11, true); }
+  else if (name === 'chase') { g.fillRect(-14, 8, 28, 22); O(-16, 34, 7, true); O(16, 34, 7, true); g.lineWidth = 6; g.beginPath(); g.roundRect(-40, -42, 30, 22, 4); g.stroke(); g.setLineDash([6, 8]); L(-18, -22, 0, 4); }
+  else if (name === 'scout') { g.beginPath(); g.roundRect(-30, -14, 60, 24, 6); g.fill(); O(-22, 22, 11, true); O(22, 22, 11, true); g.lineWidth = 6; L(14, -14, 14, -38); O(14, -40, 5, true); }
+  else if (name === 'hauler') { g.fillRect(-42, -2, 84, 14); g.fillRect(-42, -26, 22, 26); O(-28, 24, 11, true); O(0, 24, 11, true); O(28, 24, 11, true); g.lineWidth = 6; L(-14, -4, -14, -18, 40, -18, 40, -4); }
+  else if (name === 'cover') { g.lineWidth = 9; g.beginPath(); g.arc(0, 10, 38, Math.PI, 0); g.stroke(); L(-42, 10, 42, 10); O(0, -6, 8, true); L(0, 2, 0, 10); }
+  else if (name === 'tray') { g.lineWidth = 7; L(-44, 14, 44, 14); for (let i = 0; i < 4; i++) { g.beginPath(); g.arc(-33 + i * 22, 14, 9, 0, Math.PI); g.stroke(); } }
+  else if (name === 'port') { g.lineWidth = 8; L(-34, -30, -14, 4, -14, 34); L(34, -30, 14, 4, 14, 34); L(-40, -30, 40, -30); }
+  else if (name === 'scope') { O(0, 0, 38); g.lineWidth = 5; O(0, 0, 20); L(0, 0, 26, -26); O(-12, 10, 3, true); }
+  else if (name === 'card') { g.beginPath(); g.roundRect(-36, -28, 72, 56, 4); g.stroke(); g.beginPath(); g.moveTo(-24, 12); g.lineTo(-18, -8); g.lineTo(-2, -14); g.lineTo(8, 0); g.lineTo(4, 14); g.closePath(); g.fill(); g.lineWidth = 5; L(18, -10, 28, -10); L(18, 4, 28, 4); }
+  else if (name === 'battery') { g.beginPath(); g.roundRect(-38, -20, 70, 40, 4); g.stroke(); g.fillRect(32, -9, 8, 18); g.fillRect(-30, -12, 16, 24); g.fillRect(-10, -12, 16, 24); }
+  else if (name === 'speed') { g.beginPath(); g.arc(0, 14, 36, Math.PI, 0); g.stroke(); L(0, 14, 18, -12); O(0, 14, 6, true); }
+  g.restore();
+}
