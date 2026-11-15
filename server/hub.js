@@ -231,6 +231,10 @@ export class Hub {
       const throttle = Math.max(-1, Math.min(1, Number(m.throttle) || 0));
       const steer = Math.max(-1, Math.min(1, Number(m.steer) || 0));
       this.later(this.lag(), () => { if (game.phase === 'run') Object.assign(game.rovers[id], { throttle, steer }); });
+    } else if (m.t === 'waypoint' && (isControl(ws.role) || ws.role === 'sci')) {
+      // Mission Ops marks a tool from the tool log; whoever has the chart marks a spot on it. One at a time.
+      const w = m.clear ? null : { tool: m.tool, x: m.x, z: m.z };
+      this.later(this.lag(), () => game.setWaypoint(w));
     } else if (isControl(ws.role)) {
       if (m.t === 'mode') game.setMode(m.mode);
       else if (m.t === 'start' && !this.requireFullCrew) game.start(); // normally the crew starts it by readying up

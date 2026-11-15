@@ -9,9 +9,10 @@
 // glowing boxes, soft shadow blobs), the walls and floor are one mesh each, and nothing casts a
 // shadow. The light fixtures are glowing boxes; three real lights do the lighting, and they change
 // intensity rather than switch on and off so no shader is ever recompiled mid-game.
-import { CFG, PLACES } from '/shared/config.js';
+import { CFG, PLACES, TOOLS } from '/shared/config.js';
 import { buildAirlock, CHAMBER } from '/airlock.js';
-import { PAL } from '/shared/palette.js';
+import { PAL, FONT, fontsReady } from '/shared/palette.js';
+import { drawTool } from '/shared/icons.js';
 import { loadPeriod, loadGlove } from '/shared/assets.js';
 import { buildDamage } from '/damage.js';
 
@@ -32,6 +33,12 @@ export const SOLIDS = [
   [2.9, 3.5, -3.05, -0.95, 2.06],    // suit lockers
   [2.9, 3.5, -0.95, -0.05, 1.85],    // the empty pressure suit beside them
   [-3.5, -1.95, -12, -10.25, 1.78],  // life support stack
+  [-1.6, 1.3, -12, -11.7, 0.6],      // the spares stand: only its back half, so a hand can reach over the front
+];
+// Things the tools rest on that you can walk under or lean over: [x0, x1, z0, z1, bottom, top]. Physics only.
+export const SHELVES = [
+  [-3.5, -3.12, -6.85, -5.15, 1.06, 1.1], // the wall rack on the west wall: brush and patch kit
+  [-1.6, 1.3, -12, -11.1, 0.56, 0.6],     // the spares stand's top: tire and generator
 ];
 // The four doors, in room coordinates: each is the inner hatch of an airlock chamber whose twin is on the
 // habitat outside (PLACES.doors). The opening in the wall is the chamber's doorway.
@@ -283,6 +290,32 @@ export function buildInterior(THREE, scene, { sfx = () => {} } = {}) {
   // Corridor stub, out to airlock N
   for (const z of [-13, -14]) { for (const x of [1.57, 3.43]) box(G, 0.12, CH, 0.16, x, CH / 2, z); box(D, 2, 0.12, 0.16, 2.5, CH - 0.06, z); }
 
+  // ---------- where the tools live (PLACES.toolHomes) ----------
+  // A wall rack on the west wall for the brush and the patch kit: a steel shelf on two brackets, a rail along
+  // its front lip. A painted mat on the bench where the welder sits. A low steel stand against the north wall
+  // for the heavy spares, the tire and the generator. Each place has an engraved sign with the tool's name.
+  {
+    const [x0, x1, z0, z1, , top] = SHELVES[0], cx = (x0 + x1) / 2, cz = (z0 + z1) / 2, d = x1 - x0, l = z1 - z0;
+    box(G, d, 0.04, l, cx, top - 0.02, cz);                               // the shelf
+    box(D, 0.02, 0.06, l, x1 - 0.01, top + 0.02, cz);                     // lip, so nothing rolls off
+    for (const z of [z0 + 0.12, z1 - 0.12]) { box(D, d - 0.04, 0.03, 0.03, cx, top - 0.1, z, 0, 0, 0.75); box(D, 0.03, 0.3, 0.03, x0 + 0.02, top - 0.17, z); } // brackets
+    box(K, 0.01, 0.5, l, x0 + 0.006, top + 0.3, cz);                      // a dark backing board behind the tools
+  }
+  box(K, 0.6, 0.006, 0.4, PLACES.toolHomes.welder.x, 0.963, PLACES.toolHomes.welder.z - 0.12); // the welder's mat
+  for (const dx of [-0.2, 0.2]) tube(G, [PLACES.toolHomes.welder.x + dx, 2.12, -4.37], [PLACES.toolHomes.welder.x + dx, 2.25, -4.37], 0.008); // the rods its sign hangs from
+  {
+    const [x0, x1, z0, z1, , top] = SHELVES[1], cx = (x0 + x1) / 2, cz = (z0 + z1) / 2;
+    box(G, x1 - x0, 0.05, z1 - z0, cx, top - 0.025, cz);                   // the top
+    box(Y, x1 - x0, 0.03, 0.02, cx, top - 0.03, z1 + 0.01);                // a hazard stripe along its front edge
+    box(D, x1 - x0 - 0.1, 0.04, 0.04, cx, 0.12, cz);                       // a stretcher bar low down
+    for (const x of [x0 + 0.05, x1 - 0.05]) for (const z of [z0 + 0.05, z1 - 0.05]) box(D, 0.06, top - 0.05, 0.06, x, (top - 0.05) / 2, z);
+    // two wheel chocks for the tire, a skid plate for the generator
+    const T = PLACES.toolHomes.tire, Gn = PLACES.toolHomes.gen;
+    for (const dx of [-0.46, 0.46]) box(D, 0.06, 0.05, 0.3, T.x + dx, top + 0.025, T.z);
+    box(K, 0.56, 0.01, 0.44, Gn.x, top + 0.005, Gn.z);
+    blob(x1 - x0 + 0.5, z1 - z0 + 0.4, cx, cz, 1);
+  }
+
   // Build the four batches
   const m4 = new THREE.Matrix4(), v3 = new THREE.Vector3(), s3 = new THREE.Vector3(), col = new THREE.Color();
   function batch(list, geo, mat, tint = true) {
@@ -327,6 +360,42 @@ export function buildInterior(THREE, scene, { sfx = () => {} } = {}) {
       : [['HABITAT POWER', 30, PAL.inkDim], ['MAIN BUS', 46, PAL.phosphor], ['ONLINE', 70, PAL.phosphor], ['SOLAR 4.1 kW   LOAD 2.6 kW', 24, PAL.inkDim]]);
   }
   drawScreens(false);
+
+  // Engraved signs: a cream plate in a bezel, the tool's picture and its name, screwed to the wall over
+  // where it lives. Lit by the room (Lambert), so they go dark with the lights.
+  function sign(id, w, h, x, y, z, ry) {
+    const PW = 512, PH = Math.round(PW * h / w), c = document.createElement('canvas'); c.width = PW; c.height = PH;
+    const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = 4;
+    const root = new THREE.Group(); root.name = 'Sign_' + id; root.position.set(x, y, z); root.rotation.y = ry; group.add(root);
+    const back = new THREE.Mesh(new THREE.BoxGeometry(w + 0.03, h + 0.03, 0.012), new THREE.MeshLambertMaterial({ color: G })); back.position.z = 0.006; root.add(back);
+    const face = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshLambertMaterial({ map: tex })); face.position.z = 0.0125; face.name = 'Face'; root.add(face);
+    const paint = () => {
+      const g = c.getContext('2d');
+      g.fillStyle = PAL.dial; g.fillRect(0, 0, PW, PH);
+      g.strokeStyle = PAL.inkDial; g.lineWidth = 4; g.strokeRect(10, 10, PW - 20, PH - 20);           // engraved border
+      g.fillStyle = PAL.bezel; for (const [sx, sy] of [[22, 22], [PW - 22, 22], [22, PH - 22], [PW - 22, PH - 22]]) { g.beginPath(); g.arc(sx, sy, 6, 0, 7); g.fill(); } // screws
+      const icon = PH - 44;
+      drawTool(g, id, 24 + icon / 2 + 8, PH / 2, icon * 0.9, PAL.inkDial);
+      const name = TOOLS[id].name.toUpperCase(), tx = 24 + icon + 26, room = PW - tx - 28;
+      let size = Math.round(PH * 0.34); g.font = `${size}px ${FONT.label}`;
+      while (g.measureText(name).width * 1.08 > room && size > 14) { size -= 2; g.font = `${size}px ${FONT.label}`; }
+      g.fillStyle = PAL.inkDial; g.textAlign = 'left'; g.textBaseline = 'middle';
+      if (g.letterSpacing !== undefined) g.letterSpacing = `${Math.round(size * 0.08)}px`;
+      g.fillText(name, tx, PH / 2 + 2);
+      for (let i = 0; i < 40; i++) { g.fillStyle = `rgba(36,34,30,${0.03 + rnd() * 0.05})`; g.fillRect(rnd() * PW, rnd() * PH, 1 + rnd() * 18, 1 + rnd() * 2); } // wear
+      tex.needsUpdate = true;
+    };
+    paint(); fontsReady.then(paint);
+    return root;
+  }
+  const H_ = PLACES.toolHomes;
+  sign('brush', 0.46, 0.15, -3.488, 1.55, H_.brush.z - 0.12, Math.PI / 2);
+  sign('patch', 0.46, 0.15, -3.488, 1.55, H_.patch.z, Math.PI / 2);
+  { // the welder's sign hangs from the gantry over the bench, on two short rods
+    sign('welder', 0.5, 0.16, H_.welder.x, 2.04, -4.36, 0);
+  }
+  sign('tire', 0.56, 0.17, H_.tire.x, 1.25, -11.988, 0);
+  sign('gen', 0.56, 0.17, H_.gen.x, 1.25, -11.988, 0);
 
   // The hall's twin of each airlock chamber, behind its door. Their inner hatches stand open onto the hall
   // (astronaut.js swings them); their outer hatches stay shut: the Moon is on the other side.

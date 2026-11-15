@@ -248,8 +248,8 @@ try {
   const bodies = await P(() => window.moonbase.calls());
   console.log(`        physics: ${bodies.bodies} bodies, last step ${bodies.physicsMs.toFixed(2)} ms`);
   check(bodies.bodies === 9, `physics: expected 5 tools and 4 decoys, got ${bodies.bodies} bodies`);
-  const brushSpot = PLACES.toolSpots[PLACES.demoTools.brush];
-  await stand(HALL_X + brushSpot.x, brushSpot.z + 0.75, HALL_X + brushSpot.x, brushSpot.z);
+  const brushSpot = PLACES.toolHomes.brush;
+  await stand(HALL_X + brushSpot.x + 0.75, brushSpot.z, HALL_X + brushSpot.x, brushSpot.z); // the rack is on the west wall
   let r = await grabTool('right', 'brush');
   check(r.ring === PAL.green, 'hall: no green ring on the brush before grabbing it: ' + r.ring);
   check(g.hands[1] === 'brush' && g.tools.brush.at === 'hand', 'hall: gripping the brush on the bench did not put it in the hand on the server');
@@ -258,7 +258,7 @@ try {
   check(buzz.some(b => b.side === 'right' && b.strength >= 0.5), 'hall: no buzz in the hand that grabbed: ' + JSON.stringify(buzz));
   // Two hands: with the brush in the right hand, the left takes the welder with its trigger, holds it while
   // the trigger is held, and lets go of it the moment the trigger is released.
-  await lay('welder', true, brushSpot.x - 0.5, brushSpot.z + 0.45);
+  await lay('welder', true, brushSpot.x + 0.5, brushSpot.z + 0.45);
   r = await P(async () => {
     const v = window.vr, mb = window.moonbase, X = window.fakeXR;
     await v.move('left', v.wp(mb.fx.tools.welder).add(v.V(0, 0.03, 0)), 6); await v.frames(2);
@@ -798,10 +798,10 @@ try {
   await letGo('right');
   if (SHOTS) {
     await kit();
-    // Finding the tools in the hall: reaching for the patch kit by the lockers.
-    const patchSpot = PLACES.toolSpots[PLACES.demoTools.patch];
+    // Finding the tools in the hall: reaching for the patch kit on the wall rack.
+    const patchSpot = PLACES.toolHomes.patch;
     await lay('patch', true, patchSpot.x, patchSpot.z);
-    await stand(HALL_X + patchSpot.x - 0.7, patchSpot.z + 0.6, HALL_X + patchSpot.x, patchSpot.z);
+    await stand(HALL_X + patchSpot.x + 0.7, patchSpot.z + 0.4, HALL_X + patchSpot.x, patchSpot.z);
     await draw('hall-tools', async () => {
       const v = window.vr, mb = window.moonbase;
       await v.move('right', v.wp(mb.fx.tools.patch).add(v.V(-0.05, 0.12, 0.05)), 4, v.V(0.3, -1, -0.3));

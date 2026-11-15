@@ -280,7 +280,7 @@ try {
   // 0:05 the solar panels get dusty. Find the brush in the hall, take it out through the airlock, brush every cell.
   await waitFor(astro, 'dust on the panels', s => s.phase === 'run' && s.scene.dust, 30);
   await ctl.waitForFunction(() => window.moonbase.state().power?.solar < 60, null, POLL).catch(() => problems.push('console: the Scientist\'s solar gauge should be low with dusty panels'));
-  await ctl.waitForFunction(() => window.moonbase.state().tools?.brush?.area === 'BENCH', null, POLL).catch(() => problems.push('console: the tool log does not have the brush on the bench'));
+  await ctl.waitForFunction(() => window.moonbase.state().tools?.brush?.area === 'TOOL RACK', null, POLL).catch(() => problems.push('console: the tool log does not have the brush on its rack'));
   await shot(ctl, 'mission-control-dust');
   await act(astro, 'take the brush', () => window.smoke.carry('brush'));
   await act(astro, 'brush the panels', () => window.smoke.dust());

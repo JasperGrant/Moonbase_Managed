@@ -16,7 +16,7 @@ import { FAULTS, TOOLS, PLACES, CFG } from '/shared/config.js';
 import { drawTool } from '/shared/icons.js';
 import { PAL } from '/shared/palette.js';
 import { loadGlove, loadPeriod, MODELS } from '/shared/assets.js';
-import { HALL, COR, SOLIDS, ROOM } from '/interior.js';
+import { HALL, COR, SOLIDS, SHELVES, ROOM } from '/interior.js';
 import { CHAMBER } from '/airlock.js';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 
@@ -48,13 +48,14 @@ const BODY = {
   tire:   { parts: [['cyl', [0.41, 0.18], [0, 0, 0], [0, 0, Math.PI / 2]]], rest: [0, 0, Math.PI / 2], lift: 0.09 },
   gen:    { parts: [['box', [0.46, 0.36, 0.34], [0, -0.03, 0]]], rest: [0, 0, 0], lift: 0.21 },
 };
-// The NASA hand tools that used to hang on the shadow board. Decoys: they lie round the hall, you can pick
-// them up and throw them, nothing uses them, and holding one still fills your hand. Room coordinates.
+// The NASA hand tools that used to hang on the shadow board. Decoys: they lie about on the benches and the
+// life support stack (never on the floor), you can pick them up and throw them, nothing uses them, and
+// holding one still fills your hand. Room coordinates.
 const DECOYS = {
   wrench:       { mass: 0.3, at: [-0.9, 0.96, -4.45] },
-  ratchet:      { mass: 0.5, at: [2.35, 0, -3.5] },
+  ratchet:      { mass: 0.5, at: [1.3, 0.96, -4.75] },
   hammer:       { mass: 1.0, at: [-2.6, 1.78, -11.2] },
-  'grease-gun': { mass: 1.2, at: [-1.6, 0, -7.6] },
+  'grease-gun': { mass: 1.2, at: [0.45, 0.96, -4.3] },
 };
 const BIG = id => id === 'tire' || id === 'gen';
 
@@ -182,7 +183,7 @@ export function buildFixtures(THREE, world, { rig, camera, send, sfx = () => {},
     const mass = decoy ? decoy.mass : TOOLS[id].mass;
     if (phys) phys.add(id, parts, mass, 'hall', { x: 0, y: -5, z: 0 });
     // The demo layout until the server says otherwise.
-    const sp = decoy ? { x: decoy.at[0], y: decoy.at[1], z: decoy.at[2] } : PLACES.toolSpots[PLACES.demoTools[id]];
+    const sp = decoy ? { x: decoy.at[0], y: decoy.at[1], z: decoy.at[2] } : PLACES.toolHomes[id];
     lay(id, 'hall', sp.x, sp.y, sp.z);
     // One invisible box per tool to point at: click a loose tool to take it.
     const [w, h, d, z] = g.userData.hit;
@@ -320,6 +321,7 @@ export function buildFixtures(THREE, world, { rig, camera, send, sfx = () => {},
     wall('z', COR.x0, COR.z0, HALL.z0, [], -1);
     wall('x', COR.z0, COR.x0, COR.x1, [D.N.hall.x], -1);
     for (const [x0, x1, z0, z1, top] of SOLIDS) fixedBox('hall', x1 - x0, top, z1 - z0, (x0 + x1) / 2, top / 2, (z0 + z1) / 2);
+    for (const [x0, x1, z0, z1, y0, y1] of SHELVES) fixedBox('hall', x1 - x0, y1 - y0, z1 - z0, (x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2);
     for (const d of Object.values(D)) chamber('hall', d.hall, false, true);
     // The Moon: the ground, the habitat's core and its two side modules, and the four chambers.
     if (world.height) P.terrain(world.ground || world.height, CFG.bounds + 4, 2); // on the field's own 2 m lattice

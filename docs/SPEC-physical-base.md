@@ -7,7 +7,7 @@ Status: written, not started. Audited against `main` at `d5c427c` (PRs 5, 7, 8 a
 Sevan's note: *the game feels extremely static.* Make the base something you move through and handle, not something you point at:
 
 1. **The tools obey physics.** They have weight (lunar weight), they fall, tumble, clatter and can be thrown, knocked off a bench and dropped on the regolith.
-2. **You find the tools inside the base.** No rack outside. The tools are scattered round the hall at the start of a mission, and you go in and look for them.
+2. **You find the tools inside the base.** No rack outside. Each tool has a home in the hall under an engraved sign with its name (`PLACES.toolHomes`): the brush and the patch kit on the wall rack on the west wall, the welder on the bench under its sign on the gantry, the tire and the generator on the spares stand against the north wall. Nothing starts on the floor. (Superseded: the tools used to start scattered round the hall.)
 3. **You walk into the airlock.** No pointing at a hatch and a fade to black. You step into the vestibule, the outer hatch swings shut behind you, the inner one swings open in front of you, and you are in the hall. The teleport to the bigger-inside hall happens while both hatches are shut, so you never see it.
 4. **Every door on the HDU works.** The model has four hatches; each is a working airlock into the hall.
 5. **The porthole is a real window.** What you see through it changes with where your head is, in stereo, like looking through glass. And a **window in the hall looks out** onto the Moon the same way.

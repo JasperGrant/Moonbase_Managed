@@ -54,6 +54,7 @@ export class Game {
     this.seen = new Uint8Array(FIELD.n * FIELD.n);
     this.seenKey = null;
     this.mark(0, 0, CFG.survey.known);
+    this.waypoint = null;      // Mission Control's beacon for the astronaut: { tool } or { x, z }
   }
 
   setMode(mode) {
@@ -90,18 +91,14 @@ export class Game {
   letGo(tool) { const i = this.hands.indexOf(tool); if (i >= 0) this.hands[i] = null; return i >= 0; }
   // Two hands: a tool or a rock sample fills one each.
   get handsFree() { return 2 - this.hands.filter(Boolean).length - this.carry.length; }
-  // Where each tool lies at the start: the same for every demo, shuffled in free play. Inside the hall,
-  // in room coordinates. at: 'loose' (lying somewhere), 'hand', or 'gone' (used up).
+  // Where each tool lies at the start: at its home in the hall, under its sign (PLACES.toolHomes), in room
+  // coordinates. at: 'loose' (lying somewhere), 'hand', or 'gone' (used up).
   layTools() {
-    const ids = Object.keys(TOOLS), spots = PLACES.toolSpots.map((_, i) => i);
-    if (this.mode !== 'demo') this.shuffle(spots);
     const tools = {};
-    ids.forEach((id, n) => {
-      const sp = PLACES.toolSpots[this.mode === 'demo' ? PLACES.demoTools[id] : spots[n]];
-      tools[id] = { at: 'loose', inside: true, x: sp.x, y: sp.y, z: sp.z, area: sp.area };
-    });
+    for (const id of Object.keys(TOOLS)) tools[id] = this.atHome(id);
     return tools;
   }
+  atHome(id) { const h = PLACES.toolHomes[id]; return { at: 'loose', inside: true, x: h.x, y: h.y, z: h.z, area: h.area }; }
   // Is the astronaut where this loose tool is? Inside with a tool inside, or near it outside.
   reaches(t) { return t.inside ? !!this.astro.inside : !this.astro.inside && this.near(t); }
   near(p, reach = CFG.reach) { return Math.hypot(this.astro.x - p.x, this.astro.z - p.z) <= reach; }
@@ -128,6 +125,30 @@ export class Game {
       }
   }
   seenAt(x, z) { const k = cellOf(x, z); return k >= 0 && !!this.seen[k]; }
+
+  // Mission Control sets a waypoint: on a tool (it follows the tool wherever it lies), or on a spot out in
+  // the field ({ x, z }, from the chart). null, or anything else, clears it.
+  setWaypoint(w) {
+    if (this.phase !== 'run') return false;
+    const num = v => typeof v === 'number' && Number.isFinite(v);
+    if (w && typeof w.tool === 'string' && this.tools[w.tool] && this.tools[w.tool].at === 'loose') this.waypoint = { tool: w.tool };
+    else if (w && num(w.x) && num(w.z) && Math.hypot(w.x, w.z) <= CFG.bounds) this.waypoint = { x: +w.x.toFixed(2), z: +w.z.toFixed(2) };
+    else this.waypoint = null;
+    this.wpn = (this.wpn || 0) + 1;
+    return true;
+  }
+  // Where the waypoint is now: { x, y, z, inside, tool?, n }, or null.
+  wayAt() {
+    const w = this.waypoint; if (!w) return null;
+    if (w.tool) { const t = this.tools[w.tool]; return { tool: w.tool, x: t.x, y: t.y || 0, z: t.z, inside: !!t.inside, n: this.wpn }; }
+    return { x: w.x, y: 0, z: w.z, inside: false, n: this.wpn };
+  }
+  // Reached: the tool is in a hand (or used up), or the astronaut stands at the spot.
+  checkWaypoint() {
+    const w = this.waypoint; if (!w) return;
+    if (w.tool) { if (this.tools[w.tool].at !== 'loose') this.waypoint = null; return; }
+    if (!this.astro.inside && this.near(w, CFG.waypoint.reach)) this.waypoint = null;
+  }
 
   tick(dt) {
     // The debrief times out, so a room nobody is watching goes back to the lobby by itself.
@@ -162,6 +183,7 @@ export class Game {
     }
 
     this.drive(dt);
+    this.checkWaypoint();
 
     // Power: a power fault drains the battery, and a flat battery darkens the base.
     const draining = this.faults.dust;
@@ -179,8 +201,7 @@ export class Game {
 
     if (this.tireBackAt !== null && now >= this.tireBackAt) {
       this.tireBackAt = null;
-      const sp = PLACES.toolSpots[PLACES.restock];
-      this.tools.tire = { at: 'loose', inside: true, x: sp.x, y: sp.y, z: sp.z, area: sp.area };
+      this.tools.tire = this.atHome('tire'); // a new one on its stand
     }
 
     // Oxygen: the suit drains outside, and tops up inside while the base has power.
@@ -263,7 +284,7 @@ export class Game {
       if (!t || !this.letGo(a.drop)) return;
       const inside = !!this.astro.inside;
       Object.assign(t, { at: 'loose', inside, x: this.astro.x, y: 0, z: this.astro.z });
-      if (inside) { const sp = PLACES.toolSpots[0]; Object.assign(t, { x: num(a.x) ? a.x : sp.x, z: num(a.z) ? a.z : sp.z }); }
+      if (inside) { const sp = PLACES.toolHomes[a.drop]; Object.assign(t, { x: num(a.x) ? a.x : sp.x, z: num(a.z) ? a.z : sp.z }); }
       else if (num(a.x) && num(a.z) && Math.hypot(a.x - this.astro.x, a.z - this.astro.z) < 4) Object.assign(t, { x: a.x, z: a.z });
       t.area = areaName(inside, t.x, t.z, this.rovers.hauler);
     } else if (a.rest !== undefined) {
@@ -466,6 +487,8 @@ export class Game {
     const rovers = {};
     for (const [id, r] of Object.entries(this.rovers)) rovers[id] = { x: r.x, z: r.z, ry: r.ry, v: r.v };
     const all = role === 'all';
+    // The astronaut sees the beacon; Mission Ops and the Scientist see what they set. The Technician has no map.
+    if (role !== 'tech') v.waypoint = this.phase === 'run' ? this.wayAt() : null;
 
     if (role === 'astronaut') {
       // Hands and eyes: the tool in hand, where the others lie, what is physically there, and the hiss.

@@ -7,6 +7,7 @@ import { buildWorld } from '/world.js';
 import { buildFixtures } from '/stations.js';
 import { buildInterior, ROOM } from '/interior.js';
 import { buildPhysics } from '/physics.js';
+import { buildWaypoint } from '/waypoint.js';
 import { CHAMBER } from '/airlock.js';
 import { CFG, CREW, ROLES, PLACES, HAULER, covers } from '/shared/config.js';
 import { sheltered } from '/shared/rules.js';
@@ -74,6 +75,8 @@ function pulse(i, strength = 0.5, ms = 40) {
 }
 const phys = buildPhysics();
 const fx = buildFixtures(THREE, world, { rig, camera, send: a => net.send({ t: 'do', a }), sfx: k => radio.sfx(k), sfxAt: (k, p, g, o) => radio.sfxAt(k, p, g, o), pulse, phys, interior, where: () => where, onRail: i => mount(i) });
+// Mission Control's waypoint: a beacon in the world where they want the astronaut to go (client/waypoint.js).
+const waypoint = buildWaypoint(THREE, { scene, interior, world, toolAt: id => { const t = fx.tools[id]; return t && t.parent ? t.getWorldPosition(new THREE.Vector3()) : null; } });
 
 // The samples banked so far stand in a rack on the hall's bench, one canister each.
 const rack = [];
@@ -1303,6 +1306,10 @@ renderer.setAnimationLoop(() => {
   interior.setPower(powerOut);
   interior.setDamage(debugDamage ? { dark: true, hull: {}, meteor: 5 } : run ? s.scene : null, where === 'in');
   interior.update(dt, now);
+  if (waypoint.update(run ? s.waypoint : null, where, now)) { // a new one: a chime from where it stands, a tap on both wrists
+    const at = waypoint.position(); if (at) radio.sfxAt('ping', at, 1); else radio.sfx('ping');
+    pulse(0, 0.3, 40); pulse(1, 0.3, 40);
+  }
   radio.room(where === 'in' ? (interior.dark ? 0.15 : 1) : 0);
   if (mode) control(dt, now); else keyed = false;
   if (mode) airlockStep(Math.min(1, now - armFrame)); // real time, so the airlock is as quick on a slow machine
@@ -1341,7 +1348,7 @@ renderer.setAnimationLoop(() => {
 });
 
 // For debugging from the browser console, and for the tests: moonbase.state(), moonbase.fx.targets() ...
-window.moonbase = { mount: () => mount(2), dismount: () => dismount(-1), riding: () => riding, resetStanding: () => { standing = 1.2; }, state: () => state, fx, world, interior, radio, rig, camera, net, board, THREE, scene, use: () => use(null), headset: () => headset, sendPose, myPose, teleport, turnRig,
+window.moonbase = { waypoint, mount: () => mount(2), dismount: () => dismount(-1), riding: () => riding, resetStanding: () => { standing = 1.2; }, state: () => state, fx, world, interior, radio, rig, camera, net, board, THREE, scene, use: () => use(null), headset: () => headset, sendPose, myPose, teleport, turnRig,
   where: () => where, placeInside, showPlace, renderer, phys, forcePortal: false,
   // For the tests: stand the head at (x, z) in a place ('in': room coordinates, 'out': world), facing yaw (0 = north).
   standAt(to, x, z, yaw = 0) { cycle = null; showPlace(to); rig.rotation.set(0, yaw, 0); rig.position.set(0, 0, 0); rig.updateMatrixWorld(true); camera.getWorldPosition(headPos); const p = to === 'in' ? interior.toWorld(x, z) : { x, z }; rig.position.x = p.x - headPos.x; rig.position.z = p.z - headPos.z; riding = false; vy = 0; grounded = true; rig.position.y = to === 'in' ? 0 : world.height(p.x, p.z); rig.updateMatrixWorld(true); },
