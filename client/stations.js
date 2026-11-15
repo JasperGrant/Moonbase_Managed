@@ -316,7 +316,7 @@ export function buildFixtures(THREE, world, { rig, camera, send, sfx = () => {},
     P.fixed('surface', new C.Cylinder(2.5, 2.5, 3.6, 16), 0, 1.8, 0);
     fixedBox('surface', 2.4, 2.6, 1.9, -3.4, 1.3, 0);
     fixedBox('surface', 5.2, 2.8, 2.9, 4.8, 1.4, 0);
-    for (const d of Object.values(D)) chamber('surface', d, true, false);
+    for (const d of Object.values(D)) chamber('surface', { x: d.x + Math.sin(d.ry) * CHAMBER.outset, z: d.z + Math.cos(d.ry) * CHAMBER.outset, ry: d.ry }, true, false); // as world.js stands them
   }
 
   // ---------- things to point at on the fixtures themselves ----------
