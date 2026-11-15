@@ -221,6 +221,8 @@ Things the code needed that sections 1 to 7 did not say. Each is in the code as 
 
 - **A8 (merge with main's physical base, docs/SPEC-physical-base.md).** Main replaced the rack with tools found in the hall, made them cannon-es physics bodies (client/physics.js) and held one at a time. On merging, **two hands wins** (decided by the project owner) and main's physics, hall, decoys, `rest` reports and tool log stand. So, superseding sections 3 to 5 where they differ: the server keeps main's `tools[id] = { at, inside, x, y, z, area }` with `hands: [left, right]` in place of `held`; `take` names a hand (`freeHand`), `drop` and `rest` are main's; there is no rack, so D2 and the `pick` act fall away (a loose tool is taken with `take`). The client's own throw (`flights`, `rest` notes, A1, A2) gives way to main's physics; `stations.js` keeps main's held slots, now one tool per hand and a second laptop slot (held[3], left). The trigger grab (D1), the pose `arms`, the animated figure, the cuff's two hand lamps and the Ops HANDS panel (now above the tool log, which names the hand) are this design's. `scene().tools` sends the held pair and the tools lying outside for the rover camera.
 
+- **A9 (laptop pick-up on a key).** On a laptop, **hold E** while looking at a loose tool or a rock sample (in reach) to take it, and let go of E to let go of it (`fx.grabKey` and `fx.releaseKey`, which put it down 0.6 m in front like Q). E was already the key that mounts and dismounts the Hauler, so E is context-sensitive: with something pickable in view and not riding, it grabs; otherwise it mounts or dismounts as before. Losing the window's focus lets go too. `npm run keypick` covers it.
+
 ## 9. Out of scope
 
 - Two-handed carrying of heavy tools, and weight.
