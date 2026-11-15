@@ -40,11 +40,16 @@ export function createDesk({ canvas, cam, seat, layoutFor, roundSeconds, linkOpe
     D.H = Math.max(H_MIN, Math.min(H_MAX, Math.round(DW * vh / vw)));
     D.k = Math.min(vw / DW, vh / D.H);
     D.dpr = Math.min(window.devicePixelRatio || 1, 2);
-    const cw = Math.round(DW * D.k), ch = Math.round(D.H * D.k);
-    for (const c of [canvas, cam].filter(Boolean)) Object.assign(c.style, { width: cw + 'px', height: ch + 'px', left: Math.round((vw - cw) / 2) + 'px', top: Math.round((vh - ch) / 2) + 'px' });
+    const cw = Math.round(DW * D.k), ch = Math.round(D.H * D.k), left = Math.round((vw - cw) / 2), top = Math.round((vh - ch) / 2);
+    Object.assign(canvas.style, { width: cw + 'px', height: ch + 'px', left: left + 'px', top: top + 'px' });
     const bw = Math.min(2732, Math.round(cw * D.dpr)), bh = Math.round(bw * D.H / DW);
     canvas.width = back.width = bw; canvas.height = back.height = bh;
     D.layout = layoutFor(DW, D.H);
+    // The camera canvas covers only the monitors' glass (their bounding box), not the whole desk: a WebGL canvas
+    // costs its whole area every frame, and most of the desk is not camera.
+    const gl = D.layout.glass || [];
+    D.camBox = gl.length ? { x: Math.min(...gl.map(r => r.x)), y: Math.min(...gl.map(r => r.y)), x1: Math.max(...gl.map(r => r.x + r.w)), y1: Math.max(...gl.map(r => r.y + r.h)) } : null;
+    if (cam && D.camBox) { const b = D.camBox; Object.assign(cam.style, { left: Math.round(left + b.x * D.k) + 'px', top: Math.round(top + b.y * D.k) + 'px', width: Math.round((b.x1 - b.x) * D.k) + 'px', height: Math.round((b.y1 - b.y) * D.k) + 'px' }); }
     drawBack();
   }
   const scale = () => canvas.width / DW;
@@ -141,8 +146,8 @@ export function createDesk({ canvas, cam, seat, layoutFor, roundSeconds, linkOpe
     },
     resetEvents() { D.events = {}; D.last = null; },
     key(code, down) { down ? D.keysDown.add(code) : D.keysDown.delete(code); },
-    // Where the rover cameras go, in CSS pixels of the camera canvas.
-    glass() { return (D.layout?.glass || []).map(r => ({ x: r.x * D.k, y: r.y * D.k, w: r.w * D.k, h: r.h * D.k })); },
+    // Where the rover cameras go, in CSS pixels of the camera canvas (which starts at the glass's bounding box).
+    glass() { const b = D.camBox; return b ? D.layout.glass.map(r => ({ x: (r.x - b.x) * D.k, y: (r.y - b.y) * D.k, w: r.w * D.k, h: r.h * D.k })) : []; },
     get swinging() { return motion.swinging; },
   };
 }
