@@ -2,8 +2,8 @@
 
 A co-op fix-it game. One astronaut is on the Moon in VR. Mission control is on laptops, 384,000 km away. Something breaks. Mission control can see the symptoms but not the cause, the astronaut has the hands but not the information, and fixing things in the wrong order makes everything worse.
 
-- **Astronaut (Quest, or a laptop for testing):** has the hands, a tool belt that holds 4 weight units, and ears. No map, no instructions, and nothing on the visor: oxygen, the clock and the belt are icons on a wrist cuff that comes up while the radio is keyed.
-- **Mission Ops:** the only voice the astronaut hears, over a crackly radio. Sees what is on the belt and what is left in the locker.
+- **Astronaut (Quest, or a laptop for testing):** has two hands, one tool in each, and ears. No map, no instructions, and nothing on the visor: oxygen, the clock and what each hand holds are icons on a wrist cuff that comes up while the radio is keyed.
+- **Mission Ops:** the only voice the astronaut hears, over a crackly radio. Sees what is in each hand, and in the tool log roughly where every other tool lies.
 - **Technician:** the radar map and the rover camera. Knows *where* and *when*.
 - **Scientist:** two screens of gauges, POWER and AIR. Knows *what* is wrong.
 
@@ -77,12 +77,12 @@ If the venue Wi-Fi blocks devices from seeing each other, use a phone hotspot.
 | | Controllers | Bare hands (hand tracking) | Laptop (testing) |
 | --- | --- | --- | --- |
 | Radio to Mission Ops, and wrist gauges | raise your left wrist where you can read it, like a watch (the left trigger also keys the radio, without looking) | raise your left wrist where you can read it (a left hand held to the helmet also keys the radio) | hold Tab |
-| Grab (tools off the rack and your belt, cable plugs, the rover wheel, the generator cord) | grip button, with your hand on it | pinch, with your fingers on it | click it |
+| Grab and hold (a loose tool, cable plugs, the rover wheel, the generator cord) | hold the trigger (or the grip), with your hand on it; let go to drop it, or let go mid-swing to throw it | pinch, with your fingers on it; open to let go | click it; Q puts down the right hand's tool, then the left's |
 | Use a tool | bring it to the work: the brush and patch kit work on contact, the welder lights when its tip is on the crack | same | click the work, hold to keep brushing or welding |
 | Point at something within arm's reach (a fallback for grabbing) | right trigger | | |
 | Go in or out of the habitat | point at the airlock hatch, pull trigger | point at the hatch, pinch and let go | click the hatch |
 | Take cover | crouch | crouch | hold C |
-| Patch your suit / pull the generator cord | patch kit to the red spot on your forearm / grab the generator on your belt and pull | same | F / G |
+| Patch your suit / pull the generator cord | patch kit to the red spot on your forearm / set the generator down (or hold it in one hand), grab its cord handle with the other and pull | same | F / G |
 | Move | left stick | point right hand at the ground, pinch to teleport (up to 14 m) | WASD |
 | Turn | right stick | pinch left hand in empty air, drag it sideways (30° per 10 cm) | mouse |
 | Zoom the visor | | pinch both empty hands, pull them apart (up to 6x); push them together to zoom out | |
@@ -92,7 +92,7 @@ The astronaut walks at 4 m/s and can roam 45 m from the habitat in every directi
 
 Hand tracking kicks in when you put the controllers down; the Quest switches by itself. Your hands are drawn as white gloves, and a green ring on the ground shows where a pinch will take you. A pinch on a tool, a plug or the wheel grabs it at once; a bare right hand pointing at the hatch, the READY board or the ground acts when the pinch lets go, so you can hold the pinch, steer the ring, and release.
 
-Mission Ops holds **Space** to talk. The Technician drives the rover with the **arrow keys**.
+Mission Ops holds **Space** to talk. The Technician drives the Scout with **W A S D** and the Hauler with the **arrow keys**, and switches each rover's camera between **first person** (from the rover) and **third person** (a chase view from behind and above, the rover in shot) with **C** for the Scout and **/** for the Hauler, or by clicking that camera's screen. The mouse wheel over a screen in third person moves the chase camera nearer or further. Each screen says which view it is in, and the choice is remembered between missions. The design is in [docs/design/rover-camera-views.md](docs/design/rover-camera-views.md).
 
 Visor zoom is for looking at something from where you stand, such as whether the solar panels are dusty: a round scope opens in the middle of your view and magnifies what you are looking at by the amount your hands have moved apart (20 cm to 60 cm is 3x). Let go and it stays. Push your pinched hands back together to close it. It is a hand-tracking gesture only; controllers and the laptop have no zoom. While the scope is open the scene is drawn one extra time, into a 1024-pixel texture.
 
@@ -119,36 +119,35 @@ The display has no words or numbers on it, only icons:
 | Microphone | the radio. A grey outline while it is off; solid red with sound coming off it while you are on the air; an amber bar through it if the page has no microphone; a red bar through it during a blackout: no signal |
 | Loudspeaker, in place of the microphone | blue, while Mission Ops is talking to you |
 | Warning triangles | one lit for each thing that is broken right now (up to two). They do not say what |
-| Row of four boxes | the tool belt: one box per weight unit, filled for each unit in use, amber when full |
+| Two lamps, each with a tool's outline beside it | your hands, left and right: lit while that hand holds something |
 | Magnifying glass | lit while the visor zoom is on, with pips for how far in |
 
 The microphone is the sign that your radio is on, and the display backs it up: a light strip in its top edge and the frame round the face take the radio's colour. The arm is modelled on an EVA suit's: a woven white outer garment with soft wrinkles, a ribbed elbow, a red identification stripe, the metal wrist disconnect, and a glove with a gauntlet, palm strap, knuckle pad and silicone fingertips.
 
-Mission Ops holds **Space** to talk. The Technician drives the rover with the **arrow keys**.
+Mission Ops holds **Space** to talk. The Technician drives the Scout with **W A S D** and the Hauler with the **arrow keys**, and switches each rover's camera between **first person** (from the rover) and **third person** (a chase view from behind and above, the rover in shot) with **C** for the Scout and **/** for the Hauler, or by clicking that camera's screen. The mouse wheel over a screen in third person moves the chase camera nearer or further. Each screen says which view it is in, and the choice is remembered between missions. The design is in [docs/design/rover-camera-views.md](docs/design/rover-camera-views.md).
 
 
-## Tools and the belt
+## Tools and your hands
 
-Tools hang in the locker beside the airlock. The belt carries 4 weight units, and refuses anything that would go over with a red flash and a buzz.
+The tools lie scattered round the hall at the start of a mission, among a few decoys (NASA hand tools nothing uses). They are physics bodies: they fall, tumble, clatter and can be thrown. There is no belt and no rack: you have two hands and each holds one tool. The design is in [docs/design/hands-and-avatar.md](docs/design/hands-and-avatar.md) and [docs/SPEC-physical-base.md](docs/SPEC-physical-base.md).
 
-| Tool | Weight | Fixes |
-| --- | --- | --- |
-| Brush | 1 | Dusty solar panels |
-| Patch kit | 1 | Suit leak |
-| Welder | 2 | Hull breach |
-| Space tire | 3 | Broken rover wheel. Used up when fitted; a new one reaches the locker 30 s later |
-| Backup generator | 3 | Nothing. One pull gives 25 s of power during a blackout, once per mission |
+| Tool | Fixes |
+| --- | --- |
+| Brush | Dusty solar panels |
+| Patch kit | Suit leak |
+| Welder | Hull breach |
+| Space tire | Broken rover wheel. Used up when fitted; a new one turns up in the hall 30 s later |
+| Backup generator | Nothing. Pull its cord: 25 s of power during a blackout, once per mission |
 
-Welder, brush and patch kit fill the belt exactly, so the tire or the generator always means leaving something behind. Grab a tool on the rack and it is on your belt and in your hand, ready to use. Let go and it hangs on your belt. To put one back, take it off your belt and let go of it at the locker. A tool let go anywhere else snaps back to your belt, so nothing is ever lost on the ground.
+Hold the trigger on a tool and it is in that hand; let go and it leaves the hand at once. A still hand drops it; a moving hand throws it, and it lies where it stops. Two hands means choosing what to carry out of the hall: the welder and the brush, and the patch kit stays behind. Mission Ops' HANDS panel shows what is in each hand, and the TOOL LOG roughly where the rest lie.
 
-Nothing on the rack is below waist height, and the belt rides at your hips: it stays there when you bend over the rover's wheel, and only sinks when you crouch right down.
+The Technician's rover camera shows the astronaut as a figure that walks, crouches and reaches where the player's hands are, holding the tools in its fingers (`client/avatar.js`).
 
 ### What your hands tell you (headset)
 
 | You see or feel | It means |
 | --- | --- |
 | A green ring, and a light tick in that hand | this is what the hand will grab if you close it now |
-| A red ring on a tool on the rack | too heavy for what is already on your belt. Close your hand and it shakes, buzzes twice, and stays |
 | A buzz as your hand closes | you have it |
 | A tick for each patch of dust, and a puff off the panel | brushed clean |
 | A steady buzz, a spark, and the point of the crack glowing redder | welding: stay on that point. A strong buzz and a bright bead: done, move along |
@@ -226,8 +225,11 @@ client/astronaut.*  VR client: movement, grabbing, pointing, crouch, visor zoom,
 client/arm.js       the astronaut's left arm and its wrist gauge cluster
 client/interior.js  the hall inside the habitat: geometry, the lighting states, where you can walk
 client/damage.js    what comes loose in the hall when a fault hits, and goes back when it is fixed
-client/stations.js  the tools, the belt and every repair, each with a grab-it version and a point-at-it version
+client/stations.js  the tools (physics bodies, one in each hand) and every repair, each with a grab-it version and a point-at-it version
 client/world.js     the Moon scene and everything that can be seen broken (shared with the rover camera)
+client/rovercam.js  the Technician's two rover cameras, each in first or third person
+client/avatar.js    the rover camera's astronaut: the NASA model cut into limbs, walking, crouching, reaching and holding tools
+client/tools.js     the five tool models for the rover camera, how each lies on the ground and how a hand grasps it
 client/index.html   the landing page: landing.js (2 or 4 players, then the seat picker), backdrop.js (the base in 3D)
 client/device.js    is this browser in a VR headset?
 client/console.*    Mission Ops, Technician, Scientist and all-in-one
@@ -261,7 +263,11 @@ Tested four ways. `npm test` checks the rules in plain Node: the first choice of
 
 `npm run music` checks the theme song in headless Chromium, with the browser's rule that a page may not play sound before a click or key press: that it waits for one, then plays and really makes sound, at the moment of the song the clock says, on the landing page, a seat, the astronaut and the admin console; that the loop overlaps the two players for about 3 seconds without dipping; and that it drops for a mission and further for the radio.
 
-`npm run vr` starts on the landing page as a headset (`?device=headset`): it says you will be the Astronaut, and choosing 4 players seats you there with no picker; it starts in the hall by the status board, the server hears the astronaut is suited, Mission Ops calls GO (a pulse in both hands), and taking the headset off stands the GO down. Then it puts the astronaut's page in a pretend headset (`test/fakexr.js`, a stand-in for the browser's WebXR: a head, two controllers with grip, trigger and haptics, or two tracked hands with a pinch) and does every repair by hand, the way a player in a Quest would: reach for the tool, close the hand, bring it to the work. With controllers it takes tools off the rack and the belt with either hand, is refused the tire on a full belt, sweeps the brush over all three panels (and checks that waving it 35 cm off the panel does nothing), welds the crack point by point (and that leaving a point early does not weld it), goes in through the airlock and pushes plugs into a full socket, a wrong one and the right ones, pulls the wheel and fits the tire, pulls the generator cord in a blackout, patches each forearm with the other hand, listens to the hiss in each ear with the crack on the left, on the right, near and far, and stands, crouches and hides through meteor showers. It repeats the grabbing with bare hands and checks that a pinch on a tool grabs while two empty-handed pinches still zoom. With a pretend microphone it then checks the cuff, with controllers and with bare hands: the arm hanging at the side leaves the radio off, an arm brought up for an instant does not key it, holding the cuff up like a watch puts the astronaut on the air with the microphone icon lit, the cuff then faces the eyes the right way up on the forearm behind the wrist, and looking away, turning the arm over or lowering it turns the radio off. It also measures how far every action makes the arm reach, and fails if any needs more than 0.8 m: that check is why the tire and the generator were moved up the rack and why the belt stays at the hips. The last step draws real frames for both eyes. `npm run vr:shots` saves those as pictures in `test/shots/`.
+`npm run vr` starts on the landing page as a headset (`?device=headset`): it says you will be the Astronaut, and choosing 4 players seats you there with no picker; it starts in the hall by the status board, the server hears the astronaut is suited, Mission Ops calls GO (a pulse in both hands), and taking the headset off stands the GO down. Then it puts the astronaut's page in a pretend headset (`test/fakexr.js`, a stand-in for the browser's WebXR: a head, two controllers with grip, trigger and haptics, or two tracked hands with a pinch) and does every repair by hand, the way a player in a Quest would: reach for the tool, close the hand, bring it to the work. With controllers it takes a tool with the grip and a second in the other hand with the trigger, checks releasing the trigger lets go at once, drops and throws a tool, sweeps the brush over all three panels (and checks that waving it 35 cm off the panel does nothing), welds the crack point by point (and that leaving a point early does not weld it), goes in through the airlock and pushes plugs into a full socket, a wrong one and the right ones, pulls the wheel and fits the tire, pulls the generator cord in a blackout, patches each forearm with the other hand, listens to the hiss in each ear with the crack on the left, on the right, near and far, and stands, crouches and hides through meteor showers. It repeats the grabbing with bare hands and checks that a pinch on a tool grabs while two empty-handed pinches still zoom. With a pretend microphone it then checks the cuff, with controllers and with bare hands: the arm hanging at the side leaves the radio off, an arm brought up for an instant does not key it, holding the cuff up like a watch puts the astronaut on the air with the microphone icon lit, the cuff then faces the eyes the right way up on the forearm behind the wrist, and looking away, turning the arm over or lowering it turns the radio off. It also measures how far every action makes the arm reach, and fails if any needs more than 0.8 m: that check is how the tool spots in the hall were chosen. The last step draws real frames for both eyes. `npm run vr:shots` saves those as pictures in `test/shots/`.
+
+`npm run camviews` runs the real rover cameras in Chromium on a scripted state: each camera switches between first and third person on its own, the switch glides, the chase camera ends up behind and above its rover looking at it, swings round behind a turn, stays above the ground and zooms with the wheel. `npm run camviews:shots` writes pictures to `test/shots/camviews/`.
+
+`npm run avatar` loads the rover camera's astronaut (`client/avatar.js`) in Chromium and checks the rig: the arms hang (no T-pose), each hand reaches a tracked hand to within 5 cm, a crouch brings the figure down with its boots on the ground, the legs swing walking, and tools go in the right hands. `npm run avatar:shots` draws it standing, walking, crouching, reaching and holding each tool, and once through the rover camera itself, to `test/shots/avatar/`.
 
 **What that leaves untested: a real headset.** The pretend one proves the code runs and the distances are reachable. It cannot say whether the gestures feel right, whether the belt sits where a hand expects it, whether the haptics are too strong, how real hand tracking behaves when a pinch is half-recognised, or how the scene performs on the Quest's GPU. Try those first on the day. Every distance is a named constant at the top of `client/stations.js` (`GRAB`, `GRAB_RACK`, `SOCKET_SNAP`, `WHEEL_PULL`, `CORD_PULL`, `TIRE_FIT`, `PATCH_RANGE`, `BELT_AT`, `WELD_RANGE`, `WELD_DWELL`). If a gesture misbehaves, pointing the right trigger at the thing from within 1.6 m does the same job. If it stutters, the first things to turn down are in `client/world.js`: the terrain segment count (`SEG`), the boulder counts in the three `scatter` calls, and the shadow map size.
 

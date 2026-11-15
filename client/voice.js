@@ -208,6 +208,8 @@ export class Radio {
     if (kind === 'refuse') { this.tone(140, 0.12, 0.14, 'square'); this.tone(140, 0.12, 0.14, 'square', 0.16); }  // too heavy
     if (kind === 'brush') this.burst(0.12, 0.1, 'bandpass', 3200);
     if (kind === 'weld') { this.burst(0.14, 0.12, 'highpass', 3000); this.tone(110, 0.14, 0.05, 'sawtooth'); }
+    if (kind === 'toss') this.sweep(420, 160, 0.18, 0.05, 'triangle');                                  // a tool leaving the glove
+    if (kind === 'thud') { this.burst(0.09, 0.22, 'lowpass', 260); this.tone(70, 0.08, 0.12); }         // a tool landing on regolith
     if (kind === 'impact') this.burst(0.5, 0.35, 'lowpass', 220);
     if (kind === 'hit') { this.burst(0.8, 0.8, 'lowpass', 300); this.tone(90, 0.5, 0.2, 'sawtooth'); }
     if (kind === 'blackout') { this.tone(440, 0.25, 0.12, 'sawtooth'); this.tone(220, 0.3, 0.12, 'sawtooth', 0.25); this.tone(110, 0.5, 0.12, 'sawtooth', 0.55); }
@@ -234,6 +236,13 @@ export class Radio {
     // A loss: the same three notes falling, minor, slower and lower.
     if (kind === 'lost') { this.tone(392, 0.35, 0.08); this.tone(311, 0.35, 0.08, 'sine', 0.35); this.tone(262, 0.8, 0.08, 'sine', 0.7); }
     // The cuff asking to be read: a soft two-tone wrist-watch beep.
+    // The sample run: a rock off the ground, a sample into a cup, the port's lid, its assay, a new find on the chart.
+    if (kind === 'scrape') { this.burst(0.18, 0.12, 'bandpass', 700); this.burst(0.08, 0.06, 'highpass', 2600, 0.05); }
+    if (kind === 'clink') { this.tone(1250, 0.12, 0.06, 'triangle'); this.tone(1870, 0.08, 0.03, 'triangle', 0.02); }
+    if (kind === 'lid') { this.tone(95, 0.18, 0.2, 'square'); this.burst(0.1, 0.16, 'lowpass', 500); }
+    if (kind === 'found') { this.tone(660, 0.14, 0.09); this.tone(990, 0.3, 0.09, 'sine', 0.15); }
+    if (kind === 'dud') { this.tone(150, 0.45, 0.1, 'square'); }
+    if (kind === 'ping') { this.tone(1400, 0.06, 0.05); this.tone(1400, 0.25, 0.025, 'sine', 0.07); }
     if (kind === 'watch') { this.tone(2100, 0.05, 0.03, 'square'); this.tone(2100, 0.05, 0.03, 'square', 0.12); }
   }
 }

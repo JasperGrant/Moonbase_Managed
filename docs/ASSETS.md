@@ -51,7 +51,7 @@ Sizes are the baked box, width (x) × height (y) × depth (z), in metres. "Repla
 | `spectrograph-crate` | 0.94 × 0.94 × 2.2 | 0.3k | Cargo at the fuel depot `PLACES.depot` (-9, -5), lying beside the tanks | new | Reads as a sealed instrument crate. |
 | `support-cradle` | 1.7 × 1.8 × 0.87 | 1.3k | Fuel depot, a handling cradle beside the tanks | new | Its gold is fine; roughen it (0.7). |
 | `grace-satellite` | 1.9 × 1.26 × 3.1 | 4k | Fuel depot, cargo waiting to fly, on the ground or on the cradle | new | Lowest priority; modern. Use only if the depot looks empty. |
-| `astronaut` | 1.76 × 1.9 × 0.71 | 6.4k | The astronaut figure the rover camera and Mission Control see | `world.js` 791-800, the capsule avatar | **Unrigged and in a T-pose**: it cannot bend. Acceptable at rover-camera distance; do not use it anywhere it is seen close up or must animate. Remove the green display box (`world.js` 798) with the capsules. |
+| `astronaut` | 1.76 × 1.9 × 0.71 | 6.4k | The astronaut figure the rover camera and Mission Control see | `client/avatar.js` (built by `world.js`) | **Unrigged and in a T-pose**, so `avatar.js` cuts it into rigid limbs by triangle position and hangs each from a joint (shoulders, elbows, hips, knees, ankles): it walks, crouches and reaches at rover-camera distance. The cut faces show if you look closely; do not use it anywhere it is seen close up. |
 
 ### Inside the habitat (`client/interior.js`)
 
@@ -72,10 +72,10 @@ Sizes are the baked box, width (x) × height (y) × depth (z), in metres. "Repla
 
 | Model | Size | Tris | Goes | Replaces | Notes |
 | --- | --- | --- | --- | --- | --- |
-| `pistol-grip-tool` | 0.066 × 0.302 × 0.391 | 1k | **The welder**: the tool the astronaut holds to the crack | `stations.js` 73-80 (the welder group) | The real EVA power tool, so it is the best fit. The bit runs along Z: put the spark (`stations.js` 77) on the bit's tip, set `BELT_SCALE.welder` and `RACK_SCALE.welder` back to 1 because the model is life-size, and check the grab in `npm run vr`. |
+| `pistol-grip-tool` | 0.066 × 0.302 × 0.391 | 1k | **The welder**: the tool the astronaut holds to the crack | `stations.js` 73-80 (the welder group) | The real EVA power tool, so it is the best fit. The bit runs along Z: put the spark (`stations.js` 77) on the bit's tip, set `RACK_SCALE.welder` back to 1 because the model is life-size, and check the grab in `npm run vr`. |
 | `wrench`, `ratchet`, `hammer`, `grease-gun` | 0.25, 0.3, 0.36, 0.4 long | 0.7k-3k | Hung on the locker rack as a shadow board, each over a painted outline | new | Scenery: they are not in `TOOLS`, so nothing picks them up. Do not add them to the rules. |
 | `maintenance-tool`, `printed-wrench`, `crowfoot`, `socket` | 0.03-0.11 | 1.5k-4.4k | On the habitat workbench, in a tray | new | 3D-printed ISS tools. |
-| `tether` | 0.12 × 0.12 × 0.6 | 3k | One per tool on the belt, from the tool to the belt ring; one hanging from each rack hook | new | Small detail that sells EVA. Sag it with a slight rotation; do not simulate it. |
+| `tether` | 0.12 × 0.12 × 0.6 | 3k | One hanging from each rack hook (there is no belt: docs/design/hands-and-avatar.md) | new | Small detail that sells EVA. Sag it with a slight rotation; do not simulate it. |
 
 The game's own tools (brush, patch kit, space tire, backup generator) have no model in this set. Keep them hand-built, bevelled and textured as CLAUDE.md asks.
 

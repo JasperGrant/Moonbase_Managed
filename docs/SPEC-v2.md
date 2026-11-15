@@ -19,6 +19,8 @@ Follow these when a detail is not spelled out below.
 
 ## Tools and the belt
 
+> **Superseded** by [specs/hands-and-avatar.md](specs/hands-and-avatar.md): there is no belt and no weight limit. Each hand holds one tool; a tool let go drops or is thrown and lies on the ground until picked up. The text below is kept for history.
+
 Tools live in a **tool locker** beside the airlock. The astronaut can carry at most **4 weight units**.
 
 | Tool | Weight | Fixes | Uses |
@@ -119,7 +121,7 @@ So the right order is usually power first (it has the shortest fuse and silences
 
 Keep text to labels. Views are switched with big tabs so players have to go looking.
 
-**Astronaut (VR).** Oxygen bar and belt weight on the HUD. No map, no gauges, no instructions. A fixture that needs a tool the astronaut is not carrying shows that tool's silhouette when they are within 2 m.
+**Astronaut (VR).** Oxygen bar and belt weight on the HUD *(superseded: two hand lamps on the cuff)*. No map, no gauges, no instructions. A fixture that needs a tool the astronaut is not carrying shows that tool's silhouette when they are within 2 m.
 
 **Scientist: knows what.** Two tabs.
 
@@ -131,7 +133,7 @@ Keep text to labels. Views are switched with big tabs so players have to go look
 - RADAR: the map with the stations, the rover, the astronaut dot and meteor blips with a countdown ring. Static when the rover wheel is broken.
 - ROVER CAM: the existing camera view. Arrow keys still drive the rover when it is working. Driving the rover to the astronaut gives them cover in a shower.
 
-**Mission Ops: knows the kit, and is the voice.** The mission clock, the oxygen bar, a picture of the belt with the tools on it and the weight used, and a picture of the locker with what is left. Hold Space to talk, as now. Ops is still the only person the astronaut hears, with the 1.3 s delay.
+**Mission Ops: knows the kit, and is the voice.** The mission clock, the oxygen bar, a picture of the belt with the tools on it and the weight used, and a picture of the locker with what is left. *(Superseded: what is in each hand and what is lying out, see [specs/hands-and-avatar.md](specs/hands-and-avatar.md).)* Hold Space to talk, as now. Ops is still the only person the astronaut hears, with the 1.3 s delay.
 
 **Mission Control (`/control`).** All three consoles on one page, as now.
 
@@ -159,7 +161,7 @@ Score: 100 per fault fixed, plus twice the oxygen left on a win.
 
 ## Controls
 
-- **Grab:** grip button on a controller, pinch with a bare hand. This is new, and is what picks up tools, plugs, the wheel and the pull cord.
+- **Grab:** grip button on a controller, pinch with a bare hand. *(Superseded: the trigger grabs too, and holds until released. See [specs/hands-and-avatar.md](specs/hands-and-avatar.md).)* This is new, and is what picks up tools, plugs, the wheel and the pull cord.
 - **Use a held tool:** trigger (welder). The brush and patch kit work on contact.
 - **Crouch:** physically, in VR.
 - Talk, move, turn and teleport stay as they are.

@@ -72,3 +72,12 @@ export function jewel(g, x, y, r, colour, on) {
   g.fillStyle = grd; g.beginPath(); g.arc(x, y, r, 0, 7); g.fill();
   g.restore();
 }
+
+// The rock samples and their lookalikes (docs/DESIGN.md, "Samples"). Used by the 3D rocks and the field guide.
+export const SAMPLE_COL = {
+  anor: PAL.dial, fleck: PAL.inkDial, anorDust: '#b5ad9b',     // anorthosite: pale cream, dark flecks
+  basalt: '#34322e', pit: '#161513', basaltLight: '#4a4741',   // vesicular basalt: charcoal, pitted
+  glass: '#b9763a', bead: '#d39a55',                           // orange glass: ochre beads
+  ice: '#9fb0b8', frost: '#d6dbd8',                            // ice-bearing clod: pale blue-grey, frosted
+  dusty: '#b9b4a8',                                            // the ice's lookalike: a pale dusty rock
+};
