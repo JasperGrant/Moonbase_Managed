@@ -731,10 +731,13 @@ let chosen = null, portalCalls = 0, portalMs = 0, shadowsStale = true;
 function choosePortal(now) {
   if (chosen) { chosen.mask.visible = chosen.punch.visible = false; chosen = null; }
   collectMats(now);
-  if ((!mode && !window.moonbase?.forcePortal) || window.moonbase?.noPortal) return;
+  if ((!mode && !window.moonbase?.forcePortal) || window.moonbase?.noPortal || !portalAllowed()) return;
   camera.getWorldPosition(headPos);
-  const cam = renderer.xr.isPresenting ? renderer.xr.getCamera() : camera;
-  cam.updateMatrixWorld(); projView.multiplyMatrices(cam.projectionMatrix, cam.matrixWorldInverse); frustum.setFromProjectionMatrix(projView);
+  // In a headset, the camera given this frame's head pose and both eyes' frustum. (Not the XR ArrayCamera:
+  // its updateMatrixWorld() drops the rig, which put the frustum at the world's origin and no porthole in it.)
+  rig.updateMatrixWorld(true);
+  if (renderer.xr.isPresenting) renderer.xr.updateCamera(camera); else camera.updateMatrixWorld();
+  projView.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse); frustum.setFromProjectionMatrix(projView);
   let best = Infinity;
   for (const p of portals) {
     if (p.to === where) continue;                         // it looks into the place you are already in
@@ -751,6 +754,27 @@ function choosePortal(now) {
   if (chosen) chosen.mask.visible = chosen.punch.visible = true;
 }
 const isShown = m => { for (let o = m; o; o = o.parent) if (!o.visible) return false; return true; };
+// In a headset three.js draws into its own multisampled render target, and at the end of every render() it
+// throws that target's depth and stencil away (and, without WEBGL_multisampled_render_to_texture, its
+// multisampled colour too, after copying it out). The stencil the glass wrote in the main pass would be gone
+// before the porthole pass reads it. So, while a porthole is drawn: the target keeps its depth and stencil
+// after the main pass (resolveDepthBuffer), and the porthole pass draws no shadow maps, which would bind
+// another framebuffer in between. Without the extension there is no way to keep the colour: no porthole.
+let xrKeep = null; // { rt, depth, stencil } while the main pass is told to keep its depth and stencil
+const xrTarget = () => (renderer.xr.isPresenting ? renderer.getRenderTarget() : null);
+function portalAllowed() {
+  const rt = xrTarget();
+  return !rt || !(rt.samples > 0) || renderer.extensions.has('WEBGL_multisampled_render_to_texture');
+}
+function keepStencil(on) {
+  if (on) {
+    const rt = xrTarget(); if (!rt) return;
+    xrKeep = { rt, depth: rt.resolveDepthBuffer, stencil: rt.resolveStencilBuffer };
+    rt.resolveDepthBuffer = rt.resolveStencilBuffer = true;
+  } else if (xrKeep) {
+    xrKeep.rt.resolveDepthBuffer = xrKeep.depth; xrKeep.rt.resolveStencilBuffer = xrKeep.stencil; xrKeep = null;
+  }
+}
 // After the main draw: the other place, through the chosen glass.
 // Saved as an Euler, not a quaternion: copying a quaternion back makes three.js rewrite the rig's Euler, and a
 // yaw past 90 degrees comes back as (pi, pi - yaw, pi), which turns the mouse and the keys round backwards.
@@ -779,7 +803,9 @@ function renderPortal() {
   // A colour background makes three.js clear the frame (and the stencil) even with autoClear off.
   const bg = scene.background; scene.background = null;
   renderer.autoClear = false;
-  renderer.shadowMap.autoUpdate = false; renderer.shadowMap.needsUpdate = other === 'out' && shadowsStale; shadowsStale = false;
+  renderer.shadowMap.autoUpdate = false;
+  if (!renderer.xr.isPresenting) { renderer.shadowMap.needsUpdate = other === 'out' && shadowsStale; shadowsStale = false; }
+  keepStencil(false); // this pass is the last one: the target may drop its depth and stencil after it
   const t0 = performance.now();
   renderer.render(scene, camera);
   portalMs = performance.now() - t0;
@@ -1144,9 +1170,11 @@ renderer.setAnimationLoop(() => {
   if (arm.group.visible) drawGauges(now);
   renderScope();
   choosePortal(now);
+  keepStencil(!!chosen);
   renderer.render(scene, camera);
   mainCalls = renderer.info.render.calls;
   renderPortal();
+  keepStencil(false);
   if (snapWaiting) { snapWaiting(renderer.domElement.toDataURL('image/png')); snapWaiting = null; } // must follow the draw in the same frame
 });
 

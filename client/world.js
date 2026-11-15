@@ -273,7 +273,7 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
   }
   // Under and round each airlock chamber the ground is dug a few centimetres below its grate floor
   // (y = 0.004): the fine undulation used to come up through the floor in patches of regolith.
-  const chamberMid = Object.values(PLACES.doors).map(d => ({ x: d.x + Math.sin(d.ry) * CHAMBER.depth / 2, z: d.z + Math.cos(d.ry) * CHAMBER.depth / 2 }));
+  const chamberMid = Object.values(PLACES.doors).map(d => { const k = CHAMBER.outset + CHAMBER.depth / 2; return { x: d.x + Math.sin(d.ry) * k, z: d.z + Math.cos(d.ry) * k }; });
   function height(x, z) {
     const r = Math.hypot(x, z);
     let h = ramp(r, 18, 70) * demAt(x, z);                      // real ground, blended in past the pad
@@ -543,7 +543,7 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
     const apronMat = new THREE.MeshStandardMaterial({ map: apronTex, roughness: 0.9, metalness: 0.05 });
     for (const [id, d] of Object.entries(PLACES.doors)) {
       const a = buildAirlock(THREE, { id, shell: true, castShadow: shadows });
-      a.root.position.set(d.x, 0, d.z); a.root.rotation.y = d.ry;
+      a.root.position.set(d.x, 0, d.z); a.root.rotation.y = d.ry; a.root.translateZ(CHAMBER.outset); // clear of the model's skin
       a.setOuter(1); a.setInner(0); a.setLamp('green'); a.setPressure(0);
       hab.add(a.root);
       doors[id] = a;
