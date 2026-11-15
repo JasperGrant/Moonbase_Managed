@@ -454,7 +454,7 @@ try {
   check(await serverUntil(() => !g.faults.board), 'board: all three plugs seated but the fault is not fixed');
   check(await P(async () => { for (let i = 0; i < 120 && window.moonbase.interior.phase !== 'main'; i++) await window.vr.sleep(50); return window.moonbase.interior.phase; }) === 'main', 'board: the roof lights did not come back');
   await reachOk('the switchboard');
-  check(sheltered(g.astro, g.rover), 'inside the habitat should count as cover from a meteor shower');
+  check(sheltered(g.astro, g.rovers.hauler), 'inside the habitat should count as cover from a meteor shower');
   // And out again through the east door: the twin on the hall's east wall comes out at the long module's end.
   r = await P(async () => {
     const v = window.vr, mb = window.moonbase, ch = mb.interior.doors.E;
@@ -470,13 +470,13 @@ try {
 
   // ---------- 5. pulling the wheel, fitting the tire ----------
   step('5. pulling the wheel');
-  g.rover.x = 6; g.rover.z = 12; g.rover.ry = 0; g.rover.throttle = 0;
+  Object.assign(g.rovers.hauler, { x: 6, z: 12, ry: 0, v: 0, throttle: 0 });
   await page.waitForTimeout(400);
-  await P(async () => { const mb = window.moonbase; for (let i = 0; i < 40; i++) { mb.world.moveRover(mb.state().rover, 1); await window.vr.frames(1); } });
-  g.break('wheel');
-  await P(() => window.vr.until(s => s.scene.wheel === 1, 3));
+  await P(async () => { const mb = window.moonbase; for (let i = 0; i < 40; i++) { mb.world.moveRovers(mb.state().rovers, 1); await window.vr.frames(1); } });
+  g.break('wheel', false, 'hauler');
+  await P(() => window.vr.until(s => s.scene.wheels.hauler === 1, 3));
   await P(() => window.vr.frames(3));
-  const hubAt = await P(() => { const v = window.vr, mb = window.moonbase; const h = v.wp(mb.world.fixtures.hub), c = v.wp(mb.world.rover); const out = h.clone().sub(c).setY(0).normalize(); return { x: h.x, z: h.z, ox: out.x, oz: out.z }; });
+  const hubAt = await P(() => { const v = window.vr, mb = window.moonbase; const h = v.wp(mb.world.fixtures.hub), c = v.wp(mb.world.rovers.hauler); const out = h.clone().sub(c).setY(0).normalize(); return { x: h.x, z: h.z, ox: out.x, oz: out.z }; });
   // Beside the wheel, bent to it: its hub is 0.4 m off the ground.
   await stand(hubAt.x + hubAt.ox * 0.6, hubAt.z + hubAt.oz * 0.6, hubAt.x, hubAt.z, 1.35);
   check(await P(() => window.moonbase.scene.children.some(o => o.isSprite && o.visible && o.scale.x < 1)), 'wheel: no outline of the missing tool (the tire) over the broken wheel');
@@ -489,9 +489,9 @@ try {
     v.grip('left', true); await v.frames(2);
     const held = v.holding('left')?.kind;
     await v.move('left', top.clone().add(v.V(ox * 0.2, 0, oz * 0.2)), 6);
-    const early = mb.state().scene.wheel;
+    const early = mb.state().scene.wheels.hauler;
     await v.move('left', top.clone().add(v.V(ox * 0.36, 0, oz * 0.36)), 6);
-    await v.until(s => s.scene.wheel === 2, 2);
+    await v.until(s => s.scene.wheels.hauler === 2, 2);
     v.grip('left', false); await v.frames(3);
     return { ring, held, early, buzz: v.haptics().length, lying: v.wp(F.wheel).y };
   }, hubAt);
@@ -516,7 +516,7 @@ try {
     const off = v.wp(mb.fx.tools.tire).sub(v.where('right'));
     await v.move('right', hub.clone().sub(off).add(v.V(0, 0.4, 0)), 6);
     await v.move('right', hub.clone().sub(off), 8);
-    for (let i = 0; i < 30 && mb.state().scene.wheel !== 0; i++) await v.frames(1);
+    for (let i = 0; i < 30 && mb.state().scene.wheels.hauler !== 0; i++) await v.frames(1);
     v.grip('right', false); await v.frames(2);
   });
   check(await serverUntil(() => !g.faults.wheel), 'tire: offering the tire up to the bare hub did not fit it');
@@ -530,7 +530,7 @@ try {
   await lay('gen', false, 0.35, 8.45); // set down at the work
   g.break('dust'); g.battery = 0;
   check(await serverUntil(() => g.blackout && !g.powered), 'generator: could not black the base out for the test');
-  check(await P(() => window.vr.until(s => !s.powered, 3).then(() => window.moonbase.radioState().shown)) === 'dead', 'blackout: the radio should read NO SIGNAL');
+  check(await P(() => window.vr.until(s => !s.powered, 3).then(() => window.moonbase.radioState().shown)) !== 'dead', 'blackout: comms never fail, so the radio must not read NO SIGNAL');
   await P(() => window.vr.haptics());
   r = await P(async () => {
     const v = window.vr, mb = window.moonbase;
@@ -648,7 +648,7 @@ try {
   // A shower whose near impacts have already begun, for `seconds`.
   // (The test holds the mission clock, so the shower is ended by hand.)
   const shower = async seconds => { g.meteor = { start: g.elapsed - CFG.meteorGraceSeconds - 0.1, end: g.elapsed + 600, hit: false, falling: true, after: [] }; await new Promise(r => setTimeout(r, seconds * 1000)); g.meteor = null; await new Promise(r => setTimeout(r, 250)); };
-  const beside = [g.rover.x + 1.5, g.rover.z, g.rover.x, g.rover.z];
+  const beside = [g.rovers.hauler.x + 1.5, g.rovers.hauler.z, g.rovers.hauler.x, g.rovers.hauler.z];
   let hits = g.stats.hits;
   await stand(...beside);              // standing beside the rover, 1.7 m tall
   await shower(1);

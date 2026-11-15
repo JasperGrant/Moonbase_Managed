@@ -12,6 +12,7 @@
     "music": "node test/music.mjs",
     "smoke:shots": "SMOKE_SHOTS=1 node test/smoke.mjs",
     "vr": "node test/vr.mjs",
+    "vr:sample": "node test/vr-sample.mjs",
     "vr:shots": "VR_SHOTS=1 node test/vr.mjs",
     "assets": "node test/assets.mjs",
     "assets:shots": "ASSET_SHOTS=1 node test/assets.mjs",

@@ -319,7 +319,7 @@ function setup(opts = {}) {
   const { hub, join, say } = setup();
   const a = join('astronaut');
   say(a, { t: 'pose', x: 1, z: 2, ry: 0.5, h: 1.6, inside: true, door: 'S', arms: [[-0.3, 1.1, 0.4], [0.2, 'x', 0]] });
-  assert.deepEqual(hub.game.astro, { x: 1, z: 2, ry: 0.5, h: 1.6, inside: true, door: 'S', arms: [[-0.3, 1.1, 0.4], null] }, 'a hand that is not three numbers is not tracked');
+  assert.deepEqual(hub.game.astro, { x: 1, z: 2, ry: 0.5, h: 1.6, inside: true, door: 'S', riding: null, arms: [[-0.3, 1.1, 0.4], null] }, 'a hand that is not three numbers is not tracked');
   say(a, { t: 'pose', x: 1, z: 2, ry: 0.5, arms: [[9, 1, 0]] });
   assert.deepEqual(hub.game.astro.arms, [null, null], 'a hand out of reach of the body is dropped');
   assert.equal(hub.game.astro.inside, false);
