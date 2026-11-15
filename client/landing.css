@@ -1,0 +1,58 @@
+/* The landing page: the base in 3D, full screen, with the title and the choice of 2 or 4 players over its sky. */
+.landing-page { overflow:hidden; background:#000; }
+#still, #scene { position:fixed; inset:0; width:100%; height:100%; object-fit:cover; display:block; }
+#scene { opacity:0; transition:opacity 2.4s ease; }
+.live #scene { opacity:1; }
+/* The words sit in a column on the left, over the dark side of the shot; the base, Earth and the dish
+   stay clear in the right two-thirds (client/backdrop.js keeps them there as the camera drifts). */
+.shade { position:fixed; inset:0; pointer-events:none;
+  background:linear-gradient(to right, rgba(2,3,5,.9) 0%, rgba(2,3,5,.72) 30%, rgba(2,3,5,.18) 52%, rgba(2,3,5,0) 64%),
+             linear-gradient(to bottom, rgba(2,3,5,0) 80%, rgba(2,3,5,.55) 100%); }
+
+#front { position:relative; z-index:2; min-height:100%; max-width:780px; display:flex; flex-direction:column; justify-content:center; align-items:flex-start;
+  padding:48px 24px 96px clamp(24px, 6vw, 96px); text-align:left; font-family:system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+#front header { animation:rise 1.4s ease both; background:none; border:0; padding:0; margin:0; display:block; position:static; }
+.kicker { margin:0 0 14px; color:#9fb0ba; font-size:12px; letter-spacing:.42em; text-transform:uppercase; }
+#front h1 { font-size:clamp(40px, 5.4vw, 74px); font-weight:200; letter-spacing:.28em; margin:0 -.28em 0 0; line-height:1.05; color:#f2f5f2;
+  text-shadow:0 0 40px rgba(120,170,255,.18); }
+.tag { margin:16px 0 0; max-width:30em; color:#c2cdd2; font-size:16px; line-height:1.5; }
+
+#choose, #join { margin-top:min(6vh, 52px); animation:rise 1.4s .25s ease both; }
+.ask { margin:0 0 18px; color:#e8eeea; font-size:15px; letter-spacing:.18em; text-transform:uppercase; }
+.modes { display:flex; gap:16px; flex-wrap:wrap; }
+button.mode { width:min(290px, 86vw); padding:20px 20px 18px; display:grid; grid-template-columns:auto 1fr; column-gap:14px; align-items:baseline; text-align:left;
+  color:#eef3f0; background:rgba(10,16,22,.46); border:1px solid rgba(190,215,230,.28); border-radius:14px; font-family:inherit; font-weight:400;
+  backdrop-filter:blur(10px) saturate(1.2); -webkit-backdrop-filter:blur(10px) saturate(1.2);
+  transition:transform .25s ease, border-color .25s ease, background .25s ease, box-shadow .25s ease; }
+button.mode:hover, button.mode:focus-visible { transform:translateY(-3px); border-color:var(--green); background:rgba(14,26,22,.62); box-shadow:0 10px 40px rgba(88,224,138,.16); outline:none; }
+button.mode:disabled { opacity:.5; transform:none; cursor:progress; background:rgba(10,16,22,.46); color:#eef3f0; }
+.mode .num { grid-row:span 3; font-size:52px; line-height:1; font-weight:200; color:var(--green); }
+.mode .word { font-size:13px; letter-spacing:.24em; text-transform:uppercase; color:#9fb0ba; }
+.mode .who { font-size:15px; font-weight:600; margin-top:4px; }
+.mode .more { font-size:13px; color:#a9b6bc; margin-top:2px; }
+button.mode.join { display:inline-block; width:auto; text-align:center; font-size:16px; font-weight:600; padding:16px 30px; }
+.open { margin:-6px 0 18px; color:#c2cdd2; }
+
+.note { margin:22px 0 0; color:#c2cdd2; font-size:14px; }
+#headsetNote { padding:8px 16px; border:1px dashed rgba(190,215,230,.4); border-radius:999px; }
+#headsetNote b { color:var(--green); }
+#status:empty { display:none; }
+
+#lobby { position:fixed; inset:0; z-index:4; }
+#back { position:fixed; top:14px; left:14px; z-index:5; background:rgba(0,0,0,.55); }
+
+footer.site { position:fixed; left:0; right:0; bottom:0; z-index:3; display:flex; justify-content:space-between; align-items:center; padding:12px 18px;
+  color:#7f8f98; font:12px/1.4 system-ui, sans-serif; letter-spacing:.06em; pointer-events:none; }
+footer.site a { pointer-events:auto; margin:0; }
+#lobby:not([hidden]) ~ footer.site { display:none; }
+
+@keyframes rise { from { opacity:0; transform:translateY(14px); } to { opacity:1; transform:none; } }
+@media (prefers-reduced-motion: reduce) { #front header, #choose, #join { animation:none; } #scene { transition:none; } }
+@media (max-height:620px) { #front { justify-content:flex-start; padding-top:4vh; } .tag { display:none; } }
+/* A phone: one centred column, the picture dimmed behind it. */
+@media (max-width:760px) {
+  .shade { background:linear-gradient(to bottom, rgba(2,3,5,.85) 0%, rgba(2,3,5,.55) 50%, rgba(2,3,5,.75) 100%); }
+  #front { max-width:none; align-items:center; text-align:center; padding:8vh 16px 88px; }
+  #front h1 { margin:0 0 0 .28em; }
+  .modes { justify-content:center; }
+}

@@ -25,6 +25,17 @@ function serve(req, res) {
   let url;
   try { url = decodeURIComponent(new URL(req.url, 'http://x').pathname); } catch { res.writeHead(400).end(); return; }
   if (url === '/') url = '/index.html';
+  // The landing page chooses 2 or 4 players. The first choice wins; the answer says what was set.
+  if (url === '/players' && req.method === 'POST') {
+    let body = '';
+    req.on('data', d => { body += d; if (body.length > 1000) req.destroy(); });
+    req.on('end', () => {
+      let n = null;
+      try { n = JSON.parse(body).players; } catch {}
+      res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }).end(JSON.stringify(hub.choosePlayers(n)));
+    });
+    return;
+  }
   if (url === '/seats') { res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }).end(JSON.stringify(hub.seats())); return; }
   url = PAGES[url] || url;
   const file = path.join(WEB, url);

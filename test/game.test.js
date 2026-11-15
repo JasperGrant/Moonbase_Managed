@@ -130,6 +130,7 @@ const kit = (g, tool) => {
 // ---------- power: battery, blackout, radio, generator ----------
 {
   const hub = new Hub(new Game(rng));
+  hub.choosePlayers(4); // a 4-player game, so the Astronaut and Mission Ops seats can be taken
   const g = hub.game;
   const seat = role => { const c = { got: [], send(d) { this.got.push(d); } }; hub.add(c); hub.message(c, JSON.stringify({ t: 'hello', role })); return c; };
   const astro = seat('astronaut'), ops = seat('ops');
@@ -332,5 +333,21 @@ const kit = (g, tool) => {
   g.reset();
   assert.equal(g.mode, 'free', 'the mode survives "Fly again"');
   for (const t of Object.keys(TOOLS)) assert.ok(g.tools[t].at === 'loose' && g.tools[t].inside);
+}
+// ---------- the debrief times out ----------
+{
+  const g = new Game(rng);
+  assert.equal(g.setMode('free'), true);
+  g.start();
+  g.score = 300;
+  g.end(true, 'test');
+  assert.equal(g.phase, 'results');
+  assert.equal(g.debriefLeft, CFG.debriefSeconds);
+  assert.equal(g.view('ops').debriefLeft, CFG.debriefSeconds, 'the consoles get the seconds left');
+  for (let i = 0; i < (CFG.debriefSeconds - 1) * 10; i++) g.tick(0.1);
+  assert.equal(g.phase, 'results', 'not before the time is up');
+  for (let i = 0; i < 20; i++) g.tick(0.1);
+  assert.equal(g.phase, 'lobby', 'an unattended debrief goes back to the lobby');
+  assert.equal(g.mode, 'free', 'and keeps the mode');
 }
 console.log('all game tests passed');

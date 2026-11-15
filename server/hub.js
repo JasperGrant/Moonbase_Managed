@@ -6,7 +6,7 @@
 // A client is any object the transport hands to add(); the hub sets `role` and `open` on it and
 // calls client.send(stringOrBinary). send() must never throw.
 import { Game } from './game.js';
-import { CFG, ROLES, CREW, covers } from '../client/shared/config.js';
+import { CFG, ROLES, CREW, PLAYERS, covers } from '../client/shared/config.js';
 
 const isControl = role => role === 'ops' || role === 'all';
 
@@ -21,7 +21,45 @@ export class Hub {
     this.suited = false;      // the astronaut has the headset on (or is playing on the screen): Ops can call them GO
     this.timeScale = opts.timeScale || 1; // below 1, the mission clock runs slow (the smoke test on a slow machine)
     this.adminKey = opts.adminKey || null; // when set, /admin needs this key (ADMIN_KEY in the environment)
+    this.now = opts.now || Date.now;        // a clock the tests can move
+    this.players = null;                    // 2 or 4, chosen once per game on the landing page; null until then
+    this.busy = this.now();                 // last time anyone held a seat, or the game was chosen
   }
+
+  // ---- 2 or 4 players ----
+  // The first choice wins; a different one after that is ignored, and the caller is told what was set.
+  choosePlayers(n) {
+    this.expire();
+    n = Number(n);
+    if (!this.players && PLAYERS[n]) { this.players = n; this.busy = this.now(); }
+    return this.seats();
+  }
+  // Can this role be taken? true, or why not: 'nomode' (nobody has chosen 2 or 4 players yet) or
+  // 'wrongseat' (the game does not have that seat). With requireFullCrew off (one developer testing
+  // alone, and the VR test) any seat may be taken before a choice is made.
+  seatOk(role) {
+    if (!this.players) return this.requireFullCrew ? 'nomode' : true;
+    return PLAYERS[this.players].includes(role) ? true : 'wrongseat';
+  }
+  // Forget the choice. Anyone still seated is sent back to the landing page, where it is made again.
+  clearPlayers() {
+    const was = this.players;
+    this.players = null; this.ready.clear(); this.countdown = null; this.busy = this.now();
+    if (!was) return;
+    for (const c of this.live()) {
+      this.remove(c);
+      try { c.send(JSON.stringify({ t: 'home' })); } catch {}
+      try { c.close?.(); } catch {}
+    }
+  }
+  // A game chosen but empty for emptyModeSeconds is forgotten. Checked whenever anyone asks, so it
+  // also works on Cloudflare, where nothing ticks while nobody is connected.
+  expire() {
+    if (this.crew().length || this.game.phase !== 'lobby') { this.busy = this.now(); return; }
+    if (this.players && this.now() - this.busy >= CFG.lobby.emptyModeSeconds * 1000) this.clearPlayers();
+  }
+  // Back to the start: a fresh game, and 2 or 4 players chosen again.
+  resetGame() { this.game.reset(); this.clearPlayers(); }
 
   live() { return [...this.clients].filter(c => c.open && c.role); }
   crew() { return [...new Set(this.live().map(c => c.role))]; }
@@ -34,7 +72,11 @@ export class Hub {
     return crew.includes('all') && ['ops', 'tech', 'sci'].includes(role);
   }
   // For the landing page: which seats are free right now.
-  seats() { return { crew: this.crew(), taken: Object.keys(ROLES).filter(r => this.taken(r)), phase: this.game.phase, ready: [...this.ready], countdown: this.countdown, suited: this.suited }; }
+  seats() {
+    this.expire();
+    return { crew: this.crew(), taken: Object.keys(ROLES).filter(r => this.taken(r)), phase: this.game.phase, ready: [...this.ready], countdown: this.countdown, suited: this.suited,
+      players: this.players, seats: this.players ? PLAYERS[this.players] : null };
+  }
 
   // Lobby: the mission starts by itself once every role is held and every seat is ready.
   // With requireFullCrew off, any crew that is all ready will do (one developer testing alone).
@@ -79,14 +121,15 @@ export class Hub {
       if (game.phase !== 'lobby') game.reset();
       this.ready.clear(); this.countdown = null;
       game.start();
-    } else if (m.cmd === 'reset') { game.reset(); this.ready.clear(); this.countdown = null; }
+    } else if (m.cmd === 'reset') this.resetGame();
+    else if (m.cmd === 'clearplayers') this.clearPlayers();
     else if (m.cmd === 'kick' && typeof m.role === 'string') this.kick(m.role);
     else if (m.cmd === 'kickall') for (const r of Object.keys(ROLES)) this.kick(r);
     else if (m.cmd === 'mode') game.setMode(m.mode);
   }
   adminView(who) {
     const connections = [...this.clients].filter(c => c.open).map(c => ({ role: c.admin ? 'admin' : c.role, since: c.since }));
-    return { ...this.game.view('all', who), ready: [...this.ready], countdown: this.countdown, suited: this.suited, admin: { seats: this.seats(), connections, keyed: !!this.adminKey } };
+    return { ...this.game.view('all', who), ready: [...this.ready], countdown: this.countdown, suited: this.suited, players: this.players, admin: { seats: this.seats(), connections, keyed: !!this.adminKey } };
   }
 
   // True while the base is blacked out: no radio, no commands.
@@ -125,8 +168,12 @@ export class Hub {
         return;
       }
       if (!ROLES[m.role]) return;
+      this.expire();
+      const ok = this.seatOk(m.role);
+      if (ok !== true) { ws.send(JSON.stringify({ t: 'refused', role: m.role, why: ok, players: this.players })); return; }
       if (this.taken(m.role)) { ws.send(JSON.stringify({ t: 'taken', role: m.role })); return; }
       ws.role = m.role;
+      this.busy = this.now();
       return;
     }
     if (ws.admin) { if (m.t === 'admin') this.command(m); return; }
@@ -151,6 +198,14 @@ export class Hub {
       return;
     }
 
+    // Leaving the debrief: any seat, the astronaut's cuff included, takes the crew back to the lobby.
+    // Only from the results, so nobody scrubs a running mission by accident. The others keep their
+    // own copy of the results on screen until they leave too.
+    if (m.t === 'lobby') {
+      if (game.phase === 'results') { game.reset(); this.ready.clear(); this.countdown = null; }
+      return;
+    }
+
     if (ws.role === 'astronaut') {
       // h is the head height in metres: crouching is how you take cover beside the rover.
       if (m.t === 'pose' && [m.x, m.z, m.ry].every(Number.isFinite)) game.astro = { x: m.x, z: m.z, ry: m.ry, h: Number.isFinite(m.h) ? m.h : 1.65, inside: !!m.inside, door: typeof m.door === 'string' ? m.door.slice(0, 2) : null };
@@ -169,7 +224,7 @@ export class Hub {
     } else if (isControl(ws.role)) {
       if (m.t === 'mode') game.setMode(m.mode);
       else if (m.t === 'start' && !this.requireFullCrew) game.start(); // normally the crew starts it by readying up
-      else if (m.t === 'reset') { game.reset(); this.ready.clear(); this.countdown = null; }
+      else if (m.t === 'reset') this.resetGame();
       else if (m.t === 'ptt') this.sendTo(['astronaut'], { t: 'ptt', from: 'ops', on: !!m.on }, CFG.delayMs);
     }
   }
@@ -178,12 +233,13 @@ export class Hub {
   tick() {
     const now = Date.now();
     const dt = Math.min(0.5, (now - this.last) / 1000);
+    this.expire();
     this.lobbyTick(dt);
     this.game.tick(dt * this.timeScale);
     this.last = now;
-    const who = this.crew(), ready = [...this.ready], countdown = this.countdown, suited = this.suited;
+    const who = this.crew(), ready = [...this.ready], countdown = this.countdown, suited = this.suited, players = this.players;
     for (const c of this.live()) {
-      const msg = JSON.stringify({ ...this.game.view(c.role, who), ready, countdown, suited });
+      const msg = JSON.stringify({ ...this.game.view(c.role, who), ready, countdown, suited, players });
       this.later(c.role === 'astronaut' ? 0 : this.lag(), () => { if (c.open) c.send(msg); });
     }
     const admins = this.admins();

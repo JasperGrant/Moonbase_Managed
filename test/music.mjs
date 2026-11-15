@@ -83,6 +83,8 @@ try {
 
   step('a seat page carries on where the landing page was');
   const before = await status(home);
+  // A seat needs a game: choose 4 players, as the first visitor to the landing page would.
+  await fetch(BASE + '/players', { method: 'POST', body: JSON.stringify({ players: 4 }) });
   await home.click('.lb-panel[data-role="ops"]').catch(() => home.goto(BASE + '/ops'));
   await home.waitForURL(/\/ops$/, { timeout: 10000 });
   s = await until(home, s => s.length > 0);

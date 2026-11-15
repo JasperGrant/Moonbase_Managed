@@ -28,10 +28,12 @@ catch { console.error('playwright is not installed. Run: npm i -D playwright && 
 // ---------- the server, in this process ----------
 const hub = new Hub(undefined, { requireFullCrew: false });
 const g = hub.game;
-const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml' };
+const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.jpg': 'image/jpeg', '.glb': 'model/gltf-binary', '.png': 'image/png' };
 const server = http.createServer((req, res) => {
   let url = new URL(req.url, 'http://x').pathname;
   if (url === '/seats') return res.end(JSON.stringify(hub.seats()));
+  if (url === '/players' && req.method === 'POST') { let b = ''; req.on('data', d => { b += d; }); req.on('end', () => { let n = null; try { n = JSON.parse(b).players; } catch {} res.end(JSON.stringify(hub.choosePlayers(n))); }); return; }
+  if (url === '/') url = '/index.html';
   url = PAGES[url] || url;
   fs.readFile(path.join(WEB, url), (e, d) => { if (e) { res.writeHead(404).end(); return; } res.writeHead(200, { 'Content-Type': MIME[path.extname(url)] || 'application/octet-stream' }); res.end(d); });
 });
@@ -177,9 +179,20 @@ const lay = async (tool, inside, x, z, y = 0) => {
 const reachOk = async (what, limit = 0.8) => { const r = await P(() => { const r = window.vr.reach; window.vr.resetReach(); return r; }); check(r <= limit, `${what}: needed an arm ${r.toFixed(2)} m long (a real one is about 0.75 m)`); return r; };
 
 try {
+  // The landing page knows a headset (forced here with ?device=headset), says it will be the Astronaut,
+  // and after the 4-player choice goes straight to the Astronaut's page with no seat to pick.
+  step('0. the landing page, in a headset');
+  await page.goto(`http://localhost:${PORT}/?device=headset`);
+  await page.waitForSelector('#choose:not([hidden])', { timeout: 30000 });
+  check(await P(() => !document.getElementById('headsetNote').hidden), 'landing: no "you will be the Astronaut" note in a headset');
+  await page.click('[data-players="4"]');
+  await page.waitForURL(/\/astronaut\?device=headset$/, { timeout: 60000 }).catch(() => check(false, 'landing: choosing 4 players in a headset did not go to the Astronaut page: ' + page.url()));
+  check(hub.players === 4, 'landing: the 4-player choice did not reach the server');
+  check(await serverUntil(() => hub.crew().includes('astronaut'), 30), 'landing: the headset was not seated as the Astronaut');
+
   step('putting the headset on');
-  await page.goto(`http://localhost:${PORT}/astronaut`);
   await page.waitForTimeout(1200);
+  check(await P(() => window.moonbase.headset() && document.getElementById('deskBtn').hidden), 'astronaut: a headset should not be offered "Play on this screen"');
   await page.click('#radioBtn');
   await page.waitForFunction(() => /ENTER VR/i.test(document.querySelector('#vrSlot button')?.textContent || ''), null, { timeout: 15000, polling: 200 });
   await page.click('#vrSlot button');
@@ -194,8 +207,38 @@ try {
   await P(installVR);
   const start = await P(() => window.moonbase.controllers.map(c => c.userData.hand));
   check(start.includes('left') && start.includes('right'), 'the two controllers did not connect: ' + JSON.stringify(start));
+  // ---------- the status board: suited up, and Mission Ops calls GO ----------
+  step('0. the status board in the hall: suited, and Mission Ops calls GO');
+  const board = await P(async () => { await window.vr.frames(3); const mb = window.moonbase; return { seen: mb.board.visible, where: mb.where() }; });
+  check(board.seen && board.where === 'in', 'status board: the astronaut should start in the hall with the status board in front: ' + JSON.stringify(board));
+  check(await serverUntil(() => hub.suited, 3), 'status board: entering VR did not tell the server the astronaut is suited');
+  check(!hub.ready.has('astronaut'), 'status board: the astronaut should not be GO until Mission Ops calls it');
+  const opsSeat = { send() {}, close() {} }; // someone takes the Mission Ops seat on a laptop
+  hub.add(opsSeat); hub.message(opsSeat, JSON.stringify({ t: 'hello', role: 'ops' }), false);
+  await P(() => window.vr.haptics());
+  hub.message(opsSeat, JSON.stringify({ t: 'ready', for: 'astronaut', on: true }), false);
+  check(await serverUntil(() => hub.ready.has('astronaut'), 3), 'status board: Mission Ops could not call the astronaut GO');
+  const goFelt = await P(async () => { await window.vr.until(s => (s.ready || []).includes('astronaut'), 3); await window.vr.frames(3); return window.vr.haptics(); });
+  check(['left', 'right'].every(sd => goFelt.some(b => b.side === sd)), 'status board: no pulse in both hands when Mission Ops called GO: ' + JSON.stringify(goFelt));
+  if (SHOTS) {
+    const url = await P(async () => {
+      const mb = window.moonbase, R = mb.renderer, skip = R.render;
+      window.fakeXR.head(0, 1.7, 0, 0.05, 0);
+      R.render = R.realRender; await window.vr.frames(3);
+      const u = await mb.snap(); R.render = skip; window.fakeXR.head(0, 1.7, 0); return u;
+    });
+    fs.writeFileSync(path.join(OUT, 'vr-status-board.png'), Buffer.from(url.split(',')[1], 'base64'));
+  }
+  // Taking the headset off (the session is hidden) before the start: not suited, and the GO stands down.
+  await P(() => { const s = window.moonbase.renderer.xr.getSession(); s.visibilityState = 'hidden'; s.dispatchEvent(new Event('visibilitychange')); });
+  check(await serverUntil(() => !hub.suited && !hub.ready.has('astronaut'), 3), 'status board: taking the headset off should stand the GO down');
+  await P(() => { const s = window.moonbase.renderer.xr.getSession(); s.visibilityState = 'visible'; s.dispatchEvent(new Event('visibilitychange')); });
+  check(await serverUntil(() => hub.suited, 3), 'status board: putting the headset back on should say suited again');
+  hub.remove(opsSeat);
+
   g.start(); g.script = [];
   await P(() => window.vr.until(s => s.phase === 'run', 5));
+  check(await P(async () => { await window.vr.frames(3); return !window.moonbase.board.visible; }), 'status board: still up after the start');
   await P(() => window.vr.frames(5));
   check(await P(() => window.moonbase.fx.gloves.every(gl => gl.visible)), 'no gloves are drawn on the controllers');
 
@@ -862,39 +905,104 @@ try {
     });
   }
 
-  // ---------- 13. the EXIT button on the cuff ends the session ----------
-  // Last, because it ends the headset session. Read the cuff with bare hands, then put the right index
-  // fingertip on the button: a brush does nothing, holding it for a moment takes you back to the lobby.
-  step('13. the EXIT button on the cuff');
+  // ---------- 13. the end of a mission: the debrief, and EXIT on the cuff ----------
+  // Last, because it ends the headset session. The mission ends with the astronaut inside the habitat.
+  // The cuff tells them how it went (sound, haptics, a big tick or cross), and its EXIT button takes
+  // them back to the READY board without leaving the headset. In the lobby, EXIT ends the session.
+  step('13. the debrief, and EXIT on the cuff');
   await P(async () => { window.fakeXR.kind('left', 'hand'); window.fakeXR.kind('right', 'hand'); await window.vr.frames(8); });
   await stand(0, 9, 0, 0, 1.7);
-  // Line the right index fingertip up 6 cm out from the button's cap (the joints hang off the hand), so
-  // that one push of the hand along the face of the cuff puts it on the cap. Frames stop when the session
-  // ends, so every wait here gives up after a moment.
-  r = await P(async () => {
-    const v = window.vr, mb = window.moonbase, a = mb.arm;
+  // Frames stop when the session ends, so every wait here gives up after a moment. Sounds are logged.
+  await P(spawn => {
+    const v = window.vr, mb = window.moonbase, a = mb.arm, played = v.played = [];
+    const sfx = mb.radio.sfx.bind(mb.radio);
+    mb.radio.sfx = k => { played.push(k); sfx(k); };
     v.fr = n => mb.renderer.xr.isPresenting ? Promise.race([v.frames(n), v.sleep(3000)]) : v.sleep(50);
-    v.readCuff(); await v.fr(3);
     const tipJoint = () => mb.renderer.xr.getHand(v.index('right')).joints['index-finger-tip'];
     v.exitAt = () => { a.group.updateWorldMatrix(true, false); return a.EXIT_TOP.clone().applyMatrix4(a.group.matrixWorld); };
     v.exitOut = () => v.V().setFromMatrixColumn(a.group.matrixWorld, 2).normalize();
-    let at = v.where('right');
-    for (let k = 0; k < 4; k++) { at = at.add(v.exitAt().addScaledVector(v.exitOut(), 0.06).sub(v.wp(tipJoint()))); v.hand('right', at); await v.fr(2); }
-    v.push = async (inOut) => { v.hand('right', v.where('right').addScaledVector(v.exitOut(), -0.06 * inOut)); await v.fr(1); };
     v.tipGap = () => v.wp(tipJoint()).distanceTo(v.exitAt());
-    return { off: v.tipGap() - 0.06, presenting: mb.renderer.xr.isPresenting };
-  });
+    // Line the right index fingertip up 6 cm out from the button's cap (the joints hang off the hand), so
+    // that one push of the hand along the face of the cuff puts it on the cap.
+    v.lineUp = async () => {
+      v.readCuff(); await v.fr(3);
+      let at = v.where('right');
+      for (let k = 0; k < 4; k++) { at = at.add(v.exitAt().addScaledVector(v.exitOut(), 0.06).sub(v.wp(tipJoint()))); v.hand('right', at); await v.fr(2); }
+      return { off: v.tipGap() - 0.06, presenting: mb.renderer.xr.isPresenting };
+    };
+    v.push = async (inOut) => { v.hand('right', v.where('right').addScaledVector(v.exitOut(), -0.06 * inOut)); await v.fr(1); };
+    v.hold = async ms => { for (const end = Date.now() + ms; Date.now() < end && mb.renderer.xr.isPresenting;) { await v.sleep(100); await v.fr(1); } };
+    // Where the astronaut is and what the cuff says.
+    v.after = () => {
+      const head = v.wp(mb.camera), dir = mb.camera.getWorldDirection(v.V()).setY(0).normalize();
+      const toBoard = v.V(0, 0, -1); // the status board stands up the hall from the start point
+      const at = mb.interior.toLocal(head.x, head.z); // the start point is in room coordinates
+      return { presenting: mb.renderer.xr.isPresenting, phase: mb.state().phase, debrief: mb.debrief(), where: mb.where(), board: mb.board.visible,
+        facing: +dir.dot(toBoard).toFixed(2), fromSpawn: +Math.hypot(at.x - spawn.x, at.z - spawn.z).toFixed(2),
+        status: a.shown?.status, face: a.shown?.debrief, pressing: +a.pressing.toFixed(2),
+        result: mb.resultBoard.visible && +dir.dot(v.wp(mb.resultBoard).sub(head).setY(0).normalize()).toFixed(2),
+        // the board's front must face the head, or it is culled and nothing is seen
+        resultFront: +v.V(0, 0, 1).applyQuaternion(mb.resultBoard.getWorldQuaternion(new v.T.Quaternion())).dot(head.clone().sub(v.wp(mb.resultBoard)).setY(0).normalize()).toFixed(2) };
+    };
+  }, CFG.spawn);
+  const after = () => P(() => window.vr.after());
+  const endInside = async won => {
+    await P(async () => { window.moonbase.showPlace('in'); await window.vr.fr(3); window.vr.haptics(); window.vr.played.length = 0; });
+    g.end(won, 'test');
+    return P(async won => { const v = window.vr, mb = window.moonbase; for (let i = 0; i < 60 && !mb.debrief(); i++) await v.sleep(50); v.readCuff(); await v.sleep(300); await v.fr(3); return { ...v.after(), played: [...v.played], haptics: v.haptics() }; }, won);
+  };
+
+  // A loss, and Mission Ops sends the crew back to the lobby first: the astronaut is not moved, and the
+  // cuff keeps its cross until they press EXIT.
+  // Controllers for this one: bare hands have nothing to buzz.
+  await P(async () => { window.fakeXR.kind('left', 'controller'); window.fakeXR.kind('right', 'controller'); await window.vr.fr(8); });
+  r = await endInside(false);
+  await P(async () => { window.fakeXR.kind('left', 'hand'); window.fakeXR.kind('right', 'hand'); await window.vr.fr(8); });
+  check(r.debrief && r.face && r.status === 'lost' && r.where === 'in', 'debrief: a lost mission should put a cross on the cuff: ' + JSON.stringify(r));
+  check(r.resultFront > 0.9, 'debrief: the result board is turned away from the astronaut: ' + JSON.stringify(r.resultFront));
+  check(r.result > 0.9, 'debrief: a lost mission should put a MISSION FAILED board in front of the astronaut, in the world: ' + JSON.stringify(r.result));
+  check(r.played.includes('lost') && !r.played.includes('won'), 'debrief: no "lost" sting when the mission failed: ' + JSON.stringify(r.played));
+  check(r.haptics.some(h => h.ms >= 500), 'debrief: a lost mission should give a long pull on the hands: ' + JSON.stringify(r.haptics));
+  r = await P(async () => { const v = window.vr, seen = new Set(); for (let i = 0; i < 14; i++) { await v.sleep(100); await v.fr(1); seen.add(window.moonbase.arm.invited); } return [...seen]; });
+  check(r.includes(true) && r.includes(false), 'debrief: the EXIT lamp should blink amber: ' + JSON.stringify(r));
+  g.reset(); // as Mission Ops pressing BACK TO LOBBY
+  r = await P(async () => { const v = window.vr; await v.until(s => s.phase === 'lobby', 3); await v.fr(3); return v.after(); });
+  check(r.phase === 'lobby' && r.debrief && r.status === 'lost' && r.where === 'in', 'debrief: someone else going back to the lobby should not pull the astronaut out of their debrief: ' + JSON.stringify(r));
+  if (SHOTS) await draw('debrief-lost', async () => { window.vr.readCuff(); await window.vr.sleep(300); await window.vr.fr(3); });
+  if (SHOTS) await draw('result-board-lost', async () => { window.fakeXR.head(0, 1.7, 0, 0, 0); for (const s of ['left', 'right']) window.fakeXR.hand(s, [s === 'left' ? -0.22 : 0.22, 1.1, -0.1], [-0.7071, 0, 0, 0.7071]); await window.vr.fr(4); });
+  r = await P(() => window.vr.lineUp());
   check(Math.abs(r.off) < 0.015 && r.presenting, 'exit: could not line the fingertip up with the EXIT button: ' + JSON.stringify(r));
-  const exitState = () => P(() => ({ presenting: window.moonbase.renderer.xr.isPresenting, pressing: +window.moonbase.arm.pressing.toFixed(2), gap: +window.vr.tipGap().toFixed(3) }));
   // A brush: on the cap for one frame and straight off again.
-  r = await P(async () => { const v = window.vr; await v.push(1); const gap = v.tipGap(); await v.push(-1); await v.sleep(500); await v.fr(3); return { gap, presenting: window.moonbase.renderer.xr.isPresenting }; });
-  check(r.gap < 0.02 && r.presenting, 'exit: brushing the EXIT button for an instant ended the session (or the finger never reached it): ' + JSON.stringify(r));
-  r = await P(async () => { const v = window.vr; await v.push(1); await v.sleep(250); await v.fr(2); return null; });
-  r = await exitState();
+  r = await P(async () => { const v = window.vr; await v.push(1); const gap = v.tipGap(); await v.push(-1); await v.sleep(500); await v.fr(3); return { gap, ...v.after() }; });
+  check(r.gap < 0.02 && r.presenting && r.debrief, 'exit: brushing the EXIT button for an instant did something (or the finger never reached it): ' + JSON.stringify(r));
+  r = await P(async () => { const v = window.vr; await v.push(1); await v.hold(1500); return v.after(); });
+  check(r.presenting && !r.debrief && r.result === false && r.where === 'in' && r.board && r.fromSpawn < 0.2 && r.facing > 0.9, 'exit: in the debrief, EXIT should bring the astronaut back to the status board in the hall, still in the headset: ' + JSON.stringify(r));
+
+  // A win, and the astronaut leaves first: EXIT takes the whole crew to the lobby.
+  await P(async () => { const v = window.vr; await v.push(-1); await v.fr(3); });
+  g.start(); g.script = [];
+  await P(() => window.vr.until(s => s.phase === 'run', 5));
+  r = await endInside(true);
+  check(r.debrief && r.face && r.status === 'won', 'debrief: a won mission should put a tick on the cuff: ' + JSON.stringify(r));
+  check(r.result > 0.9, 'debrief: a won mission should put a MISSION COMPLETE board in front of the astronaut: ' + JSON.stringify(r.result));
+  check(r.played.includes('won'), 'debrief: no "won" sting when the mission was complete: ' + JSON.stringify(r.played));
+  if (SHOTS) await draw('debrief-won', async () => { window.vr.readCuff(); await window.vr.sleep(300); await window.vr.fr(3); });
+  r = await P(() => window.vr.lineUp());
+  check(Math.abs(r.off) < 0.015 && r.presenting, 'exit: could not line the fingertip up with the EXIT button (2): ' + JSON.stringify(r));
+  r = await P(async () => { const v = window.vr; await v.push(1); await v.hold(1200); return v.after(); });
+  check(g.phase === 'lobby', 'exit: EXIT in the debrief should take the crew back to the lobby, the server is in ' + g.phase);
+  check(r.presenting && !r.debrief && r.where === 'in' && r.board && r.fromSpawn < 0.2, 'exit: EXIT in the debrief should bring the astronaut back to the status board: ' + JSON.stringify(r));
+  // Keep holding: it does not go on to end the session.
+  r = await P(async () => { const v = window.vr; await v.hold(1500); return v.after(); });
+  check(r.presenting, 'exit: holding on after the debrief EXIT ended the headset session: ' + JSON.stringify(r));
+  if (SHOTS) await draw('board-last-mission', async () => { window.fakeXR.head(0, 1.7, 0, 0, 0); for (const s of ['left', 'right']) window.fakeXR.hand(s, [s === 'left' ? -0.22 : 0.22, 1.1, -0.1], [-0.7071, 0, 0, 0.7071]); await window.vr.fr(4); });
+  // In the lobby, with no debrief: lift the finger, press again, and the session ends.
+  r = await P(() => window.vr.lineUp());
+  r = await P(async () => { const v = window.vr; await v.push(1); await v.sleep(250); await v.fr(2); return { pressing: +window.moonbase.arm.pressing.toFixed(2), presenting: window.moonbase.renderer.xr.isPresenting }; });
   check(r.presenting && r.pressing > 0, 'exit: a fingertip held on the EXIT button should start to press it (cap down, lamp warming): ' + JSON.stringify(r));
-  await P(async () => { const v = window.vr; for (let k = 0; k < 10 && window.moonbase.renderer.xr.isPresenting; k++) { await v.sleep(150); await v.fr(1); } });
-  r = await exitState();
-  check(!r.presenting, 'exit: holding the EXIT button did not end the headset session: ' + JSON.stringify(r));
+  await P(() => window.vr.hold(1500));
+  r = await after();
+  check(!r.presenting, 'exit: in the lobby, holding the EXIT button did not end the headset session: ' + JSON.stringify(r));
   check(await P(() => !document.getElementById('gate').hidden), 'exit: the lobby did not come back after leaving the headset');
 } catch (e) {
   problems.push('vr: ' + e.message);

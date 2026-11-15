@@ -18,7 +18,8 @@
     "bake": "node scripts/bake-assets.mjs",
     "dev:cf": "wrangler dev",
     "deploy": "wrangler deploy",
-    "vendor": "node scripts/vendor-three.mjs"
+    "vendor": "node scripts/vendor-three.mjs",
+    "debrief": "node test/debrief.mjs"
   },
   "dependencies": {
     "ws": "^8.18.0"

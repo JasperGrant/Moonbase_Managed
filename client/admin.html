@@ -19,12 +19,13 @@
   <section class="grid">
     <div class="panel">
       <h3>Mission</h3>
-      <p class="brief">The referee's console. It is not a seat: nothing here counts toward the crew, and nothing is delayed. <b>Start now</b> skips the ready-up and starts (or restarts) the mission with whoever is in. <b>Reset</b> returns everyone to the lobby.</p>
+      <p class="brief">The referee's console. It is not a seat: nothing here counts toward the crew, and nothing is delayed. <b>Start now</b> skips the ready-up and starts (or restarts) the mission with whoever is in. <b>Reset</b> ends the game and sends everyone back to the landing page, where 2 or 4 players is chosen again.</p>
       <div class="row">
         <label>Mode <select id="mode"></select></label>
         <button id="start">Start now</button>
-        <button id="reset" class="ghost">Reset to lobby</button>
+        <button id="reset" class="ghost">Reset</button>
       </div>
+      <p class="hint"><span id="players"></span> <button id="clearplayers" class="ghost" hidden>Clear the choice</button></p>
       <p class="hint" id="countdown"></p>
     </div>
     <div class="panel">
