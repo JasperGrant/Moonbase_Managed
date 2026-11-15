@@ -153,6 +153,12 @@ function installHelpers() {
       look(eye, p);
       mb.sendPose(); // the page reports where it is ten times a second; frames are slow here, so do not wait for one
       await sleep(150);
+      // The game's walk rules may have nudged us meanwhile (off a chamber wall, onto the ground's height):
+      // aim again from where the head really is, and try the next spot if the view is now blocked.
+      mb.rig.updateMatrixWorld(true);
+      const head = mb.camera.getWorldPosition(new T.Vector3());
+      if (!clear(head, p, mesh)) continue;
+      look(head, p);
       return true;
     }
     return false;
