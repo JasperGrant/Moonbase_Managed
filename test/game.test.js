@@ -294,17 +294,22 @@ const kit = (g, tool) => {
   assert.equal(most, 1, 'never two faults at once');
   assert.equal(both, 0, 'and a shower never starts on top of a fault');
   assert.ok(faults >= 5 || showers >= 1, `free play: ${faults} faults, ${showers} showers`);
-  // The demo goes in a fixed order, a gap apart.
-  const d = new Game(rng); d.start(); d.oxygen = 1e6;
-  const seen = [];
-  for (let t = 0; t < CFG.roundSeconds * 10 - 20; t++) {
-    d.tick(0.1);
-    for (const k of Object.keys(d.faults)) if (!seen.includes(k)) seen.push(k);
-    if (d.meteor && !seen.includes('meteor')) seen.push('meteor');
-    if (Object.keys(d.faults).length > 1) assert.fail('two faults in the demo');
-    if (d.elapsed % 8 < 0.1) { d.faults = {}; if (d.quiet) d.next = Math.min(d.next, d.elapsed + 2); }
-  }
-  assert.deepEqual(seen.slice(0, 3), ['dust', 'wheel', 'meteor'], 'the demo breaks the same things in the same order');
+  // The demo goes in a fixed order, a gap apart. Rover faults are off unless the admin turns them on.
+  const demoOrder = roverFaults => {
+    const d = new Game(rng); d.setRoverFaults(roverFaults); d.start(); d.oxygen = 1e6;
+    const seen = [];
+    for (let t = 0; t < CFG.roundSeconds * 10 - 20; t++) {
+      d.tick(0.1);
+      for (const k of Object.keys(d.faults)) if (!seen.includes(k)) seen.push(k);
+      if (d.meteor && !seen.includes('meteor')) seen.push('meteor');
+      if (Object.keys(d.faults).length > 1) assert.fail('two faults in the demo');
+      if (d.elapsed % 8 < 0.1) { d.faults = {}; if (d.quiet) d.next = Math.min(d.next, d.elapsed + 2); }
+    }
+    return seen;
+  };
+  assert.equal(new Game(rng).roverFaults, false, 'rover faults are off by default');
+  assert.deepEqual(demoOrder(true).slice(0, 3), ['dust', 'wheel', 'meteor'], 'the demo breaks the same things in the same order');
+  assert.ok(!demoOrder(false).includes('wheel'), 'with rover faults off, no wheel ever breaks');
 }
 
 // ---------- meteors: a warning, cover, and nothing left broken ----------
@@ -570,6 +575,7 @@ const kit = (g, tool) => {
 // ---------- the demo mission, played well, is a win ----------
 {
   const g = new Game(rng);
+  g.setRoverFaults(true); // the whole demo, the wheel included
   g.start();
   g.oxygen = g.o2Max;
   // The crew's sample run, in one go: fetch every sample the manifest wants, from where the chart showed it.

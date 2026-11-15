@@ -17,6 +17,7 @@ export class Game {
     this.seq = 0;
     this.evn = 0;
     this.mode = 'demo';
+    this.roverFaults = false; // broken rover wheels: off unless the admin turns them on. Kept across missions, like the mode.
     this.reset();
   }
 
@@ -66,11 +67,18 @@ export class Game {
     return true;
   }
 
+  // The admin's switch for rover faults. Off mid-mission drops any wheel still to come in the script.
+  setRoverFaults(on) {
+    this.roverFaults = !!on;
+    this.script = this.script.filter(e => this.allowed(e.ev));
+  }
+  allowed(ev) { return ev !== 'wheel' || this.roverFaults; }
+
   start() {
     if (this.phase !== 'lobby') return false;
     this.reset();
     this.phase = 'run';
-    this.script = [...SCRIPTS[this.mode]];
+    this.script = SCRIPTS[this.mode].filter(e => this.allowed(e.ev));
     this.tools = this.layTools(); // after reset, so free play shuffles with this mission's dice
     const f = layField(this.rng, this.mode);
     this.samples = f.samples.map(s => ({ ...s, at: 'ground', free: false })); // free: cored, and loose to pick up
@@ -171,7 +179,7 @@ export class Game {
       if (this.script.length) this.fire(this.script.shift());
       else if (this.mode === 'free') {
         if (this.rng() < CFG.freeMeteorChance) this.fire({ ev: 'meteor' });
-        else this.fire({ ev: this.pick(Object.keys(FAULTS)) });
+        else this.fire({ ev: this.pick(Object.keys(FAULTS).filter(t => this.allowed(t))) });
       }
       if (this.quiet && this.next === Infinity && (this.script.length || this.mode === 'free')) this.next = now + CFG.faultGapSeconds;
     }
