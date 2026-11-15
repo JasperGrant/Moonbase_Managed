@@ -273,6 +273,32 @@ try {
   check(r.ring === PAL.green, 'two hands: the ring on a second tool should be green with the other hand full: ' + r.ring);
   check(r.held === 'welder' && r.parent === 'hand:left' && g.hands[1] === 'brush', 'two hands: the left trigger did not take the welder with the brush in the right: ' + JSON.stringify(r));
   check(!r.after && await serverUntil(() => g.hands[0] === null && g.tools.welder.at === 'loose', 3), 'two hands: releasing the trigger did not let go of the welder: ' + JSON.stringify(r));
+  // Pointing: the right trigger pulled at a tool out of reach (but within arm's length of the ray) takes it
+  // into that hand, not into the laptop's view fixed to the helmet, and the trigger let go drops it.
+  await P(() => window.vr.grip('right', false)); // the brush's grip from above is still closed
+  await kit(null);
+  await lay('welder', true, brushSpot.x + 0.15, brushSpot.z - 0.35);
+  r = await P(async () => {
+    const v = window.vr, mb = window.moonbase, X = window.fakeXR;
+    const from = v.wp(mb.camera).add(v.V(0.2, -0.45, -0.15).applyQuaternion(mb.rig.quaternion));
+    const to = v.wp(mb.fx.tools.welder);
+    v.hand('right', from, to.clone().sub(from)); await v.frames(3);
+    const gap = from.distanceTo(to);
+    X.trigger('right', true); await v.frames(3);
+    await v.until(s => s.hands[1] === 'welder', 3); await v.frames(20);
+    const hand = v.where('right'), tool = v.wp(mb.fx.tools.welder), head = v.wp(mb.camera);
+    const out = { gap: +gap.toFixed(2), held: v.holding('right')?.id || null, parent: v.parentOf('welder'), toHand: +tool.distanceTo(hand).toFixed(2), toHead: +tool.distanceTo(head).toFixed(2) };
+    // Move the hand: the tool goes with it.
+    const moved = hand.clone().add(v.V(0, 0.25, 0)); v.hand('right', moved); await v.frames(4);
+    out.followed = +v.wp(mb.fx.tools.welder).distanceTo(moved).toFixed(2);
+    X.trigger('right', false); await v.frames(3);
+    out.after = v.holding('right')?.id || null; out.state = mb.fx.toolState('welder').state;
+    return out;
+  });
+  check(r.gap > 0.4 && r.held === 'welder' && r.parent === 'hand:right', 'pointing: the right trigger at a tool out of reach did not put it in the right hand: ' + JSON.stringify(r));
+  check(r.toHand < 0.05 && r.followed < 0.05 && r.toHead > 0.3, 'pointing: the pointed-at tool is not in the hand (pinned to the helmet?): ' + JSON.stringify(r));
+  check(!r.after && r.state === 'loose' && await serverUntil(() => g.hands[1] === null && g.tools.welder.at === 'loose', 3), 'pointing: letting the trigger go did not drop the tool: ' + JSON.stringify(r));
+  await kit('brush');
   // Drop it: it falls to the floor, comes to rest, and the server (and Mission Ops' tool log) hears where.
   const dropAt = await P(async () => {
     const v = window.vr, mb = window.moonbase, at = v.wp(mb.camera).add(v.V(0.45, -0.6, -0.1).applyQuaternion(mb.rig.quaternion));

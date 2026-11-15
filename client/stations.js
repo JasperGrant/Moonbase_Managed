@@ -185,7 +185,8 @@ export function buildFixtures(THREE, world, { rig, camera, send, sfx = () => {},
     lay(id, 'hall', sp.x, sp.y, sp.z);
     // One invisible box per tool to point at: click a loose tool to take it.
     const [w, h, d, z] = g.userData.hit;
-    target(add(g, new THREE.BoxGeometry(w, h, d), ghost, 0, 0, z), () => T[id].state === 'loose' && running(), () => take(id, DESK));
+    // Pointed at from a headset (`hand` is the controller's index) it goes into that hand, not the laptop's view.
+    target(add(g, new THREE.BoxGeometry(w, h, d), ghost, 0, 0, z), () => T[id].state === 'loose' && running(), (pt, hand) => take(id, hand ?? DESK)).userData.tool = id;
   }
   const running = () => !!st.tools;
   const isTool = h => h?.kind === 'tool';
@@ -207,7 +208,8 @@ export function buildFixtures(THREE, world, { rig, camera, send, sfx = () => {},
     if (BIG(id) && !isDesk(i)) {
       // Heavy things are held where the hand closed on them, not snapped to it.
       const obj = handObj[i];
-      if (obj) { obj.updateWorldMatrix(true, false); g.updateWorldMatrix(true, false); held[i].grip = new THREE.Matrix4().copy(obj.matrixWorld).invert().multiply(g.matrixWorld); }
+      // Taken by pointing from further off, it swings into the hand instead of hanging out at arm's length.
+      if (obj && obj.getWorldPosition(a).distanceTo(g.getWorldPosition(b)) < GRAB_BIG * 1.5) { obj.updateWorldMatrix(true, false); g.updateWorldMatrix(true, false); held[i].grip = new THREE.Matrix4().copy(obj.matrixWorld).invert().multiply(g.matrixWorld); }
     }
     T[id].state = 'held'; T[id].took = clock(); T[id].trail.length = 0;
     rig.attach(g); // carried in the rig's frame, so it comes through the airlock with you
@@ -622,7 +624,8 @@ export function buildFixtures(THREE, world, { rig, camera, send, sfx = () => {},
     get refusedAt() { return refusedAt; },
     // Meshes that can be pointed at right now.
     targets: () => hits.filter(m => m.userData.enabled() && m.parent && isShown(m)),
-    click(mesh, point) { mesh.userData.click(point); },
+    // `hand`: the headset hand (0 or 1) that pointed, or undefined on a laptop.
+    click(mesh, point, hand) { mesh.userData.click(point, hand); },
 
     // Desk keys for the things you cannot point at, and Q to put the held tool down.
     patchSuit, pullCord,
