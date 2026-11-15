@@ -271,11 +271,18 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
     }
     return h * ramp(r, r0 + 3, r0 + 14); // the pad around the habitat and stations was graded
   }
+  // Under and round each airlock chamber the ground is dug a few centimetres below its grate floor
+  // (y = 0.004): the fine undulation used to come up through the floor in patches of regolith.
+  const chamberMid = Object.values(PLACES.doors).map(d => ({ x: d.x + Math.sin(d.ry) * CHAMBER.depth / 2, z: d.z + Math.cos(d.ry) * CHAMBER.depth / 2 }));
   function height(x, z) {
     const r = Math.hypot(x, z);
     let h = ramp(r, 18, 70) * demAt(x, z);                      // real ground, blended in past the pad
     h += (0.03 + 0.17 * ramp(r, 15, 40)) * N.fbm(x * 0.6, z * 0.6, 2, 3); // fine undulation
-    return h + craterHeight(x, z, r);
+    h += craterHeight(x, z, r);
+    let near = Infinity;
+    for (const c of chamberMid) near = Math.min(near, Math.hypot(x - c.x, z - c.z));
+    const k = ramp(near, 1.4, 3.0);
+    return h * k - 0.05 * (1 - k);
   }
   void craters;
   const SIZE = 1500, SEG = 230;

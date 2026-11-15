@@ -190,8 +190,10 @@ export function buildInterior(THREE, scene, { sfx = () => {} } = {}) {
     const { x, z, ry } = d.hall, c = Math.cos(ry), sn = Math.sin(ry);
     const at = (lx, lz) => [x + lx * c + lz * sn, z - lx * sn + lz * c]; // door-local (x across, z out of the hall) to room
     const fr = (w, h, dp, lx, y, lz) => { const [px, pz] = at(lx, lz); box(D, w, h, dp, px, y, pz, 0, ry, 0); };
-    fr(0.12, DOOR_H + 0.12, 0.1, -DOOR_W / 2 - 0.06, (DOOR_H + 0.12) / 2, -0.04); fr(0.12, DOOR_H + 0.12, 0.1, DOOR_W / 2 + 0.06, (DOOR_H + 0.12) / 2, -0.04);
-    fr(DOOR_W + 0.24, 0.14, 0.1, 0, DOOR_H + 0.07, -0.04);
+    // Wholly on the hall side of the wall (lz < -0.012): reaching into the chamber, it fought the chamber's
+    // own door collar and showed through round the hatch.
+    fr(0.12, DOOR_H + 0.12, 0.1, -DOOR_W / 2 - 0.06, (DOOR_H + 0.12) / 2, -0.064); fr(0.12, DOOR_H + 0.12, 0.1, DOOR_W / 2 + 0.06, (DOOR_H + 0.12) / 2, -0.064);
+    fr(DOOR_W + 0.24, 0.14, 0.1, 0, DOOR_H + 0.07, -0.064);
     for (const lx of [-DOOR_W / 2 - 0.2, DOOR_W / 2 + 0.2]) { const [a1, b1] = at(lx, -0.08); tube(G, [a1, 0.7, b1], [a1, 1.6, b1], 0.022); }
     const [sx, sz] = at(0, -0.62); box(Y, 1.3, 0.004, 0.1, sx, 0.004, sz, 0, ry, 0);
     for (const lx of [-0.62, 0.62]) { const [px, pz] = at(lx, -0.32); box(Y, 0.1, 0.004, 0.6, px, 0.004, pz, 0, ry, 0); }
