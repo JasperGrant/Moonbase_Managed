@@ -24,7 +24,7 @@ const clock = s => `${Math.floor(Math.max(0, s) / 60)}:${String(Math.floor(Math.
 const C = { bg: PAL.consoleDeep, line: PAL.rule, ink: PAL.ink, dim: PAL.inkDim, green: PAL.green, amber: PAL.amber, red: PAL.red, blue: PAL.blue };
 
 const BRIEF = {
-  ops: '<b>You are the voice, the kit and the tally.</b> The only voice the astronaut hears: hold SPACE to talk. The astronaut holds one thing in each hand (a tool or a rock sample): your HANDS panel shows which. The mission is to bring rock samples home. Your TOOL LOG says roughly where each tool lies; your SAMPLE LOG says what is in hand, in the tray and banked. When they are suited up, you call them GO.',
+  ops: '<b>You are the voice, the kit and the tally.</b> The only voice the astronaut hears: hold SPACE to talk. The astronaut holds one thing in each hand (a tool or a rock sample): your HANDS panel shows which. The mission is to bring rock samples home. Your TOOL LOG says roughly where each tool lies; your SAMPLE LOG says what is in hand, in the tray and banked, and where the core DRILL is: a rock only comes out of the ground through it. When they are suited up, you call them GO.',
   tech: '<b>You have the EYES and the WHEELS.</b> Two rovers, two cameras, both at once: the Scout on W A S D, the Hauler on the arrows. C and / switch each camera between first and third person. The astronaut rides the Hauler. You have no map: the Scientist does.',
   sci: '<b>You have the CHART and the FIELD GUIDE.</b> Only you know what a sample looks like. The chart sharpens wherever a rover drives. POWER and AIR say how bad a fault is.',
 };
@@ -69,7 +69,7 @@ $('run').innerHTML = [
     <button id="ptt">HOLD SPACE TO TALK TO THE ASTRONAUT</button>
     <h2>Hands</h2><canvas id="handsCv" class="pic" width="560" height="150"></canvas>
     <h2>Tool log</h2><canvas id="toolCv" class="pic" width="560" height="330"></canvas>
-    <h2>Sample log</h2><canvas id="sampleCv" class="pic" width="560" height="150"></canvas></div>`,
+    <h2>Sample log</h2><canvas id="sampleCv" class="pic" width="560" height="200"></canvas></div>`,
   has('tech') && `<div class="panel tech"><h3>Technician</h3>
     <div class="camwrap"><canvas id="cam"></canvas><canvas id="camHud"></canvas></div>
     <canvas id="techCv" class="pic" width="920" height="210"></canvas>
@@ -445,6 +445,16 @@ function drawSampleLog(s) {
   label(g, 'OF', 450, 80, 11, C.dim);
   nixie(g, String(t.wanted), 492, 78, 42);
   for (let i = 0; i < t.wanted; i++) jewel(g, 450 - (t.wanted - 1) * 14 + i * 28, 124, 8, 'green', i < t.banked);
+  // The core drill: where it is, and while it works, its countdown on five Nixie tubes like the ones on top of it.
+  const d = s.drill || { at: 'rover', left: 0 };
+  g.strokeStyle = PAL.rule; g.lineWidth = 1; g.beginPath(); g.moveTo(16, 146); g.lineTo(W - 16, 146); g.stroke();
+  drawTool(g, 'drill', 46, 174, 40, C.ink);
+  const working = d.at === 'site' && d.left > 0, ready = d.at === 'site' && !working && d.cored;
+  jewel(g, 92, 174, 8, working ? 'amber' : 'green', d.at === 'hand' || ready || (working && Math.floor(performance.now() / 500) % 2 === 0)); // blinks at 1 Hz while it works
+  label(g, 'DRILL', 110, 163, 12, C.dim, 'left');
+  const where = { rover: 'ON THE HAULER', hand: 'IN BOTH HANDS', ground: 'STANDING DOWN', site: working ? 'DRILLING' : ready ? 'CORE READY' : 'ON A ROCK' }[d.at] || '';
+  label(g, where, 110, 184, 15, C.ink, 'left');
+  for (let i = 0; i < 5; i++) nixie(g, String(5 - i), 400 + i * 30, 174, 34, { lit: working && 5 - i <= Math.ceil(d.left) });
 }
 
 // ---------- Scientist: the survey chart ----------
