@@ -18,6 +18,8 @@ export class Hub {
     this.requireFullCrew = opts.requireFullCrew ?? CFG.lobby.requireFullCrew;
     this.ready = new Set();   // seats that pressed Ready, by role as held ('all' in 2-player mode)
     this.countdown = null;    // seconds until the mission starts, while everyone is ready
+    this.suited = false;      // the astronaut has the headset on (or is playing on the screen): Ops can call them GO
+    this.timeScale = opts.timeScale || 1; // below 1, the mission clock runs slow (the smoke test on a slow machine)
     this.adminKey = opts.adminKey || null; // when set, /admin needs this key (ADMIN_KEY in the environment)
     this.now = opts.now || Date.now;        // a clock the tests can move
     this.players = null;                    // 2 or 4, chosen once per game on the landing page; null until then
@@ -72,7 +74,7 @@ export class Hub {
   // For the landing page: which seats are free right now.
   seats() {
     this.expire();
-    return { crew: this.crew(), taken: Object.keys(ROLES).filter(r => this.taken(r)), phase: this.game.phase, ready: [...this.ready], countdown: this.countdown,
+    return { crew: this.crew(), taken: Object.keys(ROLES).filter(r => this.taken(r)), phase: this.game.phase, ready: [...this.ready], countdown: this.countdown, suited: this.suited,
       players: this.players, seats: this.players ? PLAYERS[this.players] : null };
   }
 
@@ -95,6 +97,7 @@ export class Hub {
     client.open = false;
     this.clients.delete(client);
     if (client.role && !this.crew().includes(client.role)) this.ready.delete(client.role); // their panel goes grey
+    if (!this.crew().includes('astronaut')) { this.suited = false; this.ready.delete('astronaut'); }
     if (!this.allReady()) this.countdown = null;
   }
 
@@ -126,7 +129,7 @@ export class Hub {
   }
   adminView(who) {
     const connections = [...this.clients].filter(c => c.open).map(c => ({ role: c.admin ? 'admin' : c.role, since: c.since }));
-    return { ...this.game.view('all', who), ready: [...this.ready], countdown: this.countdown, players: this.players, admin: { seats: this.seats(), connections, keyed: !!this.adminKey } };
+    return { ...this.game.view('all', who), ready: [...this.ready], countdown: this.countdown, suited: this.suited, players: this.players, admin: { seats: this.seats(), connections, keyed: !!this.adminKey } };
   }
 
   // True while the base is blacked out: no radio, no commands.
@@ -176,9 +179,21 @@ export class Hub {
     if (ws.admin) { if (m.t === 'admin') this.command(m); return; }
     if (!ws.role) return;
 
+    // The astronaut does not ready themselves: Mission Ops calls them GO, once they are suited up
+    // (the headset is on). Taking the headset off stands them down again.
+    if (m.t === 'suited' && ws.role === 'astronaut') {
+      this.suited = !!m.on;
+      if (!this.suited) { this.ready.delete('astronaut'); if (!this.allReady()) this.countdown = null; }
+      return;
+    }
     if (m.t === 'ready') {
       if (game.phase !== 'lobby') return;
-      if (m.on) this.ready.add(ws.role); else this.ready.delete(ws.role);
+      let role = ws.role;
+      if (m.for === 'astronaut') {
+        if (!isControl(ws.role) || !this.crew().includes('astronaut') || (m.on && !this.suited)) return;
+        role = 'astronaut';
+      } else if (ws.role === 'astronaut') return;
+      if (m.on) this.ready.add(role); else this.ready.delete(role);
       if (!this.allReady()) this.countdown = null;
       return;
     }
@@ -193,7 +208,7 @@ export class Hub {
 
     if (ws.role === 'astronaut') {
       // h is the head height in metres: crouching is how you take cover beside the rover.
-      if (m.t === 'pose' && [m.x, m.z, m.ry].every(Number.isFinite)) game.astro = { x: m.x, z: m.z, ry: m.ry, h: Number.isFinite(m.h) ? m.h : 1.65 };
+      if (m.t === 'pose' && [m.x, m.z, m.ry].every(Number.isFinite)) game.astro = { x: m.x, z: m.z, ry: m.ry, h: Number.isFinite(m.h) ? m.h : 1.65, inside: !!m.inside, door: typeof m.door === 'string' ? m.door.slice(0, 2) : null };
       else if (m.t === 'do') game.act(m.a);
       else if (m.t === 'ptt' && (!m.on || !this.silent())) this.sendTo(['ops', 'all'], { t: 'ptt', from: 'astronaut', on: !!m.on }, CFG.delayMs);
       return;
@@ -220,11 +235,11 @@ export class Hub {
     const dt = Math.min(0.5, (now - this.last) / 1000);
     this.expire();
     this.lobbyTick(dt);
-    this.game.tick(dt);
+    this.game.tick(dt * this.timeScale);
     this.last = now;
-    const who = this.crew(), ready = [...this.ready], countdown = this.countdown, players = this.players;
+    const who = this.crew(), ready = [...this.ready], countdown = this.countdown, suited = this.suited, players = this.players;
     for (const c of this.live()) {
-      const msg = JSON.stringify({ ...this.game.view(c.role, who), ready, countdown, players });
+      const msg = JSON.stringify({ ...this.game.view(c.role, who), ready, countdown, suited, players });
       this.later(c.role === 'astronaut' ? 0 : this.lag(), () => { if (c.open) c.send(msg); });
     }
     const admins = this.admins();

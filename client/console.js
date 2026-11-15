@@ -5,7 +5,6 @@
 import { connect } from '/net.js';
 import { Radio } from '/voice.js';
 import { CFG, TOOLS, PLACES, MODES, ROLES, SOCKET_SHAPES } from '/shared/config.js';
-import { beltWeight } from '/shared/rules.js';
 import { drawTool, drawShape } from '/shared/icons.js';
 import { seatTaken, seatRefused, kicked } from '/seat.js';
 import { createLobby } from '/lobby.js';
@@ -24,7 +23,7 @@ const clock = s => `${Math.floor(Math.max(0, s) / 60)}:${String(Math.floor(Math.
 const C = { bg: PAL.consoleDeep, line: PAL.rule, ink: PAL.ink, dim: PAL.inkDim, green: PAL.green, amber: PAL.amber, red: PAL.red, blue: PAL.blue };
 
 const BRIEF = {
-  ops: '<b>You are the only voice the astronaut hears.</b> Hold SPACE to talk; it takes 1.3 s to reach the Moon. You see what is on their belt and what is left in the locker. Decide what they carry and what gets fixed first.',
+  ops: '<b>You are the only voice the astronaut hears.</b> Hold SPACE to talk; it takes 1.3 s to reach the Moon. The astronaut holds one tool at a time. Your TOOL LOG says roughly where each one lies: tell them where to look, and what to fix first. When they are suited up, you call them GO.',
   tech: '<b>You know WHERE and WHEN.</b> The radar map and the rover camera. The radar is on the rover. Arrow keys drive.',
   sci: '<b>You know WHAT is wrong.</b> Two screens of gauges: POWER and AIR. Read them and work out the cause.',
 };
@@ -50,6 +49,8 @@ const firstMine = role === 'all' ? 'ops' : role;
 const lobby = createLobby($('lobbyView'), {
   mine: role,
   onReady: on => { radio?.init(); net.send({ t: 'ready', on }); },
+  // Mission Ops (or the one player at all three consoles) calls the astronaut GO.
+  onReadyFor: has('ops') ? (who, on) => { radio?.init(); net.send({ t: 'ready', for: who, on }); } : null,
   extraEl: r => {
     if (r !== firstMine) return null;
     const b = document.createElement('button');
@@ -64,8 +65,7 @@ const tabs = (id, names) => `<div class="tabs" data-tabs="${id}">${names.map((n,
 $('run').innerHTML = [
   has('ops') && `<div class="panel"><h3>Mission Ops</h3>
     <button id="ptt">HOLD SPACE TO TALK TO THE ASTRONAUT</button>
-    <h2>Belt</h2><canvas id="beltCv" class="pic" width="560" height="170"></canvas>
-    <h2>Locker</h2><canvas id="lockerCv" class="pic" width="560" height="150"></canvas></div>`,
+    <h2>Tool log</h2><canvas id="toolCv" class="pic" width="560" height="330"></canvas></div>`,
   has('tech') && `<div class="panel"><h3>Technician</h3>
     ${tabs('tech', ['RADAR', 'ROVER CAM'])}
     <div data-pane="tech0"><canvas id="map" width="460" height="460"></canvas></div>
@@ -266,40 +266,25 @@ function dial(g, x, y, r, value, max, name, { redBelow = 0, redAbove = Infinity,
   plate(g, name, x, y + r * 0.8, r * 1.4, r * 0.11);
 }
 
-// ---------- Mission Ops: the belt and the locker ----------
+// ---------- Mission Ops: the tool log ----------
+// One row per tool: its silhouette, a jewel lamp (green in the astronaut's hand, amber lying somewhere,
+// dark used up), and where it lies, engraved. Ops knows roughly where; the astronaut has to look.
 function drawKit(s) {
-  {
-    const cv = $('beltCv'), g = cv.getContext('2d'), W = cv.width, H = cv.height;
-    panelBg(g, W, H);
-    const used = beltWeight(s.belt), u = 100, gap = 12, x0 = (W - (CFG.beltCapacity * (u + gap) - gap)) / 2, y0 = 14;
-    for (let i = 0; i < CFG.beltCapacity; i++) { // a recessed bay per weight unit, a lamp under each
-      const x = x0 + i * (u + gap);
-      g.fillStyle = PAL.bakelite; g.fillRect(x, y0, u, u);
-      g.strokeStyle = PAL.bezel; g.lineWidth = 2; g.strokeRect(x + 1, y0 + 1, u - 2, u - 2);
-      jewel(g, x + u / 2, y0 + u + 14, 6, 'green', i < used);
-    }
-    let slot = 0;
-    for (const t of s.belt) { // a heavy tool is drawn across the bays it fills
-      const w = TOOLS[t].weight, span = w * (u + gap) - gap;
-      drawTool(g, t, x0 + slot * (u + gap) + span / 2, y0 + u / 2, u - 24, C.ink);
-      slot += w;
-    }
-    nixie(g, `${used}/${CFG.beltCapacity}`, W - 52, H - 18, 18);
-    jewel(g, 30, H - 18, 7, 'amber', used >= CFG.beltCapacity);
-    label(g, 'FULL', 52, H - 18, 12, C.dim, 'left');
-  }
-  {
-    const cv = $('lockerCv'), g = cv.getContext('2d'), W = cv.width, H = cv.height;
-    panelBg(g, W, H);
-    const ids = Object.keys(TOOLS), cell = W / ids.length;
-    ids.forEach((t, i) => {
-      const here = s.locker.includes(t), cx = cell * i + cell / 2;
-      g.globalAlpha = here ? 1 : 0.18;
-      drawTool(g, t, cx, 56, 78, C.ink);
-      g.globalAlpha = 1;
-      for (let k = 0; k < TOOLS[t].weight; k++) jewel(g, cx - (TOOLS[t].weight - 1) * 9 + k * 18, 124, 5, 'amber', here); // one lamp per weight unit
-    });
-  }
+  const cv = $('toolCv'), g = cv.getContext('2d'), W = cv.width, H = cv.height;
+  panelBg(g, W, H);
+  const ids = Object.keys(TOOLS), row = (H - 20) / ids.length;
+  ids.forEach((t, i) => {
+    const y = 10 + row * i + row / 2, info = s.tools?.[t], at = info?.at || 'gone';
+    if (i) { g.strokeStyle = PAL.rule; g.lineWidth = 1; g.beginPath(); g.moveTo(16, y - row / 2); g.lineTo(W - 16, y - row / 2); g.stroke(); }
+    g.fillStyle = PAL.bakelite; g.fillRect(18, y - row / 2 + 6, row - 12, row - 12);
+    g.globalAlpha = at === 'gone' ? 0.25 : 1;
+    drawTool(g, t, 18 + (row - 12) / 2, y, row - 22, C.ink);
+    g.globalAlpha = 1;
+    jewel(g, row + 34, y, 8, at === 'hand' ? 'green' : 'amber', at !== 'gone');
+    label(g, TOOLS[t].name.toUpperCase(), row + 56, y - 11, 13, C.dim, 'left');
+    const where = at === 'hand' ? 'IN HAND' : at === 'gone' ? (t === 'tire' ? 'FITTED' : 'USED') : info.area || '';
+    label(g, where, row + 56, y + 11, 17, at === 'gone' ? C.dim : C.ink, 'left');
+  });
 }
 
 // ---------- Technician: the radar scope ----------
@@ -336,16 +321,18 @@ function drawMap(s) {
     g.arc(W / 2, W / 2, R, sweep - (i + 1) * 0.03, sweep - i * 0.03); g.closePath(); g.fill();
   }
   label(g, 'N', W / 2, 26, 12, phos(0.7));
-  // The base, in phosphor outline: habitat, canopy, and the places the astronaut works.
-  const cn = PLACES.canopy;
+  // The base, in phosphor outline: the habitat, its side modules, its four airlocks (inside is cover),
+  // and the places the astronaut works.
   g.strokeStyle = phos(0.7); g.lineWidth = 1.5;
-  g.strokeRect(X(cn.x0), Y(cn.z0), (cn.x1 - cn.x0) * k, (cn.z1 - cn.z0) * k);
-  for (let i = 1; i < 5; i++) { g.beginPath(); g.moveTo(X(cn.x0) + i * (cn.x1 - cn.x0) * k / 5, Y(cn.z0)); g.lineTo(X(cn.x0) + (i - 1) * (cn.x1 - cn.x0) * k / 5, Y(cn.z1)); g.stroke(); }
   g.beginPath(); g.arc(X(0), Y(0), CFG.habRadius * k, 0, 7); g.stroke();
+  g.strokeRect(X(2.2), Y(-1.45), 5.4 * k, 2.9 * k); g.strokeRect(X(-4.6), Y(-1.35), 2.4 * k, 2.7 * k);
   label(g, 'HAB', X(0), Y(0) + 3, 10, phos(0.9));
-  label(g, 'COVER', X(0), Y(cn.z1) + 10, 9, phos(0.6));
+  for (const [id, d] of Object.entries(PLACES.doors)) { // a short tick out from each hatch, and its letter
+    const ox = Math.sin(d.ry), oz = Math.cos(d.ry);
+    g.beginPath(); g.moveTo(X(d.x), Y(d.z)); g.lineTo(X(d.x + ox * 1.3), Y(d.z + oz * 1.3)); g.stroke();
+    label(g, id, X(d.x + ox * 2.1), Y(d.z + oz * 2.1) + 3, 9, phos(0.75));
+  }
   const mark = (p, name, w = 10, h = 10) => { g.strokeStyle = phos(0.9); g.strokeRect(X(p.x) - w / 2, Y(p.z) - h / 2, w, h); if (name) label(g, name, X(p.x), Y(p.z) - h / 2 - 9, 9, phos(0.75)); };
-  mark(PLACES.locker, 'LOCKER');
   g.fillStyle = phos(0.9); g.fillRect(X(0) - 4, Y(-1.5) - 4, 8, 8); // the switchboard is inside the habitat
   label(g, 'BOARD', X(0), Y(0) - CFG.habRadius * k - 9, 9, phos(0.75));
   PLACES.panels.forEach((p, i) => mark(p, i === 0 ? 'SOLAR' : '', 6, 22));
@@ -357,7 +344,9 @@ function drawMap(s) {
     g.beginPath(); g.moveTo(0, -9); g.lineTo(6, 7); g.lineTo(-6, 7); g.closePath(); g.fill(); g.restore();
   };
   blip(s.rover.x, s.rover.z, s.rover.ry, C.amber, 'ROVER');
-  if (s.astro && s.crew.includes('astronaut')) blip(s.astro.x, s.astro.z, s.astro.ry, C.blue, 'ASTRONAUT');
+  if (s.astro && s.crew.includes('astronaut')) blip(s.astro.x, s.astro.z, s.astro.ry, C.blue, s.astro.inside ? 'INSIDE' : 'ASTRONAUT');
+  // Tools left out on the Moon: tiny amber dots, so one dropped in the field can be found again.
+  for (const t of Object.values(s.tools || {})) if (t.at === 'loose' && !t.inside) { g.fillStyle = C.amber; g.beginPath(); g.arc(X(t.x), Y(t.z), 2.5, 0, 7); g.fill(); }
   // Meteors: amber blips closing on the base and a ring that shrinks to nothing at the first impact.
   if (s.meteor) {
     const m = s.meteor, f = m.eta / CFG.meteorWarnSeconds;

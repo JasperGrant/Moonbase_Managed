@@ -82,8 +82,8 @@ try {
   await astro.waitForFunction(() => !window.moonbase.debrief(), null, POLL);
   await astro.keyboard.up('x');
   await astro.waitForTimeout(800); // the fade
-  r = await astro.evaluate(() => { const mb = window.moonbase; return { phase: mb.state().phase, board: mb.resultBoard.visible, room: mb.room.group.visible, where: mb.where() }; });
-  check(r.phase === 'lobby' && !r.board && r.room && r.where === 'out', 'astronaut: holding X should take everyone to the lobby and the astronaut to the waiting room: ' + JSON.stringify(r));
+  r = await astro.evaluate(() => { const mb = window.moonbase; return { phase: mb.state().phase, board: mb.resultBoard.visible, room: mb.board.visible, where: mb.where() }; });
+  check(r.phase === 'lobby' && !r.board && r.room && r.where === 'in', 'astronaut: holding X should take everyone to the lobby and the astronaut back to the status board in the hall: ' + JSON.stringify(r));
   await ctl.waitForFunction(() => document.getElementById('crewLamp')?.classList.contains('on'), null, POLL);
   check(await resultsShown(), 'console: its results were pulled away when the astronaut went back to the lobby');
   await ctl.click('#results [data-lobby]');
@@ -107,8 +107,8 @@ try {
   await astro.waitForFunction(() => !window.moonbase.debrief(), null, POLL);
   await astro.keyboard.up('x');
   await astro.waitForTimeout(800);
-  r = await astro.evaluate(() => ({ phase: window.moonbase.state().phase, room: window.moonbase.room.group.visible, board: window.moonbase.resultBoard.visible }));
-  check(r.phase === 'lobby' && r.room && !r.board, 'astronaut: EXIT after the others have left should still bring them to the waiting room: ' + JSON.stringify(r));
+  r = await astro.evaluate(() => ({ phase: window.moonbase.state().phase, room: window.moonbase.board.visible, board: window.moonbase.resultBoard.visible }));
+  check(r.phase === 'lobby' && r.room && !r.board, 'astronaut: EXIT after the others have left should still bring them back to the status board: ' + JSON.stringify(r));
   // And the next mission starts clean: no debrief carried over.
   g.start(); g.script = [];
   await astro.waitForFunction(() => window.moonbase.state().phase === 'run', null, POLL);

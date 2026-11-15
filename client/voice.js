@@ -133,7 +133,7 @@ export class Radio {
     const c = this.ctx, o = c.createOscillator(), g = c.createGain(), t = c.currentTime;
     o.type = type; o.frequency.setValueAtTime(f0, t); o.frequency.exponentialRampToValueAtTime(f1, t + dur);
     g.gain.setValueAtTime(vol, t); g.gain.linearRampToValueAtTime(0, t + dur);
-    o.connect(g).connect(c.destination);
+    o.connect(g).connect(this.out || c.destination);
     o.start(t); o.stop(t + dur + 0.02);
   }
 
@@ -145,7 +145,7 @@ export class Radio {
     g.gain.setValueAtTime(vol, t);
     g.gain.setValueAtTime(vol, t + dur * 0.8);
     g.gain.linearRampToValueAtTime(0, t + dur);
-    o.connect(g).connect(c.destination);
+    o.connect(g).connect(this.out || c.destination);
     o.start(t); o.stop(t + dur + 0.02);
   }
 
@@ -158,7 +158,7 @@ export class Radio {
     const t = c.currentTime + at;
     g.gain.setValueAtTime(vol, t);
     g.gain.exponentialRampToValueAtTime(0.001, t + dur);
-    n.connect(f).connect(g).connect(c.destination);
+    n.connect(f).connect(g).connect(this.out || c.destination);
     n.start(t, Math.random()); n.stop(t + dur + 0.02);
   }
 
@@ -186,8 +186,21 @@ export class Radio {
     }
   }
 
+  // A game sound that comes from a place in the world (pos: {x, y, z}), at `gain` (0 to 1).
+  sfxAt(kind, pos, gain = 1, opts) {
+    if (!this.ready) return;
+    const c = this.ctx, p = c.createPanner(), g = c.createGain();
+    p.panningModel = 'HRTF'; p.distanceModel = 'inverse'; p.refDistance = 1; p.rolloffFactor = 1.2;
+    if (p.positionX) { p.positionX.value = pos.x; p.positionY.value = pos.y; p.positionZ.value = pos.z; } else p.setPosition(pos.x, pos.y, pos.z);
+    g.gain.value = gain;
+    g.connect(p).connect(c.destination);
+    this.out = g;
+    try { this.sfx(kind, opts); } finally { this.out = null; }
+    setTimeout(() => { g.disconnect(); p.disconnect(); }, 3000);
+  }
+
   // Game sounds, made from tones and noise so there are no audio files to load.
-  sfx(kind) {
+  sfx(kind, opts = {}) {
     if (kind === 'click') this.tone(900, 0.04, 0.06, 'square');
     if (kind === 'alarm') { this.tone(880, 0.15, 0.1, 'square'); this.tone(660, 0.15, 0.1, 'square', 0.18); this.tone(880, 0.15, 0.1, 'square', 0.36); }
     if (kind === 'solve') { this.tone(660, 0.1, 0.1); this.tone(880, 0.1, 0.1, 'sine', 0.1); this.tone(1320, 0.2, 0.1, 'sine', 0.2); }
@@ -211,6 +224,11 @@ export class Radio {
     if (kind === 'clang') { this.tone(310, 0.6, 0.1, 'triangle'); this.tone(463, 0.45, 0.06, 'triangle'); this.burst(0.1, 0.2, 'lowpass', 400); }
     if (kind === 'snap') { this.burst(0.06, 0.25, 'highpass', 2500); this.tone(90, 0.12, 0.1, 'square', 0.02); }
     if (kind === 'spark') { this.burst(0.05 + Math.random() * 0.12, 0.12, 'highpass', 2200 + Math.random() * 1500); }
+    // The physical base: tools landing, hatches swinging, air coming back, Mission Control's GO.
+    if (kind === 'thud') { const m = opts.mass || 1; this.burst(0.09 + Math.min(0.25, m * 0.01), 0.3, 'lowpass', 900 / Math.sqrt(m) + 120); this.tone(260 / Math.sqrt(m) + 60, 0.08, 0.08, 'triangle'); }
+    if (kind === 'creak') this.sweep(220, 150, 0.8, 0.025, 'triangle');
+    if (kind === 'repress') { this.burst(1.2, 0.18, 'bandpass', 1400); this.burst(1.4, 0.1, 'lowpass', 400, 0.1); }
+    if (kind === 'go') { this.tone(587, 0.12, 0.08); this.tone(880, 0.25, 0.08, 'sine', 0.13); }
     if (kind === 'hatch') { this.sweep(150, 60, 0.35, 0.12, 'square'); this.tone(55, 0.25, 0.18, 'sine', 0.3); }
     if (kind === 'end' || kind === 'won') { this.tone(523, 0.2, 0.1); this.tone(659, 0.2, 0.1, 'sine', 0.2); this.tone(784, 0.4, 0.1, 'sine', 0.4); }
     // A loss: the same three notes falling, minor, slower and lower.

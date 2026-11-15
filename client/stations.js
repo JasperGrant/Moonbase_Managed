@@ -1,73 +1,90 @@
-// The astronaut's hands: the tools, the belt, and every repair.
+// The astronaut's hands: the tools, and every repair.
 //
 // There are two ways to do each thing, and both end in the same message to the server:
-//   - physical (VR): grab a tool off the belt and bring it to the work. Sweep the brush over the
-//     dust, hold the welder on the crack, push a plug into a socket, pull the wheel off its hub.
+//   - physical (VR): find a tool lying in the hall, pick it up and bring it to the work. Sweep the brush
+//     over the dust, hold the welder on the crack, push a plug into a socket, pull the wheel off its hub.
 //   - pointing (mouse, or a VR trigger at arm's length): click the thing. This is the fallback
 //     that lets the game be tested, and played, without a headset.
 // The server decides what counted (server/game.js). Nothing here changes the game by itself.
-import { FAULTS } from '/shared/config.js';
-import { fits } from '/shared/rules.js';
+//
+// The tools are physics bodies (client/physics.js): they lie where they were left, fall, tumble and
+// can be thrown. The astronaut holds one at a time, in either hand; the other hand stays free for work.
+import { FAULTS, TOOLS, PLACES, CFG } from '/shared/config.js';
 import { drawTool } from '/shared/icons.js';
 import { PAL } from '/shared/palette.js';
-import { loadGlove, loadPeriod } from '/shared/assets.js';
+import { loadGlove, loadPeriod, MODELS } from '/shared/assets.js';
+import { HALL, COR, SOLIDS, ROOM } from '/interior.js';
+import { CHAMBER } from '/airlock.js';
+import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 
 // Everything here is a guess until it has been tried on a head: tune these first.
-const GRAB = 0.24;          // metres: how close a hand must be to grab a tool on the belt
-const GRAB_RACK = 0.3;      // ... a hand tool on the rack (the tire and the generator: 0.5)
+const GRAB = 0.2;           // metres: how close a hand must be to a loose tool to take it...
+const GRAB_BIG = 0.35;      // ...the tire and the generator
+const GRAB_CORD = 0.14;     // ... the generator's pull handle
 const GRAB_PLUG = 0.18;     // ... a loose cable plug
 const SOCKET_SNAP = 0.11;   // metres: a held plug this close to a socket goes in (sockets are 0.25 apart)
 const WHEEL_PULL = 0.3;     // metres the broken wheel must be pulled before it comes off
 const CORD_PULL = 0.4;      // metres of generator cord
 const TIRE_FIT = 0.25;      // metres from the tire's centre to the bare hub
 const PATCH_RANGE = 0.13;   // metres from the patch to the leak
-const BELT_AT = 0.63;       // the belt rides at this fraction of your standing eye height (your hips)...
-const BELT_DROP = 0.45;     // ...and never closer under your eyes than this, so it sinks when you crouch right down
-const BELT_R = 0.3;         // metres from the body to a belt slot
-const BELT_SLOT = { gen: -1.3, brush: -0.65, patch: 0, welder: 0.65, tire: 1.3 }; // radians round the waist, left to right
-const BELT_SCALE = { brush: 0.8, patch: 1, welder: 1, tire: 0.36, gen: 0.42 };
-// How each tool hangs on the rack, so you see its side and not its end: [x, y] rotation in radians.
-const RACK_TURN = { brush: [Math.PI / 2, 0], welder: [0, Math.PI / 2], tire: [0, Math.PI / 2] };
-const RACK_SCALE = { brush: 1.3, patch: 1.3 }; // the welder is the life-size NASA tool
 const WELD_DWELL = 0.4;     // seconds the tip must stay on one point of the crack
 const WELD_RANGE = 0.12;    // metres from the tip to that point
-// Where a held tool sits in the hand. The tire is carried by its rim, so the wheel is out in front.
-const IN_HAND = { tire: { z: -0.36, scale: 0.8 } };
+const HEAVY_LAG = 9;        // 1/s: how fast the tire and the generator catch up with the hand (they swing)
+const DESK_HOLD = [0.24, -0.26, -0.55]; // on a laptop, where the held tool sits in the view
 
-export function buildFixtures(THREE, world, { rig, camera, send, sfx = () => {}, pulse = () => {} }) {
+// Each tool's collider (client/physics.js parts, in the tool's own frame, -z away from the hand), how it
+// lies at rest, and how far its middle sits above what it lies on.
+const BODY = {
+  brush:  { parts: [['box', [0.04, 0.04, 0.24], [0, 0, -0.08]], ['box', [0.2, 0.065, 0.1], [0, 0, -0.25]]], rest: [0, 0, 0], lift: 0.035 },
+  patch:  { parts: [['box', [0.15, 0.15, 0.03], [0, 0, -0.06]]], rest: [-Math.PI / 2, 0, 0], lift: 0.02 },
+  welder: { parts: [['box', [0.05, 0.15, 0.06], [0, -0.06, 0]], ['box', [0.065, 0.07, 0.28], [0, 0.03, -0.1]]], rest: [0, 0, Math.PI / 2], lift: 0.04 },
+  tire:   { parts: [['cyl', [0.41, 0.18], [0, 0, 0], [0, 0, Math.PI / 2]]], rest: [0, 0, Math.PI / 2], lift: 0.09 },
+  gen:    { parts: [['box', [0.46, 0.36, 0.34], [0, -0.03, 0]]], rest: [0, 0, 0], lift: 0.21 },
+};
+// The NASA hand tools that used to hang on the shadow board. Decoys: they lie round the hall, you can pick
+// them up and throw them, nothing uses them, and holding one still fills your hand. Room coordinates.
+const DECOYS = {
+  wrench:       { mass: 0.3, at: [-0.9, 0.96, -4.45] },
+  ratchet:      { mass: 0.5, at: [2.35, 0, -3.5] },
+  hammer:       { mass: 1.0, at: [-2.6, 1.78, -11.2] },
+  'grease-gun': { mass: 1.2, at: [-1.6, 0, -7.6] },
+};
+const BIG = id => id === 'tire' || id === 'gen';
+
+export function buildFixtures(THREE, world, { rig, camera, send, sfx = () => {}, sfxAt = null, pulse = () => {}, phys = null, interior = null, where = () => 'out' }) {
   const F = world.fixtures;
   const V = () => new THREE.Vector3();
   const a = V(), b = V(), c = V(), q4 = new THREE.Quaternion();
-  let st = { belt: [], locker: [], scene: null, suit: false };
+  let st = { held: null, tools: null, scene: null, suit: false };
   const clock = () => performance.now() / 1000; // not the frame time: a click can land between two slow frames
   const hits = [];           // every mesh that can be pointed at
-  const held = [null, null]; // what each hand has hold of
+  const held = [null, null, null]; // what each hand has hold of: 0 and 1 the hands in a headset, 2 the laptop's one hand
   const sent = new Map();    // repairs already reported, so one sweep does not send a cell fifty times
   const once = (key, fn, every = 1) => { const t = clock(); if ((sent.get(key) || -9) + every > t) return false; sent.set(key, t); fn(); return true; };
-  let refusedAt = -9, refused = '', selectedPlug = -1, plugCooldown = 0, standing = 1.2;
+  let refusedAt = -9, refused = '', selectedPlug = -1, plugCooldown = 0;
+  const DESK = 2;
 
   const ghost = new THREE.MeshBasicMaterial({ visible: false }); // never drawn, but the raycaster still finds it
   const mat = (color, o = {}) => new THREE.MeshStandardMaterial({ color, roughness: 0.6, metalness: 0.2, ...o });
   const add = (parent, geo, material, x = 0, y = 0, z = 0) => { const m = new THREE.Mesh(geo, material); m.position.set(x, y, z); parent.add(m); return m; };
   // A mesh you can point at. `hold` means it keeps working while the trigger or mouse stays down.
   const target = (mesh, enabled, click, hold = false) => { Object.assign(mesh.userData, { enabled, click, hold }); hits.push(mesh); return mesh; };
-
   // ---------- the five tools. Each is modelled in the hand: local -z points away from you. ----------
   const tools = {};
   const orange = PAL.hex.orange, steel = PAL.hex.aluminium, dark = 0x2b2a26;
   {
     const g = new THREE.Group();                                   // brush
     add(g, new THREE.CylinderGeometry(0.018, 0.018, 0.24, 8), mat(orange), 0, 0, -0.08).rotation.x = Math.PI / 2;
-    add(g, new THREE.BoxGeometry(0.2, 0.035, 0.05), mat(dark), 0, 0, -0.22);
-    add(g, new THREE.BoxGeometry(0.19, 0.03, 0.07), mat(0xe9dfc4, { roughness: 1 }), 0, 0, -0.28);
+    add(g, new RoundedBoxGeometry(0.2, 0.035, 0.05, 2, 0.008), mat(dark, { roughness: 0.7, metalness: 0.1 }), 0, 0, -0.22).name = 'Head';
+    add(g, new RoundedBoxGeometry(0.19, 0.03, 0.07, 2, 0.01), mat(PAL.hex.whiteOff, { roughness: 1, metalness: 0 }), 0, 0, -0.28).name = 'Bristles';
     g.userData = { tip: new THREE.Vector3(0, 0, -0.3), hit: [0.26, 0.12, 0.44, -0.12] };
     tools.brush = g;
   }
   {
     const g = new THREE.Group();                                   // patch kit
-    add(g, new THREE.BoxGeometry(0.15, 0.15, 0.02), mat(orange), 0, 0, -0.06);
-    add(g, new THREE.BoxGeometry(0.1, 0.03, 0.024), mat(PAL.hex.dial), 0, 0, -0.06);
-    add(g, new THREE.BoxGeometry(0.03, 0.1, 0.024), mat(PAL.hex.dial), 0, 0, -0.06);
+    add(g, new RoundedBoxGeometry(0.15, 0.15, 0.024, 2, 0.01), mat(orange, { roughness: 0.75, metalness: 0.05 }), 0, 0, -0.06).name = 'Body';
+    add(g, new RoundedBoxGeometry(0.1, 0.03, 0.028, 1, 0.006), mat(PAL.hex.dial, { roughness: 0.8, metalness: 0 }), 0, 0, -0.06);
+    add(g, new RoundedBoxGeometry(0.03, 0.1, 0.028, 1, 0.006), mat(PAL.hex.dial, { roughness: 0.8, metalness: 0 }), 0, 0, -0.06);
     g.userData = { tip: new THREE.Vector3(0, 0, -0.07), hit: [0.2, 0.2, 0.12, -0.06] };
     tools.patch = g;
   }
@@ -102,51 +119,205 @@ export function buildFixtures(THREE, world, { rig, camera, send, sfx = () => {},
   }
   {
     const g = new THREE.Group();                                   // backup generator, with its pull cord
-    add(g, new THREE.BoxGeometry(0.42, 0.3, 0.3), mat(PAL.hex.hazard, { metalness: 0.3 }));
-    add(g, new THREE.BoxGeometry(0.46, 0.04, 0.34), mat(dark), 0, -0.17, 0);
-    add(g, new THREE.CylinderGeometry(0.05, 0.05, 0.06, 10), mat(dark), -0.1, 0.18, 0);
-    add(g, new THREE.TorusGeometry(0.05, 0.014, 6, 14), mat(0xa8402f), 0.12, 0.2, 0);
-    g.userData = { tip: new THREE.Vector3(0, 0, 0), hit: [0.5, 0.45, 0.4, 0] };
+    add(g, new RoundedBoxGeometry(0.42, 0.3, 0.3, 3, 0.03), mat(PAL.hex.hazard, { roughness: 0.7, metalness: 0.25 })).name = 'Body';
+    add(g, new RoundedBoxGeometry(0.46, 0.04, 0.34, 2, 0.012), mat(dark, { roughness: 0.8, metalness: 0.3 }), 0, -0.17, 0).name = 'Skid';
+    add(g, new THREE.CylinderGeometry(0.05, 0.05, 0.06, 10), mat(dark, { roughness: 0.6, metalness: 0.4 }), -0.1, 0.18, 0);
+    const handle = add(g, new THREE.TorusGeometry(0.05, 0.014, 6, 14), mat(PAL.hex.red, { roughness: 0.55, metalness: 0 }), 0.12, 0.2, 0);
+    handle.name = 'Handle_Cord';
+    g.userData = { tip: new THREE.Vector3(0, 0, 0), hit: [0.5, 0.45, 0.4, 0], handle };
     tools.gen = g;
   }
-  const beltGroup = new THREE.Group();
-  rig.add(beltGroup);
-  const ghostEdge = new THREE.LineBasicMaterial({ color: PAL.hex.inkDim }); // a painted silhouette on the rack, like a shadow board
-  for (const id in tools) {
-    const g = tools[id], [w, h, d, z] = g.userData.hit;
-    g.userData.id = id;
-    // One invisible box per tool to point at: on the rack it takes the tool, on the belt it is used by
-    // the generator only (pointing at it pulls the cord).
-    const box = add(g, new THREE.BoxGeometry(w, h, d), ghost, 0, 0, z);
-    target(box, () => st.locker.includes(id) || (id === 'gen' && st.belt.includes('gen')),
-      () => { if (st.locker.includes(id)) take(id); else pullCord(); });
-    // And an outline in its place on the rack while it is on the belt: point at it to put the tool back.
-    const slot = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(w, h, d)), ghostEdge);
-    slot.position.copy(F.lockerSlots[id]);
-    slot.geometry.translate(0, 0, z); // the box is centred on the tool, not on its grip
-    slot.rotation.set(...(RACK_TURN[id] || [0, 0]), 0); slot.scale.setScalar(RACK_SCALE[id] || 1);
-    F.locker.add(slot);
-    const back = add(F.locker, new THREE.BoxGeometry(w, h, d).translate(0, 0, z), ghost, slot.position.x, slot.position.y, slot.position.z);
-    back.rotation.copy(slot.rotation); back.scale.copy(slot.scale);
-    target(back, () => st.belt.includes(id), () => stow(id));
-    g.userData.slot = slot;
+  for (const id in tools) { tools[id].name = 'Tool_' + id; tools[id].traverse(o => { if (o.isMesh) o.castShadow = true; }); }
+
+  // ---------- the decoys: NASA hand tools, the same shapes as the old shadow board ----------
+  for (const [id, d] of Object.entries(DECOYS)) {
+    const g = new THREE.Group(); g.name = 'Decoy_' + id;
+    const [sx, sy, sz] = MODELS[id].size;
+    g.userData = { decoy: true, tip: new THREE.Vector3(), hit: [sx + 0.06, sy + 0.06, sz + 0.06, 0], size: [sx, sy, sz] };
+    loadPeriod(THREE, id, { rough: 0.55, metal: 0.6, merge: true }).then(m => {
+      const box = new THREE.Box3().setFromObject(m), mid = box.getCenter(V());
+      m.position.sub(mid); g.add(m);
+    }).catch(e => console.warn(id, e));
+    tools[id] = g;
   }
 
-  // Take a tool off the rack. Too heavy for the belt: it stays where it is, shakes, and buzzes. Returns whether it came.
-  function take(id, hand = -1) {
-    if (!st.locker.includes(id)) return false;
-    if (!fits(st.belt, id)) {
+  // ---------- where the tools are: two places, two containers ----------
+  // In the hall a tool is a child of the hall's group (room coordinates, the same as the hall's physics);
+  // on the Moon a child of `outside`, which astronaut.js hides with the rest of the surface.
+  const outside = new THREE.Group(); outside.name = 'Tools_Surface';
+  world.rover.parent.add(outside);
+  const ORIGIN = interior ? interior.group.position : V();
+  const placeNow = () => where() === 'in' ? 'hall' : 'surface';
+  const container = place => place === 'hall' && interior ? interior.group : outside;
+  // id -> { state: 'loose' | 'held' | 'gone', seen (the server's last word, as a key), report (where we last said it lies),
+  //         drop (when we let go; until it settles the server's guess is ignored), took (when we picked it up) }
+  const T = {};
+  const restQ = id => new THREE.Quaternion().setFromEuler(new THREE.Euler(...(BODY[id]?.rest || [0, 0, 0])));
+  function lay(id, place, x, y, z, q) {
+    const g = tools[id], lift = BODY[id]?.lift ?? (g.userData.size ? g.userData.size[1] / 2 : 0.05);
+    const pose = { x, y: y + lift + 0.03, z, q: q || restQ(id) };
+    if (phys) phys.set(id, place, pose);
+    const cont = container(place);
+    if (g.parent !== cont) cont.add(g);
+    g.position.set(pose.x, pose.y, pose.z); g.quaternion.copy(pose.q);
+    T[id].quiet = clock() + 0.8; // settling into place makes no noise
+  }
+  for (const id in tools) {
+    const g = tools[id];
+    T[id] = { state: 'loose', seen: '', report: null, drop: -9, took: -9, quiet: 0, trail: [] };
+    const decoy = DECOYS[id];
+    const parts = decoy ? [['box', g.userData.size]] : BODY[id].parts;
+    const mass = decoy ? decoy.mass : TOOLS[id].mass;
+    if (phys) phys.add(id, parts, mass, 'hall', { x: 0, y: -5, z: 0 });
+    // The demo layout until the server says otherwise.
+    const sp = decoy ? { x: decoy.at[0], y: decoy.at[1], z: decoy.at[2] } : PLACES.toolSpots[PLACES.demoTools[id]];
+    lay(id, 'hall', sp.x, sp.y, sp.z);
+    // One invisible box per tool to point at: click a loose tool to take it.
+    const [w, h, d, z] = g.userData.hit;
+    target(add(g, new THREE.BoxGeometry(w, h, d), ghost, 0, 0, z), () => T[id].state === 'loose' && running(), () => take(id, DESK));
+  }
+  const running = () => !!st.tools;
+  const isTool = h => h?.kind === 'tool';
+  // The tool (or decoy) in a hand, if any: there is only ever one.
+  const inHand = () => held.find(isTool)?.id || null;
+  const handOf = id => held.findIndex(h => isTool(h) && h.id === id);
+
+  // Pick a loose tool up into hand i (DESK on a laptop). One at a time: with a tool already in the other
+  // hand it stays where it is, the ring goes red, and the hand buzzes twice. On a laptop the one held is
+  // put down where you stand first.
+  function take(id, i) {
+    if (T[id]?.state !== 'loose') return false;
+    const other = inHand();
+    if (other && i === DESK) drop(held.findIndex(isTool), [0, 0, 0], true); // on a laptop, a click on another tool swaps
+    if (held[i]) return false;
+    else if (other) {
       refusedAt = clock(); refused = id; sfx('refuse');
-      if (hand >= 0) { pulse(hand, 1, 90); setTimeout(() => pulse(hand, 1, 90), 160); }
+      if (i >= 0) { pulse(i, 1, 90); setTimeout(() => pulse(i, 1, 90), 160); }
       return false;
     }
+    const g = tools[id];
+    held[i] = { kind: 'tool', id, grip: null };
+    if (BIG(id) && i !== DESK) {
+      // Heavy things are held where the hand closed on them, not snapped to it.
+      const obj = handObj[i];
+      if (obj) { obj.updateWorldMatrix(true, false); g.updateWorldMatrix(true, false); held[i].grip = new THREE.Matrix4().copy(obj.matrixWorld).invert().multiply(g.matrixWorld); }
+    }
+    T[id].state = 'held'; T[id].took = clock(); T[id].trail.length = 0;
+    rig.attach(g); // carried in the rig's frame, so it comes through the airlock with you
+    if (phys) phys.hold(id);
+    if (!g.userData.decoy) send({ take: id });
     sfx('click');
-    send({ take: id });
+    if (i >= 0 && i !== DESK) pulse(i, 0.7, 50);
     return true;
   }
-  function stow(id) { sfx('click'); send({ stow: id }); }
-  function pullCord() { if (st.belt.includes('gen')) once('gen', () => send({ gen: true }), 2); }
-  const need = type => { const t = FAULTS[type].tool; return !t || st.belt.includes(t); };
+  // Open hand i: the tool is loose, with the hand's speed (dropped, or thrown).
+  function drop(i, v, quiet = false) {
+    const h = held[i]; if (!isTool(h)) return;
+    held[i] = null;
+    const id = h.id, g = tools[id], place = placeNow();
+    container(place).attach(g);
+    T[id].state = 'loose'; T[id].drop = clock();
+    if (phys) phys.release(id, v || velocity(id));
+    if (!g.userData.decoy) {
+      g.getWorldPosition(a); const p = place === 'hall' ? a.sub(ORIGIN) : a;
+      send({ drop: id, x: p.x, z: p.z });
+    }
+    if (!quiet) sfx('click');
+  }
+  // The held tool's speed over the last few frames, in m/s, for a throw.
+  function velocity(id) {
+    const tr = T[id].trail;
+    if (tr.length < 2) return [0, 0, 0];
+    const [p0, t0] = tr[0], [p1, t1] = tr[tr.length - 1], dt = Math.max(1e-3, t1 - t0);
+    return [(p1.x - p0.x) / dt, (p1.y - p0.y) / dt, (p1.z - p0.z) / dt];
+  }
+  function pullCord() {
+    if (tools.gen && T.gen.state !== 'gone' && (inHand() === 'gen' || near('gen', 2))) once('gen', () => { send({ gen: true }); sfx('clank'); }, 2);
+  }
+  const near = (id, r) => { camera.getWorldPosition(a); return tools[id].getWorldPosition(b).distanceTo(a) < r; };
+  const need = type => { const t = FAULTS[type].tool; return !t || inHand() === t; };
+  // Where each hand's held tool is drawn, set by update(): the controller, or the camera on a laptop.
+  const handObj = [null, null, camera];
+
+  // ---------- tool sounds: a clank where it lands, quieter and duller outside where there is no air ----------
+  const hitAt = new Map();
+  const dust = Array.from({ length: 4 }, () => {
+    const m = new THREE.Mesh(new THREE.SphereGeometry(1, 8, 6), new THREE.MeshBasicMaterial({ color: PAL.hex.regolith, transparent: true, opacity: 0, depthWrite: false }));
+    m.visible = false; m.userData.born = -9; outside.add(m); return m;
+  });
+  let dustNext = 0;
+  if (phys) phys.onHit((id, v, p, place) => {
+    if (place !== placeNow() || clock() < (T[id]?.quiet || 0)) return;
+    const t = clock(); if ((hitAt.get(id) || -9) > t - 0.09) return; hitAt.set(id, t);
+    const inside = place === 'hall', mass = DECOYS[id]?.mass || TOOLS[id]?.mass || 1;
+    a.set(p[0], p[1], p[2]); if (inside) a.add(ORIGIN);
+    camera.getWorldPosition(b);
+    const k = handOf(id);
+    if (!inside && k < 0 && a.distanceTo(b) > 3) return; // outside you hear it through your boots, close by
+    const gain = Math.min(1, v / 3) * (inside ? 1 : 0.35);
+    if (sfxAt) sfxAt('thud', a, gain, { mass }); else sfx('clank');
+    if (k >= 0 && k !== DESK) pulse(k, Math.min(1, 0.2 + v / 4), 30);
+    if (!inside && p[1] < 0.4) { // a little dust where it hits the regolith, settling slowly
+      const d = dust[dustNext++ % dust.length];
+      d.position.copy(a); d.userData.born = t; d.visible = true; d.userData.size = 0.08 + Math.min(0.25, v * 0.04 * Math.sqrt(mass));
+    }
+  });
+  // A tool came to rest. If it is somewhere new, tell the server (and so Mission Ops) where it lies.
+  if (phys) phys.onRest(id => {
+    if (DECOYS[id] || T[id].state !== 'loose') return;
+    const p = phys.pose(id), inside = p.place === 'hall', srv = st.tools?.[id];
+    if (srv && srv.at === 'loose' && !!srv.inside === inside && Math.hypot(srv.x - p.x, srv.z - p.z) < 0.05 && clock() - T[id].drop > 2) return;
+    T[id].report = { inside, x: p.x, z: p.z };
+    send({ rest: id, inside, x: +p.x.toFixed(3), y: +p.y.toFixed(3), z: +p.z.toFixed(3) });
+  });
+
+  // ---------- static things for the tools to land on ----------
+  if (phys && interior) {
+    const P = phys, C = P.CANNON;
+    const fixedBox = (place, w, h, d, x, y, z, ry = 0) => P.fixed(place, P.box(w, h, d), x, y, z, ry ? P.yaw(ry) : undefined);
+    // A box given in a door chamber's own frame (client/airlock.js), at that chamber's pose.
+    const inFrame = (place, pose, w, h, d, lx, ly, lz) => {
+      const cs = Math.cos(pose.ry), sn = Math.sin(pose.ry);
+      fixedBox(place, w, h, d, pose.x + lx * cs + lz * sn, ly, pose.z - lx * sn + lz * cs, pose.ry);
+    };
+    const { width: AW, depth: AD, height: AH } = CHAMBER;
+    const chamber = (place, pose, inner, outer) => {
+      for (const sx of [-1, 1]) inFrame(place, pose, 0.1, AH, AD + 0.1, sx * (AW / 2 + 0.05), AH / 2, AD / 2);
+      inFrame(place, pose, AW, 0.1, AD, 0, AH + 0.05, AD / 2);
+      inFrame(place, pose, AW, 0.1, AD + 0.2, 0, -0.05, AD / 2);
+      if (inner) inFrame(place, pose, AW, AH, 0.1, 0, AH / 2, -0.05);
+      if (outer) inFrame(place, pose, AW, AH, 0.1, 0, AH / 2, AD + 0.05);
+    };
+    // The hall: floor, ceiling, the walls with their four doorways, and the furniture.
+    fixedBox('hall', 16, 0.2, 24, 0, -0.1, -6);
+    fixedBox('hall', 16, 0.2, 24, 0, ROOM.height + 0.1, -6);
+    const T2 = 0.2, gap = CHAMBER.door.hw + 0.02;
+    // A wall along x (at z) or along z (at x), from a to b, with doorways centred at `holes`.
+    const wall = (axis, at, from, to, holes, out) => {
+      const cuts = [from, ...holes.flatMap(h => [h - gap, h + gap]), to];
+      for (let n = 0; n < cuts.length; n += 2) {
+        const len = cuts[n + 1] - cuts[n], mid = (cuts[n] + cuts[n + 1]) / 2;
+        if (len <= 0.01) continue;
+        if (axis === 'x') fixedBox('hall', len, ROOM.height, T2, mid, ROOM.height / 2, at + out * T2 / 2);
+        else fixedBox('hall', T2, ROOM.height, len, at + out * T2 / 2, ROOM.height / 2, mid);
+      }
+    };
+    const D = PLACES.doors;
+    wall('x', HALL.z1, HALL.x0, HALL.x1, [D.S.hall.x], 1);
+    wall('z', HALL.x0, HALL.z0, HALL.z1, [D.W.hall.z], -1);
+    wall('z', HALL.x1, COR.z0, HALL.z1, [D.E.hall.z], 1);
+    wall('x', HALL.z0, HALL.x0, COR.x0, [], -1);
+    wall('z', COR.x0, COR.z0, HALL.z0, [], -1);
+    wall('x', COR.z0, COR.x0, COR.x1, [D.N.hall.x], -1);
+    for (const [x0, x1, z0, z1, top] of SOLIDS) fixedBox('hall', x1 - x0, top, z1 - z0, (x0 + x1) / 2, top / 2, (z0 + z1) / 2);
+    for (const d of Object.values(D)) chamber('hall', d.hall, false, true);
+    // The Moon: the ground, the habitat's core and its two side modules, and the four chambers.
+    if (world.height) P.terrain(world.height, CFG.bounds + 3, 1);
+    P.fixed('surface', new C.Cylinder(2.5, 2.5, 3.6, 16), 0, 1.8, 0);
+    fixedBox('surface', 2.4, 2.6, 1.9, -3.4, 1.3, 0);
+    fixedBox('surface', 5.2, 2.8, 2.9, 4.8, 1.4, 0);
+    for (const d of Object.values(D)) chamber('surface', d, true, false);
+  }
 
   // ---------- things to point at on the fixtures themselves ----------
   F.dustCells.forEach((cell, i) => target(cell, () => !!st.scene?.dust?.[i], () => brushCell(i), true));
@@ -185,7 +356,7 @@ export function buildFixtures(THREE, world, { rig, camera, send, sfx = () => {},
     if (!need('hull') || !st.scene?.hull || st.scene.hull.welded[i]) return false;
     return once('weld' + i, () => { send({ fix: 'hull', point: i }); sfx('weld'); });
   }
-  function patchSuit() { return !!st.suit && st.belt.includes('patch') && once('patch', () => { sfx('click'); send({ fix: 'suit' }); }); }
+  function patchSuit() { return !!st.suit && inHand() === 'patch' && once('patch', () => { sfx('click'); send({ fix: 'suit' }); }); }
 
   // ---------- the suit leak: a pulsing spot on your forearm ----------
   const spot = new THREE.Mesh(new THREE.SphereGeometry(0.04, 12, 8), new THREE.MeshBasicMaterial({ color: PAL.hex.red, toneMapped: false }));
@@ -257,45 +428,100 @@ export function buildFixtures(THREE, world, { rig, camera, send, sfx = () => {},
 
   // ---------- helpers for the physical path ----------
   const worldPos = (obj, out) => obj.getWorldPosition(out);
-  const lockerPos = () => { F.locker.getWorldPosition(a); a.y = 1.2; return a; };
-  const atLocker = p => p.distanceTo(lockerPos()) < 1.3;
   const headXZ = V();
 
-  // What could this hand grab right now? Nearest thing wins.
-  function nearest(p) {
-    // Each thing has its own reach; the one the hand is deepest inside the reach of wins.
+  // What could this hand grab right now? Each thing has its own reach; the one the hand is deepest inside wins.
+  function nearest(p, i) {
     let best = null, bestD = Infinity;
     const offer = (d, limit, what) => { if (d < limit && d / limit < bestD) { bestD = d / limit; best = what; } };
     for (const id in tools) {
-      const g = tools[id], big = id === 'tire' || id === 'gen';
-      if (st.locker.includes(id)) offer(worldPos(g, b).distanceTo(p), big ? 0.5 : GRAB_RACK, { kind: 'rack', id });
-      else if (st.belt.includes(id) && !held.some(h => h?.id === id)) offer(worldPos(g, b).distanceTo(p), GRAB, id === 'gen' ? { kind: 'cord', start: p.clone() } : { kind: 'tool', id });
+      const g = tools[id], s2 = T[id].state;
+      if (s2 === 'loose' && g.parent?.visible !== false && g.parent === container(placeNow())) offer(worldPos(g, b).distanceTo(p), BIG(id) ? GRAB_BIG : GRAB, { kind: 'tool', id });
     }
-    F.plugs.forEach((plug, i) => { if (plugLoose(i) && !plug.userData.held) offer(worldPos(plug, b).distanceTo(p), GRAB_PLUG, { kind: 'plug', i }); });
+    // The generator's pull handle, on one standing loose or held in the other hand.
+    if (tools.gen && (T.gen.state === 'loose' || (T.gen.state === 'held' && handOf('gen') !== i))) {
+      worldPos(tools.gen.userData.handle, b);
+      offer(b.distanceTo(p), GRAB_CORD, { kind: 'cord', start: p.clone() });
+    }
+    F.plugs.forEach((plug, n) => { if (plugLoose(n) && !plug.userData.held) offer(worldPos(plug, b).distanceTo(p), GRAB_PLUG, { kind: 'plug', i: n }); });
     if (st.scene?.wheel === 1) offer(worldPos(F.wheel, b).distanceTo(p), 0.5, { kind: 'wheel', start: p.clone() });
     return best;
   }
 
+  // Move a held tool to its hand: snapped for the light ones, lagging for the heavy ones. dt 0 snaps.
+  const gripM = new THREE.Matrix4(), want = new THREE.Matrix4(), pW = V(), qW = new THREE.Quaternion(), sW = V();
+  function follow(id, dt, i = handOf(id)) {
+    const g = tools[id], h = held[i], obj = handObj[i];
+    if (!g || !h) return;
+    if (g.parent !== rig) rig.attach(g);
+    if (dt > 0 && obj) {
+      obj.updateWorldMatrix(true, false);
+      if (i === DESK) want.compose(pW.set(...DESK_HOLD), qW.identity(), sW.set(1, 1, 1)).premultiply(obj.matrixWorld);
+      else if (h.grip) want.multiplyMatrices(obj.matrixWorld, h.grip);
+      else want.copy(obj.matrixWorld);
+      want.premultiply(gripM.copy(rig.matrixWorld).invert()); // into the rig's frame
+      want.decompose(pW, qW, sW);
+      const k = BIG(id) && i !== DESK ? 1 - Math.exp(-dt * HEAVY_LAG) : 1;
+      g.position.lerp(pW, k); g.quaternion.slerp(qW, k); g.scale.setScalar(1);
+    }
+    g.updateMatrixWorld(true);
+    if (!phys) return;
+    const place = placeNow();
+    g.getWorldPosition(a); g.getWorldQuaternion(q4);
+    if (place === 'hall') a.sub(ORIGIN);
+    const tr = T[id].trail;
+    if (tr.length && tr[tr.length - 1][2] !== place) tr.length = 0; // came through an airlock: no throw from the jump
+    tr.push([a.clone(), clock(), place]); if (tr.length > 4) tr.shift();
+    phys.follow(id, place, a.x, a.y, a.z, q4, dt);
+  }
+  // Is a mesh in the part of the world being drawn?
+  const isShown = m => { for (let o = m; o; o = o.parent) if (!o.visible) return false; return true; };
+
   const api = {
-    tools, rings, gloves, spot, beltGroup,
+    tools, rings, gloves, spot, outside,
     get refusedAt() { return refusedAt; },
     // Meshes that can be pointed at right now.
-    targets: () => hits.filter(m => m.userData.enabled()),
+    targets: () => hits.filter(m => m.userData.enabled() && m.parent && isShown(m)),
     click(mesh) { mesh.userData.click(); },
 
-    // Desktop keys for the two things you cannot point at.
+    // Desk keys for the things you cannot point at, and Q to put the held tool down.
     patchSuit, pullCord,
+    dropHeld() {
+      const i = held.findIndex(isTool); if (i < 0) return false;
+      if (i === DESK) { // 0.6 m in front, with a small push forward
+        const g = tools[held[i].id];
+        camera.getWorldPosition(a); camera.getWorldDirection(b); b.y = 0; b.normalize();
+        rig.worldToLocal(c.copy(a).addScaledVector(b, 0.6).setY(Math.max(0.4, a.y - 0.45)));
+        g.position.copy(c);
+        g.updateMatrixWorld(true);
+        follow(held[i].id, 0);
+        drop(i, [b.x * 1.2, 0.4, b.z * 1.2]);
+      } else drop(i);
+      return true;
+    },
+    // What is in the hand: the tool's (or decoy's) id, or null.
+    get inHand() { return inHand(); },
+    toolState: id => T[id] && { state: T[id].state, ...(phys ? phys.pose(id) : {}) },
+    // Put a loose tool at room/world coordinates (tests and the console).
+    layTool: (id, place, x, y, z) => lay(id, place, x, y, z),
+    // For the tests: put a tool straight into hand i (whatever was held is dropped where it is), or empty both hands.
+    give(id, i) {
+      held.forEach((h, k) => { if (isTool(h)) drop(k, [0, 0, 0], true); });
+      if (!id) return;
+      if (T[id].state === 'gone' && phys) phys.restore(id);
+      T[id].state = 'loose';
+      const obj = handObj[i] || camera; obj.getWorldPosition(a);
+      const place = placeNow(), p = place === 'hall' ? a.clone().sub(ORIGIN) : a;
+      lay(id, place, p.x, p.y, p.z);
+      take(id, i);
+    },
 
     // A hand closed (grip button, or a pinch with bare hands) at world point p. True if it got something.
     grab(i, p) {
       if (held[i]) return true;
-      const what = nearest(p);
+      const what = nearest(p, i);
       if (!what) return false;
-      if (what.kind === 'rack') {
-        // Off the rack it is on the belt (that is where its weight counts) and in this hand, ready to use.
-        if (take(what.id, i)) { held[i] = { kind: 'tool', id: what.id, fromRack: clock() }; pulse(i, 0.7, 50); }
-        return true;
-      }
+      if (what.kind === 'tool') { take(what.id, i); return true; }
       held[i] = what;
       if (what.kind === 'plug') { F.plugs[what.i].userData.held = true; selectedPlug = -1; }
       if (what.kind === 'wheel') F.wheel.userData.held = true;
@@ -303,27 +529,62 @@ export function buildFixtures(THREE, world, { rig, camera, send, sfx = () => {},
       pulse(i, 0.7, 50);
       return true;
     },
-    // The hand opened. A tool taken from the belt and let go at the locker goes back on the rack; anywhere
-    // else, or if it only just came off the rack, it goes to the belt.
-    release(i, p) {
+    // The hand opened: a tool in it is loose, with the hand's speed. A fast hand throws it.
+    release(i) {
       const h = held[i];
-      held[i] = null;
       if (!h) return;
-      if (h.kind === 'tool' && !h.fromRack && atLocker(p)) stow(h.id);
+      if (isTool(h)) { const v = velocity(h.id), fast = Math.hypot(...v) > 1.5; drop(i, v); if (fast) pulse(i, 0.8, 60); return; }
+      held[i] = null;
       if (h.kind === 'plug') F.plugs[h.i].userData.held = false;
       if (h.kind === 'wheel') F.wheel.userData.held = false;
     },
     holding: i => held[i],
+    // A new mission: the server lays the tools out again; take its word for every one.
+    reset() {
+      held.forEach((h, i) => { if (isTool(h)) drop(i, [0, 0, 0], true); held[i] = null; });
+      for (const id in T) { T[id].seen = ''; T[id].report = null; T[id].drop = -9; }
+      for (const [id, d] of Object.entries(DECOYS)) { if (T[id].state === 'gone' && phys) phys.restore(id); T[id].state = 'loose'; lay(id, 'hall', ...d.at); }
+    },
 
-    // The server's latest word on what exists.
+    // The server's latest word on what exists and where the tools are.
     sync(s) {
       st = s;
-      held.forEach((h, i) => { // you cannot hold what is no longer on the belt, or work what is already fixed
-        // (a tool just lifted off the rack is given a moment for the server to put it on the belt)
-        if (h?.kind === 'tool' && !s.belt.includes(h.id) && !(h.fromRack && clock() - h.fromRack < 1.5)) held[i] = null;
+      if (s.tools) for (const [id, t] of Object.entries(s.tools)) {
+        const me = T[id], g = tools[id]; if (!me) continue;
+        const key = [t.at, t.inside ? 1 : 0, (+t.x).toFixed(2), (+t.z).toFixed(2)].join('|');
+        const changed = key !== me.seen; me.seen = key;
+        if (t.at === 'gone') {
+          if (me.state === 'held') { const k = handOf(id); if (k >= 0) held[k] = null; }
+          if (me.state !== 'gone') { me.state = 'gone'; if (phys) phys.remove(id); if (g.parent) g.parent.remove(g); }
+          continue;
+        }
+        if (me.state === 'gone') { // back again: the restocked tire
+          if (phys) phys.restore(id);
+          me.state = 'loose'; lay(id, t.inside ? 'hall' : 'surface', t.x, t.y, t.z);
+          continue;
+        }
+        if (t.at === 'loose' && me.state === 'held' && clock() - me.took > 1.5) {
+          // The server would not let us have it (it was not where we are, or our hand was full).
+          const k = handOf(id); if (k >= 0) { drop(k, [0, 0, 0], true); sfx('refuse'); }
+          continue;
+        }
+        if (t.at === 'hand' && me.state === 'loose' && clock() - me.drop > 2) {
+          // The server has it in our hand and we do not (the page was reloaded): it is put down here.
+          g.getWorldPosition(a); const pl = phys?.pose(id)?.place || 'hall', pp = pl === 'hall' ? a.sub(ORIGIN) : a;
+          send({ drop: id, x: pp.x, z: pp.z }); me.drop = clock();
+          continue;
+        }
+        if (t.at === 'loose' && me.state === 'loose' && changed && clock() - me.drop > 2.5) {
+          // Moved by someone else's word (a new mission, a restock): put it there, unless it is already there.
+          const pose = phys?.pose(id), inside = pose?.place === 'hall';
+          const rep = me.report, ours = rep && rep.inside === !!t.inside && Math.hypot(rep.x - t.x, rep.z - t.z) < 0.05;
+          if (!ours && (!pose || inside !== !!t.inside || Math.hypot(pose.x - t.x, pose.z - t.z) > 0.05)) lay(id, t.inside ? 'hall' : 'surface', t.x, t.y, t.z);
+        }
+      }
+      held.forEach((h, i) => { // you cannot work what is already fixed
         if (h?.kind === 'plug' && !plugLoose(h.i)) { F.plugs[h.i].userData.held = false; held[i] = null; }
         if (h?.kind === 'wheel' && s.scene?.wheel !== 1) { F.wheel.userData.held = false; held[i] = null; }
-        if (h?.kind === 'cord' && !s.belt.includes('gen')) held[i] = null;
+        if (h?.kind === 'cord' && T.gen.state === 'gone') held[i] = null;
       });
       if (selectedPlug >= 0 && !plugLoose(selectedPlug)) selectedPlug = -1;
     },
@@ -331,38 +592,34 @@ export function buildFixtures(THREE, world, { rig, camera, send, sfx = () => {},
     // Every frame. hands: [{ obj, point, side, tracked }] for the two hands (obj is where a held tool is
     // drawn, point is where the fingers are, tracked means bare hands, not controllers); empty on a laptop.
     update(dt, now, hands, vr) {
-
-      // The belt rides at the waist and turns with the body, lazily, so it stays put while you look around.
       camera.getWorldPosition(headXZ);
-      rig.worldToLocal(a.copy(headXZ));
-      // At the hips, not hanging from the head: bend over the rover's wheel and the belt stays up out of the way of your hands.
-      standing = vr ? Math.min(2.1, Math.max(standing, a.y)) : 1.65;
-      beltGroup.position.set(a.x, Math.max(0.35, Math.min(standing * BELT_AT, a.y - BELT_DROP)), a.z);
-      const yaw = new THREE.Euler().setFromQuaternion(camera.quaternion, 'YXZ').y;
-      let dy = yaw - beltGroup.rotation.y; dy = Math.atan2(Math.sin(dy), Math.cos(dy));
-      if (Math.abs(dy) > 0.6) beltGroup.rotation.y += dy - Math.sign(dy) * 0.6;
+      const place = placeNow();
+      handObj[0] = hands[0]?.obj || null; handObj[1] = hands[1]?.obj || null;
+      // A tool held on a laptop moves to the desk hand; one held in a headset hand stays in that hand.
+      if (!vr) for (const i of [0, 1]) if (isTool(held[i])) { held[DESK] = held[i]; held[i] = null; held[DESK].grip = null; }
 
-      // Put each tool where it is: on the rack, on the belt, or in a hand.
-      for (const id in tools) {
-        const g = tools[id];
-        const hand = hands.length ? held.findIndex(h => h?.kind === 'tool' && h.id === id) : -1;
-        const onBelt = st.belt.includes(id), onRack = st.locker.includes(id) && hand < 0;
-        g.visible = onRack || onBelt || hand >= 0;
-        g.userData.slot.visible = !onRack && g.visible;
-        if (!g.visible) { if (g.parent) g.parent.remove(g); continue; }
-        const parent = onRack ? F.locker : hand >= 0 ? hands[hand].obj : beltGroup;
-        if (g.parent !== parent) parent.add(g);
-        if (onRack) {
-          g.position.copy(F.lockerSlots[id]); g.rotation.set(...(RACK_TURN[id] || [0, 0]), 0); g.scale.setScalar(RACK_SCALE[id] || 1);
-          // Too heavy for the belt: it shakes its head.
-          if (refused === id && clock() - refusedAt < 0.45) g.position.x += Math.sin((clock() - refusedAt) * 50) * 0.02;
-        } else if (hand >= 0) { const o = IN_HAND[id] || {}; g.position.set(0, 0, o.z || 0); g.rotation.set(0, 0, 0); g.scale.setScalar(o.scale || 1); }
-        else {
-          const t = BELT_SLOT[id];
-          g.position.set(Math.sin(t) * BELT_R, 0, -Math.cos(t) * BELT_R);
-          g.rotation.set(id === 'tire' || id === 'gen' ? 0 : -Math.PI / 2, -t, 0);
-          g.scale.setScalar(BELT_SCALE[id]);
+      // Held tools: placed in the rig's frame (so they come with you through an airlock), the light ones
+      // in the hand, the heavy ones swinging after it. Their bodies follow, pushing loose things about.
+      held.forEach((h, i) => { if (isTool(h)) follow(h.id, dt, i); });
+      if (phys) {
+        phys.moveHands(place, vr ? hands.map(hd => { const p = hd.point.clone(); if (place === 'hall') p.sub(ORIGIN); return p; }) : [], dt);
+        phys.step(dt, place);
+        // Loose tools where the astronaut is take their pose from the physics.
+        for (const id in tools) {
+          if (T[id].state !== 'loose') continue;
+          const p = phys.pose(id); if (!p || p.place !== place || p.asleep) continue;
+          const g = tools[id];
+          if (g.parent !== container(p.place)) container(p.place).add(g);
+          g.position.set(p.x, p.y, p.z); g.quaternion.set(p.q.x, p.q.y, p.q.z, p.q.w);
         }
+      }
+      // Dust puffs settle slowly in lunar gravity.
+      for (const d of dust) {
+        if (!d.visible) continue;
+        const age = clock() - d.userData.born;
+        if (age > 1.6) { d.visible = false; continue; }
+        d.scale.setScalar(d.userData.size * (1 + age * 1.4)); d.position.y += dt * 0.05;
+        d.material.opacity = 0.32 * (1 - age / 1.6);
       }
       const welder = tools.welder.userData;
       let welding = false;
@@ -444,17 +701,17 @@ export function buildFixtures(THREE, world, { rig, camera, send, sfx = () => {},
         if (glove.parent !== hand.obj) hand.obj.add(glove);
         glove.visible = !hand.tracked && !!hand.side;
         glove.userData.left.visible = hand.side !== 'right'; glove.userData.right.visible = hand.side === 'right';
-        const what = held[i] ? null : nearest(hand.point);
+        const what = held[i] ? null : nearest(hand.point, i);
         const ring = rings[i], name = what ? what.kind + (what.id || what.i || '') : null;
         ring.visible = !!what;
         if (what) {
-          const obj = what.kind === 'plug' ? F.plugs[what.i] : what.kind === 'wheel' ? F.wheel : tools[what.id || 'gen'];
+          const obj = what.kind === 'plug' ? F.plugs[what.i] : what.kind === 'wheel' ? F.wheel : what.kind === 'cord' ? tools.gen.userData.handle : tools[what.id];
           worldPos(obj, ring.position);
-          const big = what.kind === 'wheel' || what.id === 'tire' || what.id === 'gen' || what.kind === 'cord';
-          ring.scale.setScalar((big ? 0.3 : what.kind === 'plug' ? 0.09 : 0.14) * (0.94 + Math.sin(now * 8) * 0.06));
+          const big = what.kind === 'wheel' || BIG(what.id);
+          ring.scale.setScalar((big ? 0.3 : what.kind === 'plug' || what.kind === 'cord' ? 0.09 : 0.14) * (0.94 + Math.sin(now * 8) * 0.06));
           ring.quaternion.copy(camera.getWorldQuaternion(q4));
-          // Red if the belt cannot take it.
-          ring.material.color.setHex(what.kind === 'rack' && !fits(st.belt, what.id) ? PAL.hex.red : PAL.hex.green);
+          // Red if the other hand already has a tool: one at a time.
+          ring.material.color.setHex(what.kind === 'tool' && inHand() ? PAL.hex.red : PAL.hex.green);
         }
         if (name !== hover[i]) { hover[i] = name; if (name) pulse(i, 0.25, 20); }
       });
@@ -471,7 +728,7 @@ export function buildFixtures(THREE, world, { rig, camera, send, sfx = () => {},
       const beat = 0.9 + Math.sin(now * 9) * 0.35;
       spot.visible = st.suit;
       if (st.suit) {
-        const patchHand = held.findIndex(h => h?.kind === 'tool' && h.id === 'patch');
+        const patchHand = handOf('patch');
         const arm = vr ? hands.find((h, n) => n !== patchHand && (patchHand >= 0 || h.side === 'left')) || hands.find((_, n) => n !== patchHand) : null;
         const parent = arm ? arm.obj : camera;
         if (spot.parent !== parent) parent.add(spot);

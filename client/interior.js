@@ -9,7 +9,8 @@
 // glowing boxes, soft shadow blobs), the walls and floor are one mesh each, and nothing casts a
 // shadow. The light fixtures are glowing boxes; three real lights do the lighting, and they change
 // intensity rather than switch on and off so no shader is ever recompiled mid-game.
-import { CFG } from '/shared/config.js';
+import { CFG, PLACES } from '/shared/config.js';
+import { buildAirlock, CHAMBER } from '/airlock.js';
 import { PAL } from '/shared/palette.js';
 import { loadPeriod, loadGlove } from '/shared/assets.js';
 import { buildDamage } from '/damage.js';
@@ -20,18 +21,21 @@ export const ROOM = {
   height: 3.2,
   panel: { x: -3.44, z: -7.7 },      // breaker panel, on the west wall
 };
-const HALL = { x0: -3.5, x1: 3.5, z0: -12, z1: 0 };
-const COR = { x0: 1.5, x1: 3.5, z0: -15, z1: -12 };
+export const HALL = { x0: -3.5, x1: 3.5, z0: -12, z1: 0 };
+export const COR = { x0: 1.5, x1: 3.5, z0: -15, z1: -12 };
 const H = ROOM.height, CH = 2.6;     // hall and corridor ceiling heights
 const BODY = 0.3;                    // how close a head may get to a wall or a bench
-// Things you cannot walk through: [x0, x1, z0, z1]
-const SOLIDS = [
-  [-2.0, 1.5, -4.9, -4.0],           // workbench, long arm
-  [-2.0, -1.1, -6.5, -4.9],          // workbench, short arm
-  [2.9, 3.5, -3.05, -0.95],          // suit lockers
-  [2.9, 3.5, -0.95, -0.05],          // the empty pressure suit beside them
-  [-3.5, -1.95, -12, -10.25],        // life support stack
+// Things you cannot walk through: [x0, x1, z0, z1, top]. The top is for the tools' physics (client/physics.js).
+export const SOLIDS = [
+  [-2.0, 1.5, -4.9, -4.0, 0.96],     // workbench, long arm
+  [-2.0, -1.1, -6.5, -4.9, 0.96],    // workbench, short arm
+  [2.9, 3.5, -3.05, -0.95, 2.06],    // suit lockers
+  [2.9, 3.5, -0.95, -0.05, 1.85],    // the empty pressure suit beside them
+  [-3.5, -1.95, -12, -10.25, 1.78],  // life support stack
 ];
+// The four doors, in room coordinates: each is the inner hatch of an airlock chamber whose twin is on the
+// habitat outside (PLACES.doors). The opening in the wall is the chamber's doorway.
+const DOOR_W = CHAMBER.door.hw * 2, DOOR_H = CHAMBER.door.hh;
 const ROOF_ROWS = [-1.5, -4.2, -6.9, -9.6]; // z of each row of roof lights (two lights per row)
 
 export function buildInterior(THREE, scene, { sfx = () => {} } = {}) {
@@ -129,13 +133,23 @@ export function buildInterior(THREE, scene, { sfx = () => {} } = {}) {
     const len = Math.hypot(x1 - x0, z1 - z0), u0 = run / 4, u1 = (run + len) / 4; run += len;
     walls.add([x0, y0, z0], [x1, y0, z1], [x1, y1, z1], [x0, y1, z0], [nx, 0, nz], [[u0, y0 / H], [u1, y0 / H], [u1, y1 / H], [u0, y1 / H]]);
   }
-  wall(HALL.x0, 0, HALL.x1, 0, 0, H, 0, -1);                 // south, with the airlock
-  wall(HALL.x0, HALL.z0, HALL.x0, 0, 0, H, 1, 0);            // west, with the breaker panel
+  // A wall with door openings cut in it: `doors` are positions along the wall (x for a wall that runs
+  // along x, z for one along z). Left of the door, over it, right of it.
+  function wallWithDoors(x0, z0, x1, z1, y0, y1, nx, nz, doors) {
+    const alongX = z0 === z1, a0 = alongX ? Math.min(x0, x1) : Math.min(z0, z1), a1 = alongX ? Math.max(x0, x1) : Math.max(z0, z1);
+    const seg = (a, b, ya, yb) => alongX ? wall(a, z0, b, z0, ya, yb, nx, nz) : wall(x0, a, x0, b, ya, yb, nx, nz);
+    let a = a0;
+    for (const d of [...doors].sort((p, q) => p - q)) { seg(a, d - DOOR_W / 2, y0, y1); seg(d - DOOR_W / 2, d + DOOR_W / 2, DOOR_H, y1); a = d + DOOR_W / 2; }
+    seg(a, a1, y0, y1);
+  }
+  const D_ = PLACES.doors;
+  wallWithDoors(HALL.x0, 0, HALL.x1, 0, 0, H, 0, -1, [D_.S.hall.x]);       // south, with airlock S and the window
+  wallWithDoors(HALL.x0, HALL.z0, HALL.x0, 0, 0, H, 1, 0, [D_.W.hall.z]);  // west, with airlock W and the breaker panel
   wall(HALL.x0, HALL.z0, COR.x0, HALL.z0, 0, H, 0, 1);       // north, up to the corridor opening
   wall(COR.x0, HALL.z0, COR.x1, HALL.z0, CH, H, 0, 1);       // header over the opening
-  wall(HALL.x1, 0, HALL.x1, COR.z0, 0, H, -1, 0);            // east, hall and corridor
+  wallWithDoors(HALL.x1, 0, HALL.x1, COR.z0, 0, H, -1, 0, [D_.E.hall.z]); // east, hall and corridor, with airlock E
   wall(COR.x0, COR.z0, COR.x0, COR.z1, 0, CH, 1, 0);         // corridor west
-  wall(COR.x0, COR.z0, COR.x1, COR.z0, 0, CH, 0, 1);         // corridor end
+  wallWithDoors(COR.x0, COR.z0, COR.x1, COR.z0, 0, CH, 0, 1, [D_.N.hall.x]); // corridor end, with airlock N
   for (const r of [HALL, COR]) floor.add([r.x0, 0, r.z1], [r.x1, 0, r.z1], [r.x1, 0, r.z0], [r.x0, 0, r.z0], [0, 1, 0],
     [[r.x0 / 4, r.z1 / 4], [r.x1 / 4, r.z1 / 4], [r.x1 / 4, r.z0 / 4], [r.x0 / 4, r.z0 / 4]]);
   walls.mesh(new THREE.MeshLambertMaterial({ map: wallTex }));
@@ -158,8 +172,9 @@ export function buildInterior(THREE, scene, { sfx = () => {} } = {}) {
   // Ceilings, wall ribs, roof beams, skirting conduit
   box(0x6e675a, 7, 0.1, 12, 0, H + 0.05, -6);
   box(0x6e675a, 2, 0.1, 3, 2.5, CH + 0.05, -13.5);
+  const inDoor = (x, z) => Object.values(PLACES.doors).some(d => Math.hypot(d.hall.x - x, d.hall.z - z) < DOOR_W / 2 + 0.2);
   for (let z = -1; z > -12; z -= 2) {
-    for (const x of [-3.43, 3.43]) box(G, 0.14, H, 0.2, x, H / 2, z);
+    for (const x of [-3.43, 3.43]) if (!inDoor(x, z)) box(G, 0.14, H, 0.2, x, H / 2, z);
     box(D, 7, 0.16, 0.2, 0, H - 0.08, z);
   }
   for (const x of [-3.45, 3.45]) box(D, 0.08, 0.12, 12, x, 0.06, -6);
@@ -169,14 +184,18 @@ export function buildInterior(THREE, scene, { sfx = () => {} } = {}) {
   // Roof light housings (the glowing strips themselves are a separate mesh, below)
   for (const z of ROOF_ROWS) for (const x of [-2.2, 2.2]) box(D, 0.36, 0.08, 1.56, x, H - 0.04, z);
 
-  // Airlock hatch, on the south wall
-  box(D, 1.7, 2.3, 0.18, 0, 1.15, -0.09); box(G, 1.5, 2.1, 0.06, 0, 1.12, -0.2); box(W, 1.12, 1.82, 0.08, 0, 1.03, -0.24);
-  cyl(G, 0.3, 0.04, 0, 1.5, -0.29, Math.PI / 2); cyl(K, 0.23, 0.05, 0, 1.5, -0.3, Math.PI / 2);
-  for (const x of [-0.72, 0.72]) tube(G, [x, 0.6, -0.34], [x, 1.9, -0.34], 0.022);
-  box(Y, 1.5, 0.004, 0.1, 0, 0.004, -0.75); box(Y, 0.1, 0.004, 0.65, -0.7, 0.004, -0.42); box(Y, 0.1, 0.004, 0.65, 0.7, 0.004, -0.42);
-  const wheel = new THREE.Mesh(new THREE.TorusGeometry(0.19, 0.028, 6, 18), new THREE.MeshLambertMaterial({ color: D }));
-  wheel.position.set(0, 0.98, -0.31); group.add(wheel);
-  for (let i = 0; i < 3; i++) box(D, 0.36, 0.03, 0.03, 0, 0.98, -0.31, 0, 0, i * Math.PI / 3);
+  // The four airlock doors: a heavy frame round each opening on the hall side, hazard stripes on the
+  // floor where the hatch swings, grab handles. The hatch itself belongs to the chamber (client/airlock.js).
+  for (const d of Object.values(PLACES.doors)) {
+    const { x, z, ry } = d.hall, c = Math.cos(ry), sn = Math.sin(ry);
+    const at = (lx, lz) => [x + lx * c + lz * sn, z - lx * sn + lz * c]; // door-local (x across, z out of the hall) to room
+    const fr = (w, h, dp, lx, y, lz) => { const [px, pz] = at(lx, lz); box(D, w, h, dp, px, y, pz, 0, ry, 0); };
+    fr(0.12, DOOR_H + 0.12, 0.1, -DOOR_W / 2 - 0.06, (DOOR_H + 0.12) / 2, -0.04); fr(0.12, DOOR_H + 0.12, 0.1, DOOR_W / 2 + 0.06, (DOOR_H + 0.12) / 2, -0.04);
+    fr(DOOR_W + 0.24, 0.14, 0.1, 0, DOOR_H + 0.07, -0.04);
+    for (const lx of [-DOOR_W / 2 - 0.2, DOOR_W / 2 + 0.2]) { const [a1, b1] = at(lx, -0.08); tube(G, [a1, 0.7, b1], [a1, 1.6, b1], 0.022); }
+    const [sx, sz] = at(0, -0.62); box(Y, 1.3, 0.004, 0.1, sx, 0.004, sz, 0, ry, 0);
+    for (const lx of [-0.62, 0.62]) { const [px, pz] = at(lx, -0.32); box(Y, 0.1, 0.004, 0.6, px, 0.004, pz, 0, ry, 0); }
+  }
 
   // Suit lockers, east wall
   for (let i = 0; i < 4; i++) {
@@ -186,11 +205,19 @@ export function buildInterior(THREE, scene, { sfx = () => {} } = {}) {
   box(D, 0.6, 0.06, 2.1, 3.2, 2.03, -2.0); box(O, 0.4, 0.26, 0.5, 3.2, 2.19, -1.4); box(G, 0.45, 0.2, 0.6, 3.2, 2.16, -2.5);
   blob(1.3, 2.6, 3.1, -2.0);
 
-  // Sealed door with a lit window, west wall, after the door in the concept sketch
-  box(D, 0.2, 2.4, 1.6, -3.42, 1.2, -3); box(G, 0.08, 2.2, 1.4, -3.3, 1.15, -3); box(W, 0.08, 1.9, 1.1, -3.27, 1.0, -3);
-  box(D, 0.04, 0.62, 0.72, -3.235, 1.45, -3); glow(0xe8b872, 0.02, 0.5, 0.6, -3.22, 1.45, -3);
-  box(K, 0.05, 0.22, 0.15, -3.4, 1.3, -1.95); glow(PAL.hex.red, 0.01, 0.03, 0.03, -3.37, 1.36, -1.95);
-  for (const z of [-3.62, -2.38]) for (const y of [0.4, 1.9]) cyl(D, 0.05, 0.1, -3.25, y, z, 0, 0, Math.PI / 2);
+  // The window on the south wall: a round viewport in a heavy collar, looking out at the Moon from the
+  // painted window on Segment C of the habitat (astronaut.js draws the view through it).
+  const WIN = PLACES.window.hall;
+  const win = new THREE.Group(); win.position.set(WIN.x, WIN.y, WIN.z); win.rotation.y = WIN.ry + Math.PI; win.name = 'Window_Hall'; group.add(win); // local +z into the hall
+  {
+    const collar = new THREE.Mesh(new THREE.LatheGeometry([[0.2, 0], [0.27, 0], [0.29, 0.03], [0.28, 0.08], [0.22, 0.09], [0.2, 0.06]].map(([r, y]) => new THREE.Vector2(r, y)), 28), new THREE.MeshLambertMaterial({ color: G }));
+    collar.rotation.x = Math.PI / 2; win.add(collar);
+    for (let i = 0; i < 8; i++) { const a = i * Math.PI / 4; const bolt = new THREE.Mesh(new THREE.CylinderGeometry(0.014, 0.014, 0.02, 6), new THREE.MeshLambertMaterial({ color: D })); bolt.rotation.x = Math.PI / 2; bolt.position.set(Math.cos(a) * 0.245, Math.sin(a) * 0.245, 0.09); win.add(bolt); }
+    const lampW = new THREE.Mesh(new THREE.SphereGeometry(0.022, 10, 8), new THREE.MeshBasicMaterial({ color: PAL.hex.amberOff, toneMapped: false })); lampW.position.set(0.36, 0.2, 0.03); win.add(lampW);
+    win.userData.lamp = lampW;
+  }
+  const windowGlass = new THREE.Mesh(new THREE.CircleGeometry(0.2, 28), new THREE.MeshBasicMaterial({ color: 0x1d1c19 }));
+  windowGlass.position.z = 0.02; windowGlass.name = 'Window_Glass'; win.add(windowGlass);
 
   // Workbench island: an L of two heavy benches with drawers and a gauge. Kept tidy: a working lab.
   box(D, 3.4, 0.1, 0.8, -0.25, 0.05, -4.45); box(G, 3.5, 0.8, 0.9, -0.25, 0.5, -4.45); box(D, 3.6, 0.06, 1.0, -0.25, 0.93, -4.45);
@@ -250,15 +277,13 @@ export function buildInterior(THREE, scene, { sfx = () => {} } = {}) {
   box(G, 0.3, 0.3, 4.6, -3.25, 2.95, -9.6);
   blob(2.2, 2.6, -2.8, -11.2);
 
-  // East wall: a cabinet, an extinguisher, a status screen
+  // East wall: a cabinet, an extinguisher, a status screen (north of airlock E)
   box(G, 0.3, 0.9, 1.6, 3.33, 1.5, -6.0); box(D, 0.02, 0.8, 0.02, 3.175, 1.5, -6.0); glow(PAL.hex.green, 0.012, 0.04, 0.04, 3.175, 1.85, -5.4);
   cyl(R, 0.07, 0.42, 3.38, 1.0, -4.1); cyl(K, 0.03, 0.08, 3.38, 1.25, -4.1);
-  box(K, 0.06, 0.7, 1.2, 3.45, 1.6, -8.6);
+  box(K, 0.06, 0.7, 1.2, 3.45, 1.6, -10.3);
 
-  // Corridor stub and its sealed bulkhead
+  // Corridor stub, out to airlock N
   for (const z of [-13, -14]) { for (const x of [1.57, 3.43]) box(G, 0.12, CH, 0.16, x, CH / 2, z); box(D, 2, 0.12, 0.16, 2.5, CH - 0.06, z); }
-  box(D, 1.5, 2.3, 0.16, 2.5, 1.15, -14.92); box(W, 1.0, 1.9, 0.08, 2.5, 1.0, -14.82); box(D, 0.5, 0.06, 0.03, 2.5, 1.0, -14.77);
-  box(K, 0.12, 0.2, 0.05, 3.15, 1.3, -14.9); glow(PAL.hex.red, 0.04, 0.04, 0.01, 3.15, 1.34, -14.87);
 
   // Build the four batches
   const m4 = new THREE.Matrix4(), v3 = new THREE.Vector3(), s3 = new THREE.Vector3(), col = new THREE.Color();
@@ -289,10 +314,12 @@ export function buildInterior(THREE, scene, { sfx = () => {} } = {}) {
       tex.needsUpdate = true;
     };
   }
-  screen(0.9, 0.2, 360, 80, 0, 2.47, -0.03, Math.PI)([['AIRLOCK  EXIT', 44, PAL.phosphor]]);
-  screen(1.0, 0.2, 400, 80, 2.5, 2.42, -14.83, 0)([['CREW QUARTERS', 40, PAL.amber], ['SEALED', 18, PAL.red]]);
+  screen(0.9, 0.2, 360, 80, 0, 2.47, -0.03, Math.PI)([['AIRLOCK  S', 44, PAL.phosphor]]);
+  screen(0.8, 0.18, 360, 80, 2.5, 2.3, -14.95, 0)([['AIRLOCK  N', 44, PAL.phosphor]]);
+  screen(0.8, 0.18, 360, 80, -3.47, 2.3, -3, Math.PI / 2)([['AIRLOCK  W', 44, PAL.phosphor]]);
+  screen(0.8, 0.18, 360, 80, 3.47, 2.3, -8, -Math.PI / 2)([['AIRLOCK  E', 44, PAL.phosphor]]);
   const lifeScreen = screen(0.5, 0.5, 256, 256, -2.945, 1.25, -10.75, Math.PI / 2);
-  const busScreen = screen(1.1, 0.6, 440, 240, 3.415, 1.6, -8.6, -Math.PI / 2);
+  const busScreen = screen(1.1, 0.6, 440, 240, 3.415, 1.6, -10.3, -Math.PI / 2);
   function drawScreens(out) {
     lifeScreen(out
       ? [['LIFE SUPPORT', 26, PAL.inkDim], ['ON', 54, PAL.red], ['BATTERY', 54, PAL.red], ['FANS OFF', 28, PAL.amber]]
@@ -303,9 +330,17 @@ export function buildInterior(THREE, scene, { sfx = () => {} } = {}) {
   }
   drawScreens(false);
 
-  // The inside of the hatch is how you leave: an unseen pad over the door for the pointer to hit.
-  const hatch = new THREE.Mesh(new THREE.BoxGeometry(1.4, 2.1, 0.4), new THREE.MeshBasicMaterial());
-  hatch.position.set(0, 1.05, -0.2); hatch.visible = false; group.add(hatch);
+  // The hall's twin of each airlock chamber, behind its door. Their inner hatches stand open onto the hall
+  // (astronaut.js swings them); their outer hatches stay shut: the Moon is on the other side.
+  const doors = {};
+  for (const [id, d] of Object.entries(PLACES.doors)) {
+    const a = buildAirlock(THREE, { id, shell: false });
+    a.root.position.set(d.hall.x, 0, d.hall.z); a.root.rotation.y = d.hall.ry;
+    a.setInner(1); a.setOuter(0); a.setLamp('green'); a.setPressure(1);
+    group.add(a.root);
+    doors[id] = a;
+  }
+  const hatch = doors.S.root; // where a hull breach is heard from, indoors
 
   // ---------- lights ----------
   // Fixtures: eight roof strips and six red backup strips, each a glowing box whose colour is its state.
@@ -356,7 +391,7 @@ export function buildInterior(THREE, scene, { sfx = () => {} } = {}) {
   const inSolid = (x, z) => SOLIDS.some(([x0, x1, z0, z1]) => x > x0 - BODY + EPS && x < x1 + BODY - EPS && z > z0 - BODY + EPS && z < z1 + BODY - EPS);
 
   return {
-    group, mount, hatch, damage,
+    group, mount, hatch, damage, doors, window: win, windowGlass,
     // The server's scene, every frame (null between rounds): faults knock things loose, fixes put them back.
     setDamage(scene, audible) { damage.audible = audible; damage.set(scene); },
     get phase() { return phase; },          // 'main' | 'fail' | 'dark' | 'backup' | 'restore'
