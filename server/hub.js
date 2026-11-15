@@ -6,7 +6,7 @@
 // A client is any object the transport hands to add(); the hub sets `role` and `open` on it and
 // calls client.send(stringOrBinary). send() must never throw.
 import { Game } from './game.js';
-import { CFG, ROLES, CREW, PLAYERS, covers } from '../client/shared/config.js';
+import { CFG, ROLES, CREW, PLAYERS, ADMIN_MODES, covers } from '../client/shared/config.js';
 
 const isControl = role => role === 'ops' || role === 'all';
 
@@ -137,6 +137,7 @@ export class Hub {
     else if (m.cmd === 'delay') this.delayOn = !!m.on;
     else if (m.cmd === 'roverFaults') game.setRoverFaults(m.on);
     else if (m.cmd === 'allReal') game.setAllReal(m.on);
+    else if (m.cmd === 'labready') game.labReady(); // the Real Mission: one sample of each kind on the lab's rack
   }
   adminView(who) {
     const connections = [...this.clients].filter(c => c.open).map(c => ({ role: c.admin ? 'admin' : c.role, since: c.since }));
@@ -219,7 +220,7 @@ export class Hub {
       // h is the head height in metres: crouching is how you take cover beside the rover.
       // arms: where each hand is in the body's frame (x right, y up from the floor, z forward), for the
       // rover cameras' figure. Anything that is not three sensible numbers is a hand not being tracked.
-      if (m.t === 'pose' && [m.x, m.z, m.ry].every(Number.isFinite)) game.setPose({ x: m.x, z: m.z, ry: m.ry, h: Number.isFinite(m.h) ? m.h : 1.65, inside: !!m.inside, door: typeof m.door === 'string' ? m.door.slice(0, 2) : null, arms: [0, 1].map(i => arm(m.arms?.[i])) });
+      if (m.t === 'pose' && [m.x, m.z, m.ry].every(Number.isFinite)) game.setPose({ x: m.x, z: m.z, ry: m.ry, h: Number.isFinite(m.h) ? m.h : 1.65, inside: !!m.inside, door: typeof m.door === 'string' ? m.door.slice(0, 2) : null, arms: [0, 1].map(i => arm(m.arms?.[i])), room: m.inside && Number.isFinite(m.rx) && Number.isFinite(m.rz) ? { x: m.rx, z: m.rz } : null });
       else if (m.t === 'do') game.act(m.a);
       else if (m.t === 'ptt') this.sendTo(['ops', 'all'], { t: 'ptt', from: 'astronaut', on: !!m.on }, this.radioLag());
       return;
@@ -237,8 +238,12 @@ export class Hub {
       // Mission Ops marks a tool from the tool log; whoever has the chart marks a spot on it. One at a time.
       const w = m.clear ? null : { tool: m.tool, x: m.x, z: m.z };
       this.later(this.lag(), () => game.setWaypoint(w));
+    } else if (m.t === 'lab' && (ws.role === 'sci' || ws.role === 'all')) {
+      game.labCall(m.exp, m.answer); // the Scientist's call on a lab experiment (the Real Mission)
+    } else if (m.t === 'breaker' && (ws.role === 'tech' || ws.role === 'all')) {
+      game.setBreaker(m.id, m.on);
     } else if (isControl(ws.role)) {
-      if (m.t === 'mode') game.setMode(m.mode);
+      if (m.t === 'mode' && !ADMIN_MODES.includes(m.mode)) game.setMode(m.mode); // the Real Mission is the admin's to choose
       else if (m.t === 'start' && !this.requireFullCrew) game.start(); // normally the crew starts it by readying up
       else if (m.t === 'reset') this.resetGame();
       else if (m.t === 'ptt') this.sendTo(['astronaut'], { t: 'ptt', from: 'ops', on: !!m.on }, this.radioLag());

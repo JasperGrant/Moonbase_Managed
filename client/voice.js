@@ -258,6 +258,11 @@ export class Radio {
     if (kind === 'lock') { this.tone(120, 0.16, 0.2, 'square'); this.burst(0.12, 0.22, 'lowpass', 600); this.tone(1600, 0.03, 0.05, 'square', 0.13); }
     if (kind === 'drill') { this.burst(0.3, 0.07, 'bandpass', 240 + Math.random() * 60); this.tone(92, 0.3, 0.03, 'sawtooth'); }
     if (kind === 'tick') this.tone(1900, 0.02, 0.04, 'square');
+    // The lab (client/lab.js): a relay latching, a filament burning out, gas let off, a run's step done.
+    if (kind === 'latch') { this.tone(240, 0.05, 0.12, 'square'); this.burst(0.05, 0.1, 'bandpass', 1400); }
+    if (kind === 'burn') { this.burst(0.25, 0.16, 'highpass', 2000); this.tone(70, 0.3, 0.1, 'sawtooth'); }
+    if (kind === 'hiss') this.burst(0.5, 0.07, 'highpass', 2600);
+    if (kind === 'chime') { this.tone(1046, 0.25, 0.06); this.tone(1568, 0.35, 0.05, 'sine', 0.12); }
     if (kind === 'core') { this.sweep(180, 520, 0.45, 0.05, 'triangle'); this.tone(1250, 0.12, 0.06, 'triangle', 0.48); this.tone(1870, 0.08, 0.03, 'triangle', 0.5); }
     if (kind === 'ping') { this.tone(1400, 0.06, 0.05); this.tone(1400, 0.25, 0.025, 'sine', 0.07); }
     if (kind === 'watch') { this.tone(2100, 0.05, 0.03, 'square'); this.tone(2100, 0.05, 0.03, 'square', 0.12); }

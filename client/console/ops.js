@@ -6,6 +6,7 @@ import { drawTool } from '/shared/icons.js';
 import { TOOLS } from '/shared/config.js';
 import { face, well, title, tile, keycap, flow, label, typed, nixie, jewel, icon, needle, TAU } from './instruments.js';
 import { regionOf } from './desk.js';
+import { labTiles } from './lab.js';
 
 const TOOL_IDS = Object.keys(TOOLS);
 // Where a tool can lie in the hall: the names the server gives (PLACES.toolSpots), laid out as a plan of the hall,
@@ -97,7 +98,7 @@ export function beaconRing(g, x, y, r) {
   icon(g, 'link', x + r * 0.78, y - r * 0.78, Math.max(12, r * 0.45), PAL.amber);
 }
 
-const TAPE_ICON = { alarm: ['bell', 'red'], solve: ['fixed', 'inkDial'], hit: ['meteor', 'red'], blackout: ['dark', 'red'], power: ['bolt', 'inkDial'], gen: ['bolt', 'inkDial'], found: ['banked', 'inkDial'], dud: ['dud', 'inkDial'] };
+const TAPE_ICON = { alarm: ['bell', 'red'], solve: ['fixed', 'inkDial'], hit: ['meteor', 'red'], blackout: ['dark', 'red'], power: ['bolt', 'inkDial'], gen: ['bolt', 'inkDial'], found: ['banked', 'inkDial'], dud: ['dud', 'inkDial'], finding: ['flask', 'inkDial'] };
 // The mission tape: the whole mission on paper, a needle at now, a mark for each thing that has happened.
 export function tape(g, x, y, w, h, s, events, roundSeconds) {
   g.fillStyle = PAL.dial; g.fillRect(x, y, w, h); g.strokeStyle = PAL.bezel; g.lineWidth = 2; g.strokeRect(x, y, w, h);
@@ -191,6 +192,7 @@ export function layout(W, H, ctx) {
       // the samples, and the tape
       sampleFlow(g, R.x + 22, top + 54, R.w - 44, s);
       ctx.shown.drill = drillRow(g, R.x + 22, drillY, R.w - 44, s);
+      if (s.lab) { labTiles(g, R.x + 22, drillY - 24, R.w - 44, s, 28); ctx.shown.labBoard = Object.fromEntries(Object.entries(s.lab.board).map(([k, b]) => [k, b.grade || b.state])); }
       ctx.shown.beacon = s.waypoint ? (s.waypoint.tool || 'ground') : null;
       tape(g, R.x + 22, tapeY, R.w - 44, 80, s, ctx.tape, ctx.roundSeconds);
       ctx.shown.hands = hands.map(hd => hd?.tool || (hd?.rock ? 'rock' : null));

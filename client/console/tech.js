@@ -5,6 +5,7 @@ import { PAL, FONT } from '/shared/palette.js';
 import { ROVERS } from '/shared/config.js';
 import { face, tile, keycap, arrow, label, nixie, jewel, icon, edgewise, homeDial, monitor, phos, blinkOn, TAU, GLASS_R } from './instruments.js';
 import { regionOf } from './desk.js';
+import { breakers, BREAKER_IDS } from './lab.js';
 
 export const CAM_IDS = ['scout', 'hauler'];
 export const DRIVE = { scout: ['KeyW', 'KeyA', 'KeyS', 'KeyD'], hauler: ['ArrowUp', 'ArrowLeft', 'ArrowDown', 'ArrowRight'] };
@@ -97,6 +98,7 @@ export function layout(W, H, ctx) {
   const ky = H - 39;
   const hits = [
     ...CAM_IDS.map((id, n) => ({ ...glass[n], name: `${ROVERS[id].name} camera: click or ${VIEW_KEY[id][1]} to change the view, wheel for distance`, click: () => ctx.cam()?.toggle(id), wheel: dy => { const c = ctx.cam(); if (c?.view(id) === 'third') c.zoom(id, dy); } })),
+    ...BREAKER_IDS.map((id, i) => ({ x: 655 + i * 56 - 16, y: top + 400, w: 32, h: 70, name: `Lab breaker: ${id === 'furnace' ? 'the furnace (a big load: it runs the battery down)' : 'the cold box'}. Click to throw it`, click: () => { const s = ctx.state(); if (s?.lab) ctx.breaker(id, !s.lab.breakers[id]); } })),
     { x: 616, y: top, w: 134, h: h, name: 'Meteor warning' },
     ...CAM_IDS.map((id, n) => ({ x: glass[n].x - 10, y: panelY, w: cw + 20, h: 148, name: `${ROVERS[id].name}: way home, range, speed, wheel${id === 'hauler' ? ', rider' : ''}` })),
     ...driveHits(200, ky, 'scout', ctx), ...driveHits(950, ky, 'hauler', ctx),
@@ -115,6 +117,7 @@ export function layout(W, H, ctx) {
       CAM_IDS.forEach((id, n) => { glassHud(g, glass[n], id, s, cam?.view(id), !!cam); roverInstruments(g, glass[n].x, panelY, id, s); });
       meteorTiles(g, 683, top + 70, s);
       tile(g, 683, top + 330, 70, 'cover', 'amber', s.meteor ? 1 : 0);
+      if (s.lab) { breakers(g, 655, top + 410, s); ctx.shown.breakers = { ...s.lab.breakers }; }
       ctx.shown.view = Object.fromEntries(CAM_IDS.map(id => [id, cam?.view(id) || null]));
       ctx.shown.wheel = Object.fromEntries(CAM_IDS.map(id => [id, (s.scene?.wheels?.[id] || 0) > 0]));
       ctx.shown.meteor = s.meteor ? Math.ceil(s.meteor.eta) : null;

@@ -8,6 +8,8 @@
 import { CFG, TOOLS, FAULTS, PLACES, SCRIPTS, MODES, DUST_CELLS, CRACK_POINTS, ROVERS, HAULER, SAMPLES } from '../client/shared/config.js';
 import { sheltered, areaName, freeHand } from '../client/shared/rules.js';
 import { FIELD, cellOf, layField, pushOut } from '../client/shared/field.js';
+import { Lab } from './lab.js';
+import { EXPERIMENTS, LAB } from '../client/shared/lab.js';
 
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 
@@ -26,7 +28,9 @@ export class Game {
   reset() {
     this.phase = 'lobby';
     this.debriefLeft = 0;
-    this.timeLeft = CFG.roundSeconds;
+    this.round = this.mode === 'real' ? CFG.real.roundSeconds : CFG.roundSeconds; // this mission's length
+    this.timeLeft = this.round;
+    this.lab = null;           // the Real Mission's lab (server/lab.js), or null
     this.o2Max = CFG.o2Start;
     this.oxygen = CFG.o2Start;
     this.score = 0;
@@ -43,7 +47,7 @@ export class Game {
     this.log = [];
     this.ev = null;
     this.result = null;
-    this.stats = { fixed: 0, hits: 0, blackouts: 0, samples: 0, wanted: 0, duds: 0 };
+    this.stats = { fixed: 0, hits: 0, blackouts: 0, samples: 0, wanted: 0, duds: 0, findings: 0 };
     const door = PLACES.doors[CFG.spawn.door];
     this.astro = { x: door.x, z: door.z, ry: Math.PI, h: 1.65, inside: !!CFG.spawn.inside, door: CFG.spawn.door, riding: null };
     const rover = p => ({ x: p.x, z: p.z, ry: 0, v: 0, w: 0, throttle: 0, steer: 0 }); // parked facing out, away from the base
@@ -65,6 +69,8 @@ export class Game {
   setMode(mode) {
     if (this.phase !== 'lobby' || !MODES[mode]) return false;
     this.mode = mode;
+    this.round = mode === 'real' ? CFG.real.roundSeconds : CFG.roundSeconds;
+    this.timeLeft = this.round;
     return true;
   }
 
@@ -88,12 +94,13 @@ export class Game {
     this.samples = f.samples.map(s => ({ ...s, at: 'ground', free: false })); // free: cored, and loose to pick up
     this.heat = f.heat;
     this.manifest = f.manifest.map(kind => ({ kind, got: false }));
-    this.next = CFG.firstFaultSeconds;
+    this.next = this.mode === 'real' ? CFG.real.firstFaultSeconds : CFG.firstFaultSeconds;
+    if (this.mode === 'real') this.lab = new Lab(this.rng);
     this.note('start', `Mission start: ${MODES[this.mode]}.`);
     return true;
   }
 
-  get elapsed() { return CFG.roundSeconds - this.timeLeft; }
+  get elapsed() { return this.round - this.timeLeft; }
   // The base has power: lights on, and the suit refills indoors. The radio and the consoles work either way.
   get powered() { return !this.blackout || this.genLeft > 0; }
   get leaking() { return !!(this.faults.hull || this.faults.suit); }
@@ -208,7 +215,9 @@ export class Game {
 
     // Power: a power fault drains the battery, and a flat battery darkens the base.
     const draining = this.faults.dust;
-    this.battery += (draining ? -100 / CFG.batterySeconds : 100 / CFG.rechargeSeconds) * dt;
+    // The lab's loads (the furnace above all) eat into the charge: with the furnace on, the battery runs down.
+    const labLoad = this.lab ? this.lab.load * 100 / CFG.rechargeSeconds + this.lab.drain : 0;
+    this.battery += ((draining ? -100 / CFG.batterySeconds : 100 / CFG.rechargeSeconds) - labLoad) * dt;
     this.battery = clamp(this.battery, 0, 100);
     if (!this.blackout && this.battery <= 0) {
       this.blackout = true;
@@ -229,8 +238,12 @@ export class Game {
     let d = -CFG.o2DrainPerSec * this.drain;
     if (this.astro.inside && this.powered) d += CFG.o2RefillPerSec;
     this.oxygen = Math.min(this.o2Max, this.oxygen + d * dt);
+    if (this.lab) this.lab.tick(dt, { now, powered: this.powered });
     if (this.oxygen <= 0) this.end(false, 'Suit oxygen ran out.');
-    else if (this.timeLeft <= 0) {
+    else if (this.timeLeft <= 0 && this.lab) {
+      const n = this.lab.done.length;
+      this.end(n >= CFG.real.win, n >= CFG.real.win ? `Science return: ${n} of 4 experiments have a finding.` : `Came home with too little science: ${n} of 4 experiments have a finding.`);
+    } else if (this.timeLeft <= 0) {
       const done = this.manifest.every(x => x.got);
       this.end(done, done ? 'The manifest is banked: every sample the mission came for is home.' : 'Came home short: the manifest is not banked.');
     }
@@ -378,6 +391,11 @@ export class Game {
       if (this.astro.inside || !this.near(this.rovers.hauler, 4)) return;
       this.unCarry(s.id);
       s.at = 'tray'; s.slot = a.slot; this.tray[a.slot] = s.id;
+    } else if (a.lab !== undefined) {
+      // The astronaut's hands on a lab instrument: they have to be in the hall, at that instrument.
+      if (!this.lab || !a.lab || typeof a.lab !== 'object') return;
+      const near = exp => { const p = LAB[exp], r = this.astro.room; return !!p && this.astro.inside && !!r && Math.hypot(r.x - p.x, r.z - p.z) <= LAB.reach; };
+      this.labSound = this.lab.act(a.lab, { now: this.elapsed, near, powered: this.powered });
     } else if (a.bank !== undefined) {
       const s = this.sample(a.bank);
       if (!s || s.at !== 'hand' || !this.astro.inside) return; // the port is in the hall: samples come home
@@ -455,7 +473,36 @@ export class Game {
     this.score += pts;
     this.assay = { kind: s.kind, look: s.look, n: this.evn + 1 };
     this.note('found', `${SAMPLES[s.kind].name} banked${want ? '' : ' (not on the manifest)'}.`, 0, pts);
+    if (this.lab) this.lab.receive(s, this.elapsed); // the Real Mission: it opens its experiment in the lab
   }
+
+  // The Scientist's call on a lab experiment (server/lab.js). A finished one is a finding: points, and the
+  // mission ends, won, once all four are done.
+  labCall(exp, answer) {
+    if (this.phase !== 'run' || !this.lab) return;
+    const f = this.lab.call(exp, answer);
+    if (!f) return;
+    this.score += f.pts;
+    this.stats.findings++;
+    this.note('finding', `${EXPERIMENTS[exp].name}: a finding, grade ${f.grade}.`, 0, f.pts);
+    if (this.lab.done.length === Object.keys(EXPERIMENTS).length) this.end(true, 'Full science return: every experiment has a finding.');
+  }
+  // The admin's shortcut for a demonstration or a solo lab (docs/SPEC-real-mission.md, 9.6): one sample of each
+  // kind arrives on the rack as if it had come through the port, and opens its experiment. It scores nothing.
+  labReady() {
+    if (this.phase !== 'run' || !this.lab) return;
+    for (const kind of Object.keys(SAMPLES)) {
+      if (this.lab.x[Object.keys(EXPERIMENTS).find(e => EXPERIMENTS[e].kind === kind)].state !== 'locked') continue;
+      const s = this.samples.find(x => x.kind === kind && x.at !== 'banked');
+      if (!s) continue;
+      this.unCarry(s.id); if (s.at === 'tray') this.tray[s.slot] = null;
+      s.at = 'banked';
+      this.lab.receive(s, this.elapsed);
+    }
+    this.note('found', 'Samples put on the lab rack by the admin.');
+  }
+  // The Technician's breakers on the lab's loads.
+  setBreaker(id, on) { if (this.phase === 'run' && this.lab) this.lab.breaker(id, on); }
 
   solve(type) {
     delete this.faults[type];
@@ -557,6 +604,8 @@ export class Game {
     v.o2Max = this.o2Max;
     v.tally = this.tally;
     v.real = this.phase === 'lobby' ? this.allReal : !!this.real; // no lookalikes in this mission (the consoles leave out NOT THIS and DUD)
+    v.round = this.round;
+    if (this.lab) v.lab = this.lab.view(role === 'all' ? 'sci' : role);
     const rovers = {};
     for (const [id, r] of Object.entries(this.rovers)) rovers[id] = { x: r.x, z: r.z, ry: r.ry, v: r.v };
     const all = role === 'all';

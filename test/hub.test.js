@@ -319,10 +319,31 @@ function setup(opts = {}) {
   const { hub, join, say } = setup();
   const a = join('astronaut');
   say(a, { t: 'pose', x: 1, z: 2, ry: 0.5, h: 1.6, inside: true, door: 'S', arms: [[-0.3, 1.1, 0.4], [0.2, 'x', 0]] });
-  assert.deepEqual(hub.game.astro, { x: 1, z: 2, ry: 0.5, h: 1.6, inside: true, door: 'S', riding: null, arms: [[-0.3, 1.1, 0.4], null] }, 'a hand that is not three numbers is not tracked');
+  assert.deepEqual(hub.game.astro, { x: 1, z: 2, ry: 0.5, h: 1.6, inside: true, door: 'S', riding: null, arms: [[-0.3, 1.1, 0.4], null], room: null }, 'a hand that is not three numbers is not tracked');
+  say(a, { t: 'pose', x: 1, z: 2, ry: 0.5, inside: true, door: 'S', rx: -3, rz: -9.2 });
+  assert.deepEqual(hub.game.astro.room, { x: -3, z: -9.2 }, 'indoors, the pose says where in the hall (for the lab)');
   say(a, { t: 'pose', x: 1, z: 2, ry: 0.5, arms: [[9, 1, 0]] });
   assert.deepEqual(hub.game.astro.arms, [null, null], 'a hand out of reach of the body is dropped');
   assert.equal(hub.game.astro.inside, false);
 }
 
+
+// The Real Mission is the admin's to choose: a seat cannot set it, the admin can.
+{
+  const { hub, join, say } = setup();
+  const o = join('ops'), admin = join('admin');
+  say(o, { t: 'mode', mode: 'real' });
+  assert.notEqual(hub.game.mode, 'real', 'Mission Ops cannot choose the Real Mission');
+  say(admin, { t: 'admin', cmd: 'mode', mode: 'real' });
+  assert.equal(hub.game.mode, 'real', 'the admin can');
+  hub.game.start();
+  const s = join('sci'), t = join('tech');
+  say(t, { t: 'breaker', id: 'furnace', on: true });
+  assert.equal(hub.game.lab.breakers.furnace, true, 'the Technician throws the lab breakers');
+  say(o, { t: 'breaker', id: 'furnace', on: false });
+  assert.equal(hub.game.lab.breakers.furnace, true, 'Mission Ops cannot');
+  hub.game.lab.x.E1.state = 'loaded';
+  say(s, { t: 'lab', exp: 'E1', answer: { grain: 0, mineral: 'plag' } });
+  assert.equal(hub.game.lab.x.E1.calls[0], 'plag', 'the Scientist calls the lab');
+}
 console.log('all lobby and admin tests passed');

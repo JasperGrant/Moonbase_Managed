@@ -5,6 +5,7 @@ import { Hub } from '../server/hub.js';
 import { CFG, TOOLS, FAULTS, PLACES, SCRIPTS, DUST_CELLS, CRACK_POINTS, ROVERS, SAMPLES } from '../client/shared/config.js';
 import { OBSTACLES, BOULDERS, FIELD, layField } from '../client/shared/field.js';
 import { sheltered } from '../client/shared/rules.js';
+import { LAB, E2, E3, E4, ageOf } from '../client/shared/lab.js';
 
 let seed = 42;
 const rng = () => (seed = (seed * 1664525 + 1013904223) % 4294967296) / 4294967296;
@@ -569,7 +570,7 @@ const kit = (g, tool) => {
   const g = fresh();
   g.break('dust'); g.break('hull'); g.break('suit'); // (the test forces what the director never would)
   const only = (role, allowed) => { for (const k of Object.keys(g.view(role))) assert.ok(allowed.includes(k), `${role} sees ${k}`); };
-  const common = ['t', 'n', 'phase', 'mode', 'crew', 'score', 'result', 'powered', 'ev', 'timeLeft', 'oxygen', 'o2Max', 'tally', 'real'];
+  const common = ['t', 'n', 'phase', 'mode', 'crew', 'score', 'result', 'powered', 'ev', 'timeLeft', 'oxygen', 'o2Max', 'tally', 'real', 'round'];
   only('astronaut', [...common, 'hands', 'tools', 'scene', 'suit', 'rovers', 'riding', 'carry', 'waypoint']);
   only('ops', [...common, 'hands', 'tools', 'carry', 'tray', 'waypoint', 'drill']);
   only('tech', [...common, 'rovers', 'rider', 'scene', 'astro', 'meteor', 'tools']);
@@ -659,5 +660,110 @@ const kit = (g, tool) => {
   for (let i = 0; i < 20; i++) g.tick(0.1);
   assert.equal(g.phase, 'lobby', 'an unattended debrief goes back to the lobby');
   assert.equal(g.mode, 'free', 'and keeps the mode');
+}
+
+// ---------- the Real Mission's lab (docs/SPEC-real-mission.md) ----------
+{
+  // A real mission: 15 minutes, one sample of each kind on the manifest, a lab of four locked experiments.
+  const g = fresh('real');
+  assert.equal(g.round, CFG.real.roundSeconds); assert.equal(g.timeLeft, CFG.real.roundSeconds);
+  assert.deepEqual([...g.manifest.map(m => m.kind)].sort(), ['anor', 'basalt', 'glass', 'ice']);
+  assert.ok(Object.values(g.lab.x).every(e => e.state === 'locked'), 'every experiment is locked until its sample is home');
+  assert.equal(fresh('demo').lab, null, 'the demo has no lab');
+  // Banking a sample opens its experiment; it can only be worked from beside the instrument.
+  const bring = kind => { const s = g.samples.find(x => x.kind === kind); s.free = true; at(g, s); g.act({ pick: s.id }); inside(g); g.act({ bank: s.id }); return s; };
+  const stand = exp => { g.astro.room = { x: LAB[exp].x - 0.8 * Math.sin(-LAB[exp].ry), z: LAB[exp].z }; };
+  const lab = (exp, op, v) => g.act({ lab: { exp, op, v } });
+  bring('anor');
+  assert.equal(g.lab.x.E1.state, 'ready');
+  g.astro.room = { x: 0, z: -1 }; lab('E1', 'load');
+  assert.equal(g.lab.x.E1.state, 'ready', 'too far from the microscope to load it');
+  stand('E1'); lab('E1', 'load');
+  assert.equal(g.lab.x.E1.state, 'loaded');
+
+  // E1: focus, polariser in, turn each grain half round, call all three right: an A.
+  const e1 = g.lab.x.E1;
+  while (Math.abs(e1.focus - e1.target) > 0.05) lab('E1', 'focus', Math.sign(e1.target - e1.focus) * 0.05);
+  lab('E1', 'pol');
+  for (let gr = 0; gr < 3; gr++) { for (let i = 0; i < 12; i++) lab('E1', 'stage', 1); if (gr < 2) lab('E1', 'next'); }
+  assert.ok(e1.turned.every(t => t >= 180));
+  const sc = g.score;
+  e1.grains.forEach((m, i) => g.labCall('E1', { grain: i, mineral: m }));
+  assert.equal(e1.state, 'done'); assert.equal(e1.grade, 'A'); assert.equal(g.score, sc + 300);
+  assert.equal(g.ev.kind, 'finding');
+
+  // E2: beam on before the vacuum is good burns the filament: at best a B. Then a careful run.
+  bring('basalt'); stand('E2'); lab('E2', 'load');
+  const e2 = g.lab.x.E2;
+  lab('E2', 'beam'); assert.ok(e2.burnt > 0 && e2.capB, 'the filament burns in air');
+  for (let i = 0; i < 400; i++) g.tick(0.1); // the burn passes
+  lab('E2', 'pump'); for (let i = 0; i < 120; i++) g.tick(0.1);
+  assert.ok(e2.vac >= 0.9); lab('E2', 'beam'); assert.ok(e2.beam);
+  const go = m => { while (Math.abs(e2.mass - m) > 0.001) lab('E2', 'mass', Math.sign(m - e2.mass) * Math.min(1, Math.abs(m - e2.mass))); };
+  go(39); lab('E2', 'latch'); go(40); lab('E2', 'latch');
+  assert.deepEqual(e2.latched.map(l => l.peak), [39, 40]);
+  const age = ageOf(e2.latched[1].counts / e2.latched[0].counts);
+  assert.ok(Math.abs(age - e2.age) < 0.05, 'centred peaks give the rock its age');
+  g.labCall('E2', age);
+  assert.equal(e2.grade, 'B', 'a burnt filament caps it at B');
+
+  // E3: needs the Technician's breaker; hold each band; call the water right.
+  bring('glass'); stand('E3'); lab('E3', 'load');
+  const e3 = g.lab.x.E3;
+  for (let i = 0; i < 50; i++) g.tick(0.1);
+  assert.ok(e3.temp < 30, 'no power to the furnace, no heat');
+  g.setBreaker('furnace', true);
+  g.battery = 100; g.lab.rng = () => 0.5; // no drift, for the test
+  for (const k of [0, 1, 2]) {
+    const band = E3.steps[k];
+    while (Math.abs(e3.set - (band.lo + band.hi) / 2) > 1) lab('E3', 'set', (band.lo + band.hi) / 2 - e3.set);
+    for (let i = 0; i < 400 && e3.step === k; i++) { g.tick(0.1); g.battery = 100; }
+  }
+  assert.equal(e3.step, 3, 'three steps held');
+  g.labCall('E3', e3.water);
+  assert.equal(e3.state, 'done'); assert.ok(['A', 'B'].includes(e3.grade));
+  assert.equal(g.lab.breakers.furnace, false, 'the furnace switches off when the run is done');
+
+  // E4: the ice's clock runs from the port. Late into the box: at best a B.
+  bring('ice');
+  for (let i = 0; i < 1000; i++) g.tick(0.1); // 100 s on the rack
+  stand('E4'); lab('E4', 'load');
+  const e4 = g.lab.x.E4;
+  assert.ok(e4.warm > E4.clockA);
+  lab('E4', 'weigh', 2.5); assert.ok(e4.w1 > 0);
+  lab('E4', 'valve'); for (let i = 0; i < 160; i++) g.tick(0.1);
+  assert.equal(e4.sub, E4.subSeconds);
+  lab('E4', 'weigh', 2.5); assert.ok(e4.w2 < e4.w1, 'the water came off');
+  lab('E4', 'reader');
+  g.labCall('E4', e4.source);
+  assert.equal(e4.grade, 'B');
+  assert.equal(g.phase, 'results', 'all four done: the mission ends');
+  assert.ok(g.result.won); assert.equal(g.result.findings, 4);
+}
+{
+  // The furnace runs the battery down, but slowly enough for a run: a full battery lasts over three minutes of it.
+  const g = fresh('real'); g.lab.breaker('furnace', true);
+  for (let i = 0; i < 1800; i++) g.tick(0.1);
+  assert.ok(!g.blackout && g.battery > 0, 'three minutes of furnace on a full battery');
+  for (let i = 0; i < 600; i++) g.tick(0.1);
+  assert.ok(g.blackout, 'but not forever: the Technician has to switch it off');
+}
+{
+  // The admin's shortcut: one sample of each kind on the rack, every experiment ready, no points for it.
+  const g = fresh('real'), sc = g.score;
+  g.labReady();
+  assert.ok(Object.values(g.lab.x).every(e => e.state === 'ready')); assert.equal(g.score, sc);
+  assert.equal(fresh('demo').labReady(), undefined);
+}
+{
+  // Who sees what of the lab: the astronaut sees the instruments, never the reference; Ops the board.
+  const g = fresh('real');
+  assert.ok(!('grains' in g.view('astronaut').lab.E1) && !('target' in g.view('astronaut').lab.E1));
+  assert.ok(!('water' in g.view('sci').lab.E3) && !('source' in g.view('sci').lab.E4) && !('age' in g.view('sci').lab.E2));
+  assert.deepEqual(Object.keys(g.view('ops').lab), ['board']);
+  assert.ok('breakers' in g.view('tech').lab);
+  // At the end of the clock: won with two findings or more.
+  g.timeLeft = 0.05; g.tick(0.1);
+  assert.equal(g.phase, 'results'); assert.equal(g.result.won, false, 'no findings: not a success');
 }
 console.log('all game tests passed');

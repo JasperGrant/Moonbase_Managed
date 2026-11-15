@@ -52,6 +52,9 @@ export const CFG = {
   // One thing goes wrong at a time. A fault or a shower starts only when nothing is broken and no shower is
   // under way, and after each fix there is a breather of faultGapSeconds before the next.
   firstFaultSeconds: 30,      // the quiet start: read the chart, send the Scout out, find a tool
+  // The Real Mission (docs/SPEC-real-mission.md): longer, with a lab of four experiments. Won with at least
+  // `win` findings; it ends early, won, once all four are done.
+  real: { roundSeconds: 900, firstFaultSeconds: 300, win: 2 },
   faultGapSeconds: 20,
   freeMaxFaults: 1,
   freeMeteorChance: 0.25,     // free play: the chance the next event is a shower rather than a fault
@@ -168,6 +171,11 @@ export const SCRIPTS = {
   free: [
     { ev: 'dust' },
   ],
+  // The Real Mission: the base still breaks, but twice and late, so the lab has room (CFG.real).
+  real: [
+    { ev: 'dust' },
+    { ev: 'hull' },
+  ],
 };
 
 // The two rovers. The Technician drives both at once: the Scout with W A S D, the Hauler with the arrows.
@@ -191,7 +199,9 @@ export const SAMPLES = {
   ice:    { name: 'Ice-bearing clod', look: 'frost-blue',  dud: 'dusty-pale',  glyph: 'star',    where: 'shadow', tell: 'frost' },
 };
 export const LOOKS = Object.values(SAMPLES).flatMap(t => [t.look, t.dud]);
-export const MODES = { demo: 'Demo mission', free: 'Free play' };
+export const MODES = { demo: 'Demo mission', free: 'Free play', real: 'Real mission' };
+// Modes only the admin console may set (docs/SPEC-real-mission.md, 8.1): the lobby's mission picker leaves them out.
+export const ADMIN_MODES = ['real'];
 
 export const ROLES = {
   astronaut: 'Astronaut',

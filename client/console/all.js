@@ -14,6 +14,7 @@ import { regionOf } from './desk.js';
 import { handsOf, drawHand, toolLamp, sampleFlow, drillRow, beaconRing } from './ops.js';
 import { CAM_IDS, VIEW_KEY, glassHud, roverInstruments, meteorTiles, driveKeys, driveHits } from './tech.js';
 import { scope, faultTiles, guideRows, guideAssay, chart, clickScope, RANGES, CENTRES } from './sci.js';
+import { labPage, labClick, labTiles, LW } from './lab.js';
 import { knob, nixie } from './instruments.js';
 
 const TOOL_IDS = Object.keys(TOOLS);
@@ -37,7 +38,10 @@ export function layout(W, H, ctx) {
   const R = Math.min(140, Math.floor((h - 300) / 2)), CX = Rt.x + 22 + R, CY = top + 20 + R, KX = Rt.x + Rt.w - 60;
   const gy = CY + R + 64, grow = Math.min(70, (top + h - gy - 70) / 4);
   const ky = H - 39;
+  // The Real Mission: L puts the LAB page (client/console/lab.js) in the right-hand column, over the scope.
+  const labK = (Rt.w - 16) / LW, labOn = () => !!ctx.state()?.lab && ctx.labView();
   const hits = [
+    { x: Rt.x, y: top, w: Rt.w, h, when: labOn, name: 'The lab (L for the chart)', click: p => labClick({ x: (p.x - Rt.x - 8) / labK, y: (p.y - top - 8) / labK }) },
     { x: L.x + 14, y: handsY, w: L.w - 28, h: u + 20, name: 'The astronaut\'s hands' },
     ...TOOL_IDS.map((id, i) => ({ x: L.x + 14, y: toolsY + 34 + i * rowH, w: L.w - 28, h: rowH, name: `${TOOLS[id].name}: green in a hand, amber lying where it says, dark used up. Click to light a beacon over it`, click: () => ctx.beaconTool(id) })),
     { x: L.x + 14, y: drillY, w: L.w - 28, h: 34, name: 'The core drill' },
@@ -73,6 +77,12 @@ export function layout(W, H, ctx) {
       ctx.shown.beacon = s.waypoint ? (s.waypoint.tool || 'ground') : null;
       const cam = ctx.cam();
       CAM_IDS.forEach((id, n) => { glassHud(g, glass[n], id, s, cam?.view(id), !!cam); roverInstruments(g, glass[n].x + 4, glass[n].y + mh + 38, id, s, 0.45); });
+      if (s.lab && ctx.labView()) {
+        face(g, Rt.x, top, Rt.w, h, true);
+        g.save(); g.translate(Rt.x + 8, top + 8); g.scale(labK, labK); labPage(g, s, ctx, (h - 16) / labK); g.restore();
+        ctx.shown.labView = true;
+      } else {
+      ctx.shown.labView = false;
       // the scope
       scope(g, s, CX, CY, R, ctx.sfx);
       knob(g, KX, CY - R + 40, RANGES, chart.range, null);
@@ -80,7 +90,9 @@ export function layout(W, H, ctx) {
       faultTiles(g, Rt.x + 40, CY + R + 32, s, 30, 4);
       nixie(g, String(s.survey?.pct ?? 0).padStart(3, ' '), Rt.x + Rt.w - 74, CY + R + 32, 20); icon(g, 'scope', Rt.x + Rt.w - 30, CY + R + 32, 18, PAL.inkDim);
       guideRows(g, s, Rt.x + 14, gy, Rt.w - 28, grow);
-      guideAssay(g, s, Rt.x + 14, top + h - 56, Rt.w - 28, 44);
+      if (s.lab) labTiles(g, Rt.x + 14, top + h - 34, Rt.w - 28, s, 30); // the four experiments, in place of the assay strip
+      else guideAssay(g, s, Rt.x + 14, top + h - 56, Rt.w - 28, 44);
+      }
       ctx.shown.hands = handsOf(s).map(hd => hd?.tool || (hd?.rock ? 'rock' : null));
       ctx.shown.tools = Object.fromEntries(TOOL_IDS.map(id => [id, where(s, id)]));
       ctx.shown.talk = ctx.talk().state;
@@ -95,6 +107,7 @@ export function layout(W, H, ctx) {
       icon(g, 'hauler', 680, y, 30, PAL.inkDim); driveKeys(g, 760, y, 'hauler', keys); keycap(g, 850, y, 30, 26, '/', keys.has('Slash'));
       keycap(g, 950, y, 30, 26, 'R', keys.has('KeyR')); icon(g, 'lens', 984, y, 20, PAL.inkDim);
       keycap(g, 1040, y, 30, 26, 'E', keys.has('KeyE')); icon(g, 'scope', 1074, y, 20, PAL.inkDim);
+      if (s.lab) { keycap(g, 1110, y, 30, 26, 'L', ctx.labView()); icon(g, 'flask', 1140, y, 20, PAL.inkDim); }
       const m = s.meteor;
       tile(g, 1200, y, 46, 'meteor', 'red', m ? 1 : 0);
       nixie(g, m ? (m.falling ? '00' : String(Math.ceil(m.eta)).padStart(2, '0')) : '  ', 1270, y, 30, { lit: !!m });

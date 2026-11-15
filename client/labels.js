@@ -15,7 +15,11 @@ export const TAGS = {
   tire: ['SPACE TIRE', 'ROVER WHEELS'], gen: ['GENERATOR', 'PULL CORD'],
   wrench: ['WRENCH', null], ratchet: ['RATCHET', null], hammer: ['HAMMER', null], 'grease-gun': ['GREASE GUN', null],
 };
-export const PLATES = { port: 'SAMPLE PORT', solar: 'SOLAR ARRAY', tray: 'SAMPLE TRAY', rail: 'RIDER: HOLD RAIL' };
+export const PLATES = { port: 'SAMPLE PORT', solar: 'SOLAR ARRAY', tray: 'SAMPLE TRAY', rail: 'RIDER: HOLD RAIL',
+  // The Real Mission's lab (client/lab.js): the instruments, and the controls on them.
+  E1: 'MICROSCOPE', E2: 'MASS SPECTROMETER', E3: 'STEP FURNACE', E4: 'COLD BOX', lab: 'LAB', load: 'LOAD',
+  focus: 'FOCUS', pol: 'POLARISER', stage: 'STAGE', next: 'NEXT GRAIN', pump: 'PUMP', beam: 'BEAM', mass: 'MASS', latch: 'LATCH',
+  set: 'TEMP SET', door: 'DOOR', weigh: 'WEIGH: HOLD', valve: 'VALVE', reader: 'READER' };
 
 // The atlas: tag faces in slots of 320 x 80 (three to a row), plates in slots of 512 x 88 (two to a row),
 // and two flat swatches for the tags' edges (enamel) and the wire and the plates' edges (steel).

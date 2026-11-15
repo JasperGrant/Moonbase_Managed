@@ -1,6 +1,6 @@
 # Design spec: the Real Mission and the lab
 
-Status: **draft for review. Nothing here is built.** Written against `main` at `28fe598`. Edit freely: section 11 lists the choices most worth overturning.
+Status: **partly built.** The mode and the four sample experiments (E1 to E4) are in the game; E5 to E7, the planning phase and the rest of section 9 are not. Section 13 says what was built and where it differs from what is written above. Section 11 still lists the choices most worth overturning.
 
 Reads with: [SPEC-sample-run.md](SPEC-sample-run.md) (how samples are found and brought home today), [SPEC-guidance.md](SPEC-guidance.md) (teletype lines, name tags), [design/mission-control-consoles.md](design/mission-control-consoles.md) (the desks), [DESIGN.md](DESIGN.md) (the look), [WORKFLOW.md](WORKFLOW.md) (this document is the "spec" layer with the UI and state sketched; a `docs/design/real-mission.md` with CRC cards follows once this is agreed).
 
@@ -580,3 +580,56 @@ Each step is playable and mergeable on its own.
 - Restyling the lobby. (9.1's plan lives on the briefing sheet.)
 - Real chemistry or physics simulation: every instrument is a small state machine with a picture on it.
 - Voice between seats other than through Mission Ops.
+
+## 13. As built (E1 to E4)
+
+The first build covers the four experiments that each kind of sample opens: one finding per specimen, across three of NASA's themes (planetary processes, impact history, volatiles). Run it with `npm run lab` (`npm run lab:shots` for pictures in `test/shots/lab/`).
+
+| Piece | Where |
+| --- | --- |
+| The experiments' shared numbers (bands, peaks, sources, places, the grain pictures) | `client/shared/lab.js` |
+| The rules: what each key does, the clocks, the grades | `server/lab.js`, driven by `server/game.js` (`labCall`, `setBreaker`, `labReady`) |
+| The mode, admin-only | `MODES.real` and `ADMIN_MODES` in `client/shared/config.js`; `server/hub.js` refuses it from a seat; the lobby's picker leaves it out |
+| The instruments in the hall | `client/lab.js`, added to the astronaut page beside the fixtures |
+| The Scientist's LAB page (key 4) | `client/console/lab.js`, drawn by `client/console/sci.js` |
+| Mission Ops' four tiles, the Technician's two breakers, the 2-player desk's lab view (key L) | `client/console/ops.js`, `tech.js`, `all.js` |
+| The FINDING event light, the teletype lines, the briefing rows | `client/console/desk.js`, `client/shared/guide.js` |
+| Tests | `test/game.test.js` and `test/hub.test.js` (the rules), `test/lab.mjs` (all four through the real pages) |
+
+What each experiment asks, as built:
+
+| | The astronaut's keys | The Scientist's call | A | B |
+| --- | --- | --- | --- | --- |
+| E1 THIN SECTION | LOAD, FOCUS − +, POL, STAGE ◄ ►, NEXT GRAIN | A mineral for each of the three grains | All three right, each turned 180° with the polariser in and in focus | Two right |
+| E2 ROCK CLOCK | LOAD, PUMP, BEAM, MASS − +, LATCH | The age, read off the slide rule from the two latched counts | Peaks 39 and 40 latched within 0.05, age within 0.1 billion years, filament never burnt | Within 0.15 and 0.3 |
+| E3 FIRE FOUNTAIN | LOAD, SET − +, DOOR | The water peak's height: LOW, MED or HIGH | Right, needle in band 90% of the holds, no gas lost | Right, 70% |
+| E4 COLD TRAP | LOAD, WEIGH (held), VALVE, READER | The source of the water: solar wind, asteroid or comet | Right, in the box within 90 s, both weighings steady | Right, within 150 s or steady |
+
+Anything else is a C: every run ends in a finding. A finding is 300, 200 or 100 points and lights FINDING on every desk. All four done ends the mission, won; at the end of the clock it is won with two findings or more.
+
+Pictures from `npm run lab:shots` (the astronaut's view at each instrument, the Scientist's LAB page, Mission Ops' four tiles under SAMPLES):
+
+| | |
+| --- | --- |
+| ![The microscope and its eyepiece view](lab/astronaut-e1-microscope.png) | ![The mass spectrometer: CRT, vacuum, mass, two latched counts](lab/astronaut-e2-mass-spec.png) |
+| ![The step furnace and its temperature dial](lab/astronaut-e3-furnace.png) | ![The cold box: weights, valve, the D/H reader](lab/astronaut-e4-cold-box.png) |
+
+![The Scientist's LAB page, ROCK CLOCK: peaks, latched counts, the slide rule](lab/scientist-lab-e2.png)
+
+![The Scientist's LAB page, FIRE FOUNTAIN: the bands, the gas recorder, the water call](lab/scientist-lab-e3.png)
+
+![Mission Ops: the four experiments under SAMPLES, graded](lab/ops-lab-board.png)
+
+**Amendments** (each changes a section above):
+
+- **A1** (3.3, 3.4): the canister is not carried. A sample that comes through the port opens its experiment, and LOAD at the instrument brings its canister to the cradle. Carrying a canister needs the sample-in-hand code to work indoors on benches; it is the next step if the play wants it.
+- **A2** (4): the instruments moved to where the hall has room. A new lab bench on the west wall (x -3.5 to -2.85, z -10.05 to -7.15) holds the microscope (z -9.35) and the furnace (z -7.85); the mass spectrometer (z -9.25) and the cold box (z -10.85) stand against the east wall. They are in `SOLIDS`. The status board's row of lamps is not built; each instrument has its own `Lamp_Status`.
+- **A3** (D8): the lab furniture is in the hall in every mode, dark outside the Real Mission. The rules of Demo and Free play are untouched.
+- **A4** (5, E1): the call is a mineral per grain, not a rock. A turn counts only with the polariser in and the view in focus. The eyepiece is a round screen on a post beside the microscope (D10).
+- **A5** (5, E2): the method is 40Ar/39Ar dating: peaks at argon masses 36 (air), 39 and 40, and age = ln(1 + R / 10) / 0.554 billion years for the ratio R of 40 to 39. The slide rule is a ratio scale over an age scale with a cursor the Scientist sets.
+- **A6** (5, E3; 6): the power bus is two breakers on the Technician's pillar, FURN and COLD. The furnace runs the battery down at about 0.5% a second net while it is on (a full battery lasts a little over three minutes of furnace), and switches itself off when its run is done. The 2-player seat throws them from its lab view.
+- **A7** (5, E4): a steady weighing is the WEIGH key held for 2 s. The cold box holds the ice cold for 40 s without power.
+- **A8** (8.2): won with at least two of the four findings (`CFG.real.win`), or at once with all four.
+- **A9** (9.6, in part): the admin console has a "Samples on the lab rack" button in a running Real Mission: one sample of each kind arrives as if brought home, for a demonstration or a solo lab. It scores nothing.
+- **A10** (3.5): the faults in a Real Mission are dusty panels and a hull breach (`SCRIPTS.real`), the first after five minutes. The round is fifteen minutes (`CFG.real`).
+

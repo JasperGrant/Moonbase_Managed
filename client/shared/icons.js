@@ -135,7 +135,7 @@ export function drawSample(g, look, x, y, size, col, foil = '#b8913f') {
 // event lights, the keyset and the plates. Same house style as the tools: a 100-unit box centred on (x, y),
 // one colour, filled shapes or 8-unit round strokes, readable at 16 px.
 export const ICONS = ['clock', 'o2', 'rock', 'score', 'helmet', 'headset', 'wheel', 'lens', 'link', 'mic', 'bell', 'fixed', 'meteor', 'bolt', 'dark',
-  'banked', 'dud', 'glove', 'home', 'rider', 'eye', 'chase', 'scout', 'hauler', 'cover', 'tray', 'port', 'scope', 'card', 'battery', 'speed'];
+  'banked', 'dud', 'flask', 'glove', 'home', 'rider', 'eye', 'chase', 'scout', 'hauler', 'cover', 'tray', 'port', 'scope', 'card', 'battery', 'speed'];
 export function drawIcon(g, name, x, y, size, color) {
   const u = size / 100;
   g.save(); g.translate(x, y); g.scale(u, u);
@@ -172,6 +172,7 @@ export function drawIcon(g, name, x, y, size, color) {
   else if (name === 'scope') { O(0, 0, 38); g.lineWidth = 5; O(0, 0, 20); L(0, 0, 26, -26); O(-12, 10, 3, true); }
   else if (name === 'card') { g.beginPath(); g.roundRect(-36, -28, 72, 56, 4); g.stroke(); g.beginPath(); g.moveTo(-24, 12); g.lineTo(-18, -8); g.lineTo(-2, -14); g.lineTo(8, 0); g.lineTo(4, 14); g.closePath(); g.fill(); g.lineWidth = 5; L(18, -10, 28, -10); L(18, 4, 28, 4); }
   else if (name === 'battery') { g.beginPath(); g.roundRect(-38, -20, 70, 40, 4); g.stroke(); g.fillRect(32, -9, 8, 18); g.fillRect(-30, -12, 16, 24); g.fillRect(-10, -12, 16, 24); }
+  else if (name === 'flask') { g.beginPath(); g.moveTo(-12, -40); g.lineTo(-12, -8); g.lineTo(-36, 34); g.quadraticCurveTo(-38, 40, -30, 40); g.lineTo(30, 40); g.quadraticCurveTo(38, 40, 36, 34); g.lineTo(12, -8); g.lineTo(12, -40); g.stroke(); L(-20, -40, 20, -40); g.beginPath(); g.moveTo(-26, 22); g.lineTo(26, 22); g.lineTo(32, 36); g.lineTo(-32, 36); g.closePath(); g.fill(); }
   else if (name === 'speed') { g.beginPath(); g.arc(0, 14, 36, Math.PI, 0); g.stroke(); L(0, 14, 18, -12); O(0, 14, 6, true); }
   g.restore();
 }

@@ -8,6 +8,7 @@ import { drawFault, drawGlyph, drawSample, drawTool } from '/shared/icons.js';
 import { FIELD, CRATERS, BOULDERS, LANDMARKS } from '/shared/field.js';
 import { face, well, tile, keycap, knob, dial, strip, label, nixie, jewel, icon, arrow, phos, blinkOn, motion, TAU } from './instruments.js';
 import { regionOf } from './desk.js';
+import { labPage, labClick } from './lab.js';
 
 // ---------- the chart's state: its two switches, what has been seen, and blooms ----------
 export const RANGES = [30, 60, 120], CENTRES = ['base', 'scout', 'hauler'];
@@ -263,8 +264,10 @@ function powerPage(g, s, x, y, w, h) {
   tile(g, lx, c2, 76, '', 'amber', charging ? 0 : (blinkOn() ? 1 : 0.45), c => { icon(g, 'battery', lx, c2 + 8, 44, c); arrow(g, lx, c2 - 22, 0, c); });
 }
 
-export const AUX = ['guide', 'power', 'air'], AUX_ICON = { guide: 'card', power: 'battery', air: 'o2' };
-const AUX_NAME = { guide: 'Field guide (1)', power: 'Power (2)', air: 'Air (3)' };
+// LAB (key 4) is there only in the Real Mission (client/console/lab.js).
+export const AUX = ['guide', 'power', 'air', 'lab'], AUX_ICON = { guide: 'card', power: 'battery', air: 'o2', lab: 'flask' };
+const AUX_NAME = { guide: 'Field guide (1)', power: 'Power (2)', air: 'Air (3)', lab: 'The lab: the Real Mission\'s experiments (4)' };
+const auxOf = s => s?.lab ? AUX : AUX.slice(0, 3);
 
 export function layout(W, H, ctx) {
   const { top, h } = regionOf(H);
@@ -280,7 +283,7 @@ export function layout(W, H, ctx) {
     { x: 580, y: top + 350, w: 90, h: 90, name: 'Surveyed, percent' },
     { x: 560, y: top + 460, w: 100, h: 100, name: 'Which fault the chart shows' },
     ...AUX.map((a, i) => ({ ...btn(i), name: AUX_NAME[a], click: () => ctx.press('Digit' + (i + 1), true, true) })),
-    { x: ax, y: ay, w: aw, h: ah, name: () => AUX_NAME[ctx.aux()] },
+    { x: ax, y: ay, w: aw, h: ah, name: () => AUX_NAME[ctx.aux()], click: p => { if (ctx.aux() === 'lab') labClick({ x: p.x - ax, y: p.y - ay }); } },
   ];
   return {
     hits,
@@ -295,18 +298,19 @@ export function layout(W, H, ctx) {
       knob(g, knobs.centre.x, knobs.centre.y, ['home', 'scout', 'hauler'], chart.centre, 'scope');
       nixie(g, String(s.survey?.pct ?? 0).padStart(3, ' '), KX, top + 384, 26); icon(g, 'scope', KX - 24, top + 424, 18, PAL.inkDim); label(g, '%', KX + 6, top + 425, 11, PAL.inkDim);
       faultTiles(g, KX - 23, top + 484, s, 38);
-      const aux = ctx.aux();
-      AUX.forEach((a, i) => { const b = btn(i); keycap(g, b.x + b.w / 2, b.y + b.h / 2, b.w, b.h, '', a === aux, (c, d) => icon(g, AUX_ICON[a], b.x + b.w / 2, b.y + b.h / 2 - 2 + d, 40, c)); label(g, String(i + 1), b.x + b.w + 12, b.y + b.h - 10, 9, PAL.inkDim); });
+      const aux = ctx.aux() === 'lab' && !s.lab ? 'air' : ctx.aux(); // LAB only in the Real Mission
+      auxOf(s).forEach((a, i) => { const b = btn(i); keycap(g, b.x + b.w / 2, b.y + b.h / 2, b.w, b.h, '', a === aux, (c, d) => icon(g, AUX_ICON[a], b.x + b.w / 2, b.y + b.h / 2 - 2 + d, 40, c)); label(g, String(i + 1), b.x + b.w + 12, b.y + b.h - 10, 9, PAL.inkDim); });
       face(g, ax, ay, aw, ah, true);
       if (aux === 'guide') guide(g, s, ax + 6, ay + 4, aw - 12, ah - 8);
       else if (aux === 'power') powerPage(g, s, ax, ay, aw, ah);
+      else if (aux === 'lab') { g.save(); g.translate(ax, ay); labPage(g, s, ctx, ah); g.restore(); }
       else airPage(g, s, ax, ay, aw, ah);
       ctx.shown.aux = aux; ctx.shown.scope = { range: RANGES[chart.range], centre: CENTRES[chart.centre], pct: s.survey?.pct ?? 0, fault: s.survey?.fault?.type || null };
     },
     keyset(g, y, s, keys) {
-      AUX.forEach((a, i) => { keycap(g, 90 + i * 110, y, 30, 26, String(i + 1), a === ctx.aux()); icon(g, AUX_ICON[a], 130 + i * 110, y, 24, PAL.inkDim); });
-      keycap(g, 470, y, 30, 26, 'R', keys.has('KeyR')); icon(g, 'lens', 506, y, 22, PAL.inkDim);
-      keycap(g, 580, y, 30, 26, 'E', keys.has('KeyE')); icon(g, 'scope', 616, y, 22, PAL.inkDim);
+      auxOf(s).forEach((a, i) => { keycap(g, 90 + i * 110, y, 30, 26, String(i + 1), a === ctx.aux()); icon(g, AUX_ICON[a], 130 + i * 110, y, 24, PAL.inkDim); });
+      keycap(g, 560, y, 30, 26, 'R', keys.has('KeyR')); icon(g, 'lens', 596, y, 22, PAL.inkDim);
+      keycap(g, 670, y, 30, 26, 'E', keys.has('KeyE')); icon(g, 'scope', 706, y, 22, PAL.inkDim);
     },
   };
 }

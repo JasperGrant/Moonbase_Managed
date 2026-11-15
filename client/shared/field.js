@@ -127,6 +127,7 @@ export function layField(rng, mode, { fakes = true } = {}) {
   // The manifest: four samples, from three of the four types.
   let manifest;
   if (demo) manifest = [...DEMO_MANIFEST];
+  else if (mode === 'real') manifest = types.slice().sort(() => rnd() - 0.5); // one of each kind: each opens its own experiment in the lab
   else {
     const three = types.slice().sort(() => rnd() - 0.5).slice(0, 3);
     manifest = [three[0], three[0], three[1], three[2]].sort(() => rnd() - 0.5);

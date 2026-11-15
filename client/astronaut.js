@@ -8,6 +8,7 @@ import { buildFixtures } from '/stations.js';
 import { buildInterior, ROOM } from '/interior.js';
 import { buildPhysics } from '/physics.js';
 import { buildWaypoint } from '/waypoint.js';
+import { buildLab } from '/lab.js';
 import { CHAMBER } from '/airlock.js';
 import { CFG, CREW, ROLES, PLACES, HAULER, covers } from '/shared/config.js';
 import { sheltered } from '/shared/rules.js';
@@ -81,6 +82,11 @@ const fx = buildFixtures(THREE, world, { rig, camera, send: a => net.send({ t: '
 // Mission Control's waypoint: a beacon in the world where they want the astronaut to go (client/waypoint.js).
 const waypoint = buildWaypoint(THREE, { scene, interior, world, toolAt: id => { const t = fx.tools[id]; return t && t.parent ? t.getWorldPosition(new THREE.Vector3()) : null; } });
 
+// The Real Mission's lab (client/lab.js): four instruments in the hall. Their keys are click and point targets
+// like the fixtures'.
+const lab = buildLab(THREE, { interior, sfx: k => radio.sfx(k), send: a => net.send({ t: 'do', a }) });
+const targets = () => fx.targets().concat(lab.targets());
+
 // The samples banked so far stand in a rack on the hall's bench, one canister each.
 const rack = [];
 for (let n = 0; n < CFG.sample.manifest + 2; n++) {
@@ -151,7 +157,7 @@ function cuffTape() {
 }
 function drawGauges(now) {
   const line = cuffTape();
-  arm.draw({ tape: line?.text || '', tapeTier: line?.tier || 0, state, status: status(now), debrief: !!debrief, zoom: scopeOn() ? zoom : 1, total: CFG.roundSeconds, radio: radioState(),
+  arm.draw({ tape: line?.text || '', tapeTier: line?.tier || 0, state, status: status(now), debrief: !!debrief, zoom: scopeOn() ? zoom : 1, total: state?.round || CFG.roundSeconds, radio: radioState(),
     alarms: alarms(), held: running() ? fx.hands : [null, null], samples: running() && state.tally ? state.tally : null });
   arm.signal(radioState(), now);
 }
@@ -373,7 +379,7 @@ function drawResultBoard() {
 const NOTHING = { held: null, tools: null, scene: null, suit: false };
 let suitedSent = 0;
 net.onState = s => {
-  state = s; if (waitNote) { waitNote.remove(); waitNote = null; } lobby.update(s); fx.sync(s.phase === 'run' ? s : NOTHING);
+  state = s; if (waitNote) { waitNote.remove(); waitNote = null; } lobby.update(s); fx.sync(s.phase === 'run' ? s : NOTHING); lab.sync(s);
   // Suited is the server's to forget (a reconnect, a restart): say it again while it is true here.
   const now = performance.now();
   if (mode && s.phase === 'lobby' && !s.suited && now - suitedSent > 2000) { suitedSent = now; net.send({ t: 'suited', on: true }); }
@@ -457,7 +463,7 @@ function targetInReach(controller) {
   if (!running()) return null;
   aim(controller);
   raycaster.far = controller ? REACH_VR : REACH;
-  return raycaster.intersectObjects(fx.targets(), false)[0] || null;
+  return raycaster.intersectObjects(targets(), false)[0] || null;
 }
 // Use whatever tool or broken thing is being pointed at. Returns true if there was something.
 // With `holding`, only things that work while held down (brushing dust, welding) are used again.
@@ -1238,7 +1244,7 @@ function deskCue(now) {
   if (now < cueFist) cue = { shape: 'fist', verb: '' };
   else {
     aim(null); raycaster.far = 8;
-    const hit = raycaster.intersectObjects(fx.targets(), false)[0];
+    const hit = raycaster.intersectObjects(targets(), false)[0];
     const c = hit && hit.object.userData.cue ? hit.object.userData.cue() : null;
     if (c) { cue = hit.distance > REACH ? { shape: c.shape, verb: 'CLOSER', dim: true } : c; onRail = hit.object === fx.railHit && !cue.dim; }
   }
@@ -1403,7 +1409,8 @@ function myPose() {
   const h = headHeight();
   camera.getWorldDirection(fwd); fwd.y = 0; fwd.normalize();
   const d = PLACES.doors[door] || PLACES.doors.S, inside = where === 'in';
-  return { x: inside ? d.x : headPos.x, z: inside ? d.z : headPos.z, ry: Math.atan2(fwd.x, fwd.z), h, inside, door, riding, arms: arms() };
+  const room = inside ? interior.toLocal(headPos.x, headPos.z) : null; // where in the hall: the lab's instruments are worked from close by
+  return { x: inside ? d.x : headPos.x, z: inside ? d.z : headPos.z, ...(room ? { rx: +room.x.toFixed(2), rz: +room.z.toFixed(2) } : {}), ry: Math.atan2(fwd.x, fwd.z), h, inside, door, riding, arms: arms() };
 }
 function sendPose() { net.send({ t: 'pose', ...myPose() }); }
 
@@ -1434,6 +1441,7 @@ renderer.setAnimationLoop(() => {
       const k = s.ev.kind;
       // The astronaut is never told what broke or where: that is mission control's job.
       // The port says what went in: a rising two-tone for a sample, a flat buzz for a dud.
+      if (k === 'finding') { radio.sfx('chime'); pulse(0, 0.6, 90); pulse(1, 0.6, 90); } // a lab experiment done
       if (k === 'found' || k === 'dud') { radio.sfxAt(k, world.port.localToWorld(tmpV.copy(world.fixtures.portMouth)), 1); if (k === 'found') { pulse(0, 0.5, 60); pulse(1, 0.5, 60); } else { pulse(0, 0.8, 90); setTimeout(() => pulse(0, 0.8, 90), 150); } }
       if (k === 'found' && s.tally && s.tally.banked >= s.tally.wanted) { radio.sfx('go'); pulse(0, 1, 160); pulse(1, 1, 160); } // the manifest is home
       if (k === 'end') radio.sfx(s.result && s.result.won ? 'won' : 'lost');
@@ -1492,6 +1500,7 @@ renderer.setAnimationLoop(() => {
     h.squeeze = b ? Math.max(b[0]?.value || 0, b[1]?.value || 0) : 0;
   }
   fx.update(dt, now, vr ? handInfo : [], vr);
+  lab.update(now);
   deskCue(now);
   // Under cover while rocks are falling: the cuff says so, because there is no other way to know.
   covered = run && s.scene.meteor !== null && sheltered(myPose(), s.rovers.hauler);
@@ -1523,7 +1532,7 @@ renderer.setAnimationLoop(() => {
 });
 
 // For debugging from the browser console, and for the tests: moonbase.state(), moonbase.fx.targets() ...
-window.moonbase = { waypoint, mount: () => mount(2), dismount: () => dismount(-1), riding: () => riding, resetStanding: () => { standing = 1.2; }, state: () => state, fx, world, interior, radio, rig, camera, net, board, THREE, scene, use: () => use(null), headset: () => headset, sendPose, myPose, teleport, turnRig,
+window.moonbase = { lab, waypoint, mount: () => mount(2), dismount: () => dismount(-1), riding: () => riding, resetStanding: () => { standing = 1.2; }, state: () => state, fx, world, interior, radio, rig, camera, net, board, THREE, scene, use: () => use(null), headset: () => headset, sendPose, myPose, teleport, turnRig,
   where: () => where, placeInside, showPlace, renderer, phys, forcePortal: false,
   drawEvery: n => { drawEvery = Math.max(1, n | 0); }, // tests: draw one frame in n (the logic still runs every frame)
   // For the tests: stand the head at (x, z) in a place ('in': room coordinates, 'out': world), facing yaw (0 = north).

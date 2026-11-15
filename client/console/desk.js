@@ -17,8 +17,8 @@ export const regionOf = H => ({ top: TOP, h: H - TOP - KEYS - 12, bottom: H - KE
 
 // The eight event lights, in the same order on every desk (D3). kind -> [icon, colour].
 export const EVENTS = [['alarm', 'bell', 'red'], ['solve', 'fixed', 'green'], ['hit', 'meteor', 'red'], ['blackout', 'dark', 'red'],
-  ['power', 'bolt', 'green'], ['found', 'banked', 'green'], ['dud', 'dud', 'amber'], ['link', 'link', 'red']];
-const EV_LIGHT = { alarm: 'alarm', solve: 'solve', hit: 'hit', blackout: 'blackout', power: 'power', gen: 'power', found: 'found', dud: 'dud' };
+  ['power', 'bolt', 'green'], ['found', 'banked', 'green'], ['dud', 'dud', 'amber'], ['finding', 'flask', 'green'], ['link', 'link', 'red']];
+const EV_LIGHT = { alarm: 'alarm', solve: 'solve', hit: 'hit', blackout: 'blackout', power: 'power', gen: 'power', found: 'found', dud: 'dud', finding: 'finding' };
 const LIT_FOR = 6000, BLINK_FOR = 3000;
 
 const SEATS = { astronaut: ['helmet', 'EVA'], ops: ['headset', 'OPS'], tech: ['wheel', 'TECH'], sci: ['lens', 'SCI'], all: ['headset', 'MC'] };
@@ -89,12 +89,13 @@ export function createDesk({ canvas, cam, seat, layoutFor, roundSeconds, linkOpe
     // the event lights
     if (!linkOpen()) D.events.link = { t: now };
     // With every sample real (the admin's switch) there is no DUD light: the rest close up to the right.
-    const lights = s.real ? EVENTS.filter(([l]) => l !== 'dud') : EVENTS, skip = EVENTS.length - lights.length;
+    // FINDING (a lab experiment done) only in the Real Mission. Nine lights close up a little to fit.
+    const lights = EVENTS.filter(([l]) => !(l === 'dud' && s.real) && !(l === 'finding' && !s.lab)), sp = lights.length > 8 ? 34 : 37;
     lights.forEach(([light, ic, col], n) => {
-      const i = n + skip, e = D.events[light], age = e ? now - e.t : Infinity;
+      const e = D.events[light], age = e ? now - e.t : Infinity;
       let level = light === 'link' ? (linkOpen() ? 0 : 1) : age < LIT_FOR ? 1 : D.last === light ? 0.45 : 0;
       if (col === 'red' && age < BLINK_FOR && !blinkOn()) level = 0.45;
-      tile(g, 1076 + i * 37, 37, 30, ic, light === 'power' && e?.amber ? 'amber' : col, level);
+      tile(g, 1335 - (lights.length - 1 - n) * sp, 37, sp - 7, ic, light === 'power' && e?.amber ? 'amber' : col, level);
     });
     D.shown.clock = clock; D.shown.oxygen = Math.round(o2); D.shown.banked = t.banked; D.shown.score = s.score;
     D.shown.event = EVENTS.filter(([l]) => D.events[l] && now - D.events[l].t < LIT_FOR).map(([l]) => l);
@@ -126,7 +127,7 @@ export function createDesk({ canvas, cam, seat, layoutFor, roundSeconds, linkOpe
 
   // ---------- pointer: design pixels, hit regions, names for hover ----------
   const at = e => { const b = canvas.getBoundingClientRect(); return { x: (e.clientX - b.left) * DW / b.width, y: (e.clientY - b.top) * D.H / b.height }; };
-  const hitAt = p => (D.layout?.hits || []).find(h => p.x >= h.x && p.x <= h.x + h.w && p.y >= h.y && p.y <= h.y + h.h);
+  const hitAt = p => (D.layout?.hits || []).find(h => (!h.when || h.when()) && p.x >= h.x && p.x <= h.x + h.w && p.y >= h.y && p.y <= h.y + h.h);
   let downOn = null;
   canvas.addEventListener('pointerdown', e => { const p = at(e), h = hitAt(p); downOn = h; h?.down?.(p, e); });
   addEventListener('pointerup', e => { downOn?.up?.(at(e), e); downOn = null; });

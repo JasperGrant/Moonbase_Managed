@@ -15,6 +15,7 @@ import { PAL, FONT, fontsReady } from '/shared/palette.js';
 import { drawTool } from '/shared/icons.js';
 import { loadPeriod, loadGlove } from '/shared/assets.js';
 import { buildDamage } from '/damage.js';
+import { LAB_SOLIDS } from '/shared/lab.js';
 
 export const ROOM = {
   origin: { x: 500, z: 0 },          // where the room sits in the world, well clear of the terrain
@@ -35,6 +36,7 @@ export const SOLIDS = [
   [-3.5, -1.95, -12, -10.25, 1.78],  // life support stack
   [3.1, 3.5, -4.85, -4.35, 1.08],    // the sample port on the east wall
   [-1.6, 1.3, -12, -11.7, 0.6],      // the spares stand: only its back half, so a hand can reach over the front
+  ...LAB_SOLIDS,                     // the lab bench and the two lab consoles (client/lab.js)
 ];
 // Things the tools rest on that you can walk under or lean over: [x0, x1, z0, z1, bottom, top]. Physics only.
 export const SHELVES = [

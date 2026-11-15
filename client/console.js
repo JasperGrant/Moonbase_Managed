@@ -5,7 +5,7 @@
 // Each seat's mission screen is one desk on one canvas (client/console/desk.js and docs/design/mission-control-consoles.md).
 import { connect } from '/net.js';
 import { Radio } from '/voice.js';
-import { CFG, MODES, ROLES } from '/shared/config.js';
+import { CFG, MODES, ROLES, ADMIN_MODES } from '/shared/config.js';
 import { drawFault, drawIcon } from '/shared/icons.js';
 import { seatTaken, seatRefused, kicked } from '/seat.js';
 import { createLobby } from '/lobby.js';
@@ -69,7 +69,7 @@ $('run').innerHTML = `<canvas id="cam" aria-hidden="true"></canvas><canvas id="d
 const tape = [];   // the mission tape: { at, kind } for each event this seat has seen this mission (D9)
 let camApi = null; // the rover cameras (client/rovercam.js)
 const AUX_KEY = 'moonbase.sci.aux';
-let aux = 'air';
+let aux = 'air', labView = false;
 try { aux = SCI.AUX.includes(localStorage.getItem(AUX_KEY)) ? localStorage.getItem(AUX_KEY) : 'air'; } catch { /* a per-viewer convenience */ }
 const desk = createDesk({
   canvas: $('desk'), cam: $('cam'), seat: role, roundSeconds: CFG.roundSeconds, linkOpen: () => net.open,
@@ -77,10 +77,16 @@ const desk = createDesk({
   layoutFor: (W, H) => ({ ops: OPS, tech: TECH, sci: SCI, all: ALL })[role].layout(W, H, ctx),
 });
 const ctx = {
-  press, sfx, tape, roundSeconds: CFG.roundSeconds, shown: desk.D.shown,
+  press, sfx, tape, get roundSeconds() { return state?.round || CFG.roundSeconds; }, shown: desk.D.shown,
   state: () => state,
+  // The Scientist's call on a lab experiment (the Real Mission).
+  labCall: (exp, answer) => { net.send({ t: 'lab', exp, answer }); sfx('click'); },
+  // Throw a lab breaker (the Technician).
+  breaker: (id, on) => { net.send({ t: 'breaker', id, on }); sfx('click'); },
   cam: () => camApi,
   aux: () => aux,
+  labView: () => labView, // the 2-player desk: the lab in the right-hand column (L)
+  canBreak: role === 'all', // the 2-player seat throws the lab's breakers itself
   talk: () => ({ state: talking ? 'tx' : rx ? 'rx' : 'idle', level: () => radio?.level?.() || 0 }),
   teletype: () => ({ ...(tt && tt.id ? { text: tt.text.slice(0, tt.shown), tier: tt.tier, fresh: performance.now() - tt.at < 1200, typing: tt.shown < tt.text.length } : {}), quiet: guideQuiet }),
   // A beacon for the astronaut (docs/SPEC-guidance.md): on a loose tool, or on a spot of ground; the same again puts it out.
@@ -145,7 +151,7 @@ function teletype(s) {
   // Events: an alarm opens (a meteor hit leaves the suit leaking), a fix closes. Anything new resets the idle clock.
   if (s.ev && s.ev.n !== ttEv) {
     ttEv = s.ev.n; done.quietSince = now;
-    if (s.ev.kind === 'alarm' || s.ev.kind === 'hit') { done.broken = true; done.brokeAt = CFG.roundSeconds - (s.timeLeft ?? CFG.roundSeconds); }
+    if (s.ev.kind === 'alarm' || s.ev.kind === 'hit') { done.broken = true; done.brokeAt = (state?.round || CFG.roundSeconds) - (s.timeLeft ?? CFG.roundSeconds); }
     if (s.ev.kind === 'solve') done.broken = false;
   }
   if (has('tech') && Object.values(s.rovers || {}).some(r => Math.abs(r.v || 0) > 0.2)) done.quietSince = now; // a rover on the move is not idle
@@ -183,7 +189,7 @@ function render() {
     const k = s.ev.kind, t = $('toast');
     if (TOAST[k]) { t.className = k; t.textContent = TOAST[k] + (s.ev.pts ? `  +${s.ev.pts}` : ''); $('said').textContent = TOAST[k]; }
     desk.event(k);
-    if (s.phase === 'run') tape.push({ at: CFG.roundSeconds - Math.max(0, s.timeLeft ?? CFG.roundSeconds), kind: k });
+    if (s.phase === 'run') tape.push({ at: (state?.round || CFG.roundSeconds) - Math.max(0, s.timeLeft ?? CFG.roundSeconds), kind: k });
     if (k === 'end') sfx(s.result && s.result.won ? 'won' : 'lost');
     else if (k !== 'meteor') sfx(k);
   }
@@ -215,8 +221,8 @@ function renderPlan(s) {
   planKey = key;
   const canEdit = has('ops');
   $('plan').innerHTML = `<h3>Mission</h3>
-    <div class="vehicles">${Object.entries(MODES).map(([k, name]) =>
-      `<label class="pick ${k === s.mode ? 'sel' : ''} ${canEdit ? '' : 'off'}" data-mode="${k}"><b>${name}</b>${k === 'demo' ? '' : '<span>Random faults and meteor showers.</span>'}</label>`).join('')}</div>
+    <div class="vehicles">${Object.entries(MODES).filter(([k]) => !ADMIN_MODES.includes(k) || k === s.mode).map(([k, name]) =>
+      `<label class="pick ${k === s.mode ? 'sel' : ''} ${canEdit ? '' : 'off'}" data-mode="${k}"><b>${name}</b>${k === 'demo' ? '' : k === 'real' ? '<span>Set by the admin: fifteen minutes, and a lab of four experiments.</span>' : '<span>Random faults and meteor showers.</span>'}</label>`).join('')}</div>
     <p class="hint">${canEdit ? 'The mission starts when all four seats are ready.' : 'Mission Ops picks the mission. It starts when all four seats are ready.'}</p>`;
 }
 $('plan').addEventListener('click', e => {
@@ -329,8 +335,9 @@ function press(code, down, tap = false) {
   }
   if (!down) return false;
   if (has('tech') && (code === 'KeyC' || code === 'Slash')) { camApi?.toggle(code === 'KeyC' ? 'scout' : 'hauler'); sfx('click'); return true; }
+  if (role === 'all' && code === 'KeyL' && state?.lab) { labView = !labView; sfx('click'); return true; }
   if (has('sci') && (code === 'KeyR' || code === 'KeyE')) { const k = code === 'KeyR' ? 'range' : 'centre'; SCI.chart[k] = (SCI.chart[k] + 1) % 3; sfx('click'); return true; }
-  if (role === 'sci' && /^Digit[123]$/.test(code)) { aux = SCI.AUX[+code.slice(5) - 1]; try { localStorage.setItem(AUX_KEY, aux); } catch {} sfx('click'); return true; }
+  if (role === 'sci' && /^Digit[1234]$/.test(code) && (code !== 'Digit4' || state?.lab)) { aux = SCI.AUX[+code.slice(5) - 1]; try { localStorage.setItem(AUX_KEY, aux); } catch {} sfx('click'); return true; }
   return false;
 }
 const typing = e => e.target.closest?.('input, textarea');

@@ -38,6 +38,7 @@ export const BRIEFINGS = {
         ['DOORS', 'Walk into an airlock and wait'],
         ['SUIT, POWER', 'F to patch, G for the generator'],
         ['COVER, LEAVE', 'C to crouch; hold X'],
+        ['LAB', 'Real mission only: at an instrument in the hall, click its keys. LOAD puts the sample in'],
       ],
     },
     talk: 'Only Mission Ops. Your left wrist shows your oxygen, the clock, what is in each hand, and a triangle when something is broken.',
@@ -53,6 +54,7 @@ export const BRIEFINGS = {
       ['BEACON', 'Click a tool on the TOOL BOARD to light a beacon over it; click it again to put it out'],
       ['DESK', 'HANDS: what they hold. TOOL BOARD: the bay each tool lies in. SAMPLES: hand, tray, banked, and the drill. The tape: what has happened'],
       ['LIGHTS', 'The square lamps along the top light when something happens: alarm, fixed, meteor hit, base dark, power back, banked, no link'],
+      ['LAB', 'Real mission only: the four tiles under SAMPLES are the lab\'s experiments, lit as their samples come home, with a grade once done'],
     ],
     talk: 'Everyone. You are the only seat that talks to the astronaut.',
   },
@@ -66,6 +68,7 @@ export const BRIEFINGS = {
       ['VIEWS', 'C or click the left screen (Scout), / or click the right (Hauler). Wheel: chase distance'],
       ['HOME', 'The red needle points to base, with the range in metres'],
       ['LAMPS', 'Under each screen: WHEEL (that rover is stuck), RIDER (the astronaut is aboard). Between the screens: METEOR, counting down to impact, and TAKE COVER'],
+      ['BREAKERS', 'Real mission only: FURN and COLD on the pillar power the lab\'s furnace and cold box. The furnace runs the battery down'],
     ],
     talk: 'The Scientist, for where to go. Ops, for the astronaut and the meteor warning.',
   },
@@ -78,6 +81,7 @@ export const BRIEFINGS = {
       ['1 GUIDE', 'A card for each wanted sample: what it looks like, where it lies and its telltale. ASSAY: the last rock banked'],
       ['2 POWER', 'The battery and the solar panels\' charge, with a recorder of the last minute'],
       ['3 AIR', 'Oxygen, drain and the LEAK lamp, with a recorder of the last minute'],
+      ['4 LAB', 'Real mission only: the four experiments. The procedure, the reference, the telemetry, and the call that makes each run a finding'],
     ],
     talk: 'The Technician, for where to drive. Ops, for which rock and what broke.',
   },
@@ -90,6 +94,7 @@ export const BRIEFINGS = {
       ['ROVERS', 'W A S D for the Scout, the arrows for the Hauler. C and / change each camera\'s view'],
       ['CHART', 'R: range. E: centre. The field guide is under it, a row per sample'],
       ['BEACON', 'Click a tool in the TOOLS list, or a spot on the chart'],
+      ['LAB', 'Real mission only: L shows the lab in place of the chart. Click a breaker or a call there'],
     ],
     talk: 'The astronaut, and nobody else.',
   },
@@ -141,6 +146,13 @@ export const LINES = {
   'tech.wheel':  { tier: 2, full: '{ROVER} WHEEL BROKEN. TELL OPS: IT NEEDS A TIRE.', all: '{ROVER} WHEEL BROKEN. ASTRONAUT NEEDS A TIRE.' },
   'tech.meteor': { tier: 1, full: 'METEORS IN {N} S. TELL OPS: ASTRONAUT TO COVER.', all: 'METEORS IN {N} S. ASTRONAUT TO COVER, NOW.' },
   'tech.falling':{ tier: 1, full: 'METEORS FALLING. HOLD THE HAULER STILL.' },
+  // the Real Mission's lab (docs/SPEC-real-mission.md)
+  'sci.lab':     { tier: 4, full: 'A SAMPLE IS IN THE LAB. KEY 4: THE LAB.', all: 'A SAMPLE IS IN THE LAB. L: THE LAB.' },
+  'sci.call':    { tier: 3, full: 'THE RUN IS DONE. MAKE THE CALL ON THE LAB PAGE.' },
+  'ops.lab':     { tier: 4, full: 'SAMPLE ON THE LAB RACK. ASTRONAUT: LOAD IT AT ITS INSTRUMENT.' },
+  'ops.ice':     { tier: 3, full: 'ICE IN THE LAB: INTO THE COLD BOX WITHIN 90 S.' },
+  'tech.furnace':{ tier: 3, full: 'THE FURNACE NEEDS POWER: YOUR FURN BREAKER.', all: 'THE FURNACE NEEDS POWER: THE FURN BREAKER.' },
+  'astro.lab':   { tier: 4, full: 'LOAD THE LAB' },
   // idle (phase 5): after IDLE_SECONDS with nothing new
   'ops.idle':    { tier: 6, full: 'ASK THE SCIENTIST FOR THE NEXT SAMPLE.', all: 'PICK BRIGHT GROUND ON THE CHART. SEND THE SCOUT.' },
   'tech.idle':   { tier: 6, full: 'ASK THE SCIENTIST WHERE TO DRIVE.' },
@@ -169,7 +181,7 @@ const ROVER = { scout: 'SCOUT', hauler: 'HAULER' };
 // broken/brokeAt: Mission Ops is told only that an alarm went and a fix came; the page keeps that.
 function candidates(seat, s, mem) {
   const out = [], add = (id, vars) => out.push({ id, vars });
-  const elapsed = CFG.roundSeconds - (s.timeLeft ?? CFG.roundSeconds);
+  const elapsed = (s.round || CFG.roundSeconds) - (s.timeLeft ?? s.round ?? CFG.roundSeconds);
   const first = elapsed < ROLE_SECONDS && !mem.missions;
   const o2Low = s.o2Max ? s.oxygen / s.o2Max < LOW : false;
   if (seat === 'sci') {
@@ -184,6 +196,11 @@ function candidates(seat, s, mem) {
     }
     if (f === 'dust' || (s.power && s.power.solar < 60)) add('sci.dust');
     if (s.leak && f !== 'hull' && f !== 'suit') add('sci.leak');
+    if (s.lab) {
+      const L = s.lab, b = L.board, open = x => b[x].state === 'loaded';
+      if ((open('E1') && L.E1.turned.every(t => t >= 180)) || (open('E2') && L.E2.latched.length >= 2) || (open('E3') && L.E3.step >= 3) || (open('E4') && L.E4.dh !== null)) add('sci.call');
+      else if (Object.values(b).some(x => x.state === 'ready' || x.state === 'loaded')) add('sci.lab');
+    }
     if (first) add('sci.role'); else if (!mem.guide) add('sci.goal');
   }
   if (seat === 'ops') {
@@ -194,12 +211,15 @@ function candidates(seat, s, mem) {
       if (full) add('ops.full');
       add(elapsed - mem.brokeAt < 15 ? 'ops.alarm' : 'ops.tool');
     }
+    if (s.lab?.board?.E4?.state === 'ready') add('ops.ice');
+    else if (s.lab && Object.values(s.lab.board).some(x => x.state === 'ready')) add('ops.lab');
     if (first) add('ops.role'); else if (!mem.found) add('ops.goal');
   }
   if (seat === 'tech') {
     const m = s.meteor;
     if (m && m.falling) add('tech.falling'); else if (m) add('tech.meteor', { N: Math.max(1, Math.ceil(m.eta)) });
     for (const id of ['scout', 'hauler']) if ((s.scene?.wheels?.[id] || 0) > 0) add('tech.wheel', { ROVER: ROVER[id] });
+    if (s.lab && s.lab.board.E3.state === 'loaded' && !s.lab.breakers.furnace) add('tech.furnace');
     if (first) add('tech.role');
     else if (!(mem.scout && mem.hauler)) add(mem.scout ? 'tech.keys.h' : 'tech.keys');
   }
@@ -210,6 +230,7 @@ function candidates(seat, s, mem) {
     if (s.powered === false) add('astro.dark');
     if (outside && o2Low) add('astro.o2');
     if (sc.dust || sc.hull || Object.values(sc.wheels || {}).some(Boolean)) add('astro.alarm');
+    if (!outside && s.lab && Object.values(s.lab.board).some(x => x.state === 'ready')) add('astro.lab');
     if (elapsed < 30 && !outside && !mem.missions) add('astro.go');
   }
   return out;
@@ -228,7 +249,7 @@ export function pickLine(seat, s, mem, { quiet = false } = {}) {
     const named = list.some(c => c.id.startsWith('sci.') && lineTier(c.id) === 2);
     const drop = new Set(['sci.role', 'tech.role', 'ops.role', 'sci.goal', ...(named ? ['ops.alarm', 'ops.tool'] : [])]);
     list = list.filter(c => !drop.has(c.id));
-    const elapsed = CFG.roundSeconds - (s.timeLeft ?? CFG.roundSeconds);
+    const elapsed = (s.round || CFG.roundSeconds) - (s.timeLeft ?? s.round ?? CFG.roundSeconds);
     if (elapsed < ROLE_SECONDS && !mem.missions) list.push({ id: 'all.role' });
   }
   if (quiet) list = list.filter(c => lineTier(c.id) <= 2);
