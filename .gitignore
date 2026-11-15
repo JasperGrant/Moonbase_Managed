@@ -4,3 +4,4 @@ certs/
 test/shots/
 .wrangler/
 __pycache__/
+/trailer/

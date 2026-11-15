@@ -77,12 +77,14 @@
     constructor(s) { this.session = s; }
     getViewerPose() {
       const { p, q } = dev.head, c = document.querySelector('canvas'), W = c ? c.width : 2, H = c ? c.height : 1;
-      const proj = perspective(Math.PI / 2, (W / 2) / H, 0.05, 2000);
+      // Options (the trailer recorder sets them): one eye drawn over the whole canvas, and its vertical field of view.
+      const O = window.fakeXROptions || {}, eyes = O.eyes || 2;
+      const proj = perspective(O.fovY || Math.PI / 2, (W / eyes) / H, 0.05, 2000);
       const eye = (name, dx) => {
         const o = rotate(q, [dx, 0, 0]), ep = [p[0] + o[0], p[1] + o[1], p[2] + o[2]];
         return { eye: name, projectionMatrix: proj, transform: pose(ep, q).transform };
       };
-      return { ...pose(p, q), views: [eye('left', -0.032), eye('right', 0.032)] };
+      return { ...pose(p, q), views: eyes === 1 ? [eye('left', 0)] : [eye('left', -0.032), eye('right', 0.032)] };
     }
     getPose(space) {
       const d = dev[space.side];
@@ -109,7 +111,8 @@
       this.sources = {};
       // A real headset runs the page's frames itself; here a timer does, so the game keeps its own pace
       // even when the browser is too slow to draw.
-      this.timer = setInterval(() => this.tick(), 16);
+      // (With fakeXROptions.manual the recorder calls fakeXR.step() for each frame instead.)
+      if (!(window.fakeXROptions || {}).manual) this.timer = setInterval(() => this.tick(), 16);
     }
     updateRenderState(state) { Object.assign(this.renderState, state); }
     async requestReferenceSpace() { return { what: 'reference' }; }
@@ -154,7 +157,7 @@
     constructor(s, gl) { this.gl = gl; this.framebuffer = null; this.ignoreDepthValues = true; this.antialias = false; }
     get framebufferWidth() { return this.gl.drawingBufferWidth; }
     get framebufferHeight() { return this.gl.drawingBufferHeight; }
-    getViewport(view) { const w = this.framebufferWidth / 2; return { x: view.eye === 'right' ? w : 0, y: 0, width: w, height: this.framebufferHeight }; }
+    getViewport(view) { if ((window.fakeXROptions || {}).eyes === 1) return { x: 0, y: 0, width: this.framebufferWidth, height: this.framebufferHeight }; const w = this.framebufferWidth / 2; return { x: view.eye === 'right' ? w : 0, y: 0, width: w, height: this.framebufferHeight }; }
   };
   try { delete window.XRWebGLBinding; } catch {}
   if (typeof XRWebGLBinding !== 'undefined') Object.defineProperty(window, 'XRWebGLBinding', { value: undefined, configurable: true });
@@ -200,6 +203,8 @@
       session.fire(on ? 'selectstart' : 'selectend', side);
       if (!on) session.fire('select', side);
     },
+    // Run one frame now (with fakeXROptions.manual: the recorder's own clock).
+    step() { session?.tick(); },
     // Wait for n frames of the game to run.
     frames(n = 1) { const until = dev.frame + n; return new Promise(res => { const t = setInterval(() => { if (dev.frame >= until) { clearInterval(t); res(); } }, 4); }); },
   };

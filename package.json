@@ -25,7 +25,8 @@
     "dev:cf": "wrangler dev",
     "deploy": "wrangler deploy",
     "vendor": "node scripts/vendor-three.mjs",
-    "debrief": "node test/debrief.mjs"
+    "debrief": "node test/debrief.mjs",
+    "trailer": "node scripts/trailer/record.mjs && node scripts/trailer/assemble.mjs"
   },
   "dependencies": {
     "ws": "^8.18.0"
