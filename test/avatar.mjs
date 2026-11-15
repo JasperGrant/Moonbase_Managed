@@ -128,7 +128,12 @@ try {
     await run({ ...stand }, 0.55, 0, 1.4, [null, 'welder']); await save('walking', side, [0, 0.9, 0.8]);
     await run({ ...stand, h: 0.95 }, 1.5, 0, 0, ['patch', null]); await save('crouching', side, [0, 0.6, 0]);
     await run({ ...stand, arms: want }, 1.5, 0, 0, ['brush', 'welder']); await save('reaching', front, [0, 1.0, 0]);
-    // Through the rover camera, in the real world.
+    // Close up on each hand with each tool in it: the grip should sit in the curl of the fingers.
+    for (const [l, r] of [['brush', 'welder'], ['patch', 'tire'], ['gen', 'brush']]) {
+      const h = await run({ ...stand }, 0.5, 0, 0, [l, r]);
+      for (const [id, at, side] of [[l, h.handL, 1], [r, h.handR, -1]]) { const k = id === 'tire' || id === 'gen' ? 2.2 : 1; await save(`hold-${id}-${side > 0 ? 'left' : 'right'}`, [at[0] + side * 0.55 * k, at[1] + 0.15 * k, at[2] + 0.75 * k], at); }
+    }
+        // Through the rover camera, in the real world.
     const cam = await browser.newPage({ viewport: { width: 960, height: 540 } });
     cam.on('pageerror', e => problems.push('rover camera: ' + e.message));
     await cam.goto(`http://localhost:${PORT}/cam`);

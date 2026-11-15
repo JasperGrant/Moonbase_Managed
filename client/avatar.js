@@ -19,6 +19,7 @@
 //   av.update(dt, { x, z, ry, h, arms }); av.hold(['brush', null], tools);
 import { PAL } from '/shared/palette.js';
 import { loadPeriod } from '/shared/assets.js';
+import { grasp } from '/tools.js';
 
 // Joints in the model's own frame (metres, base at y = 0, facing +z), read off the baked model.
 const J = {
@@ -26,18 +27,20 @@ const J = {
   hipX: 0.12,                // ... and how far each is off the middle
   knee: 0.46,
   ankle: 0.13,               // the boot is cut off below this, and kept flat
-  shoulder: [0.33, 1.41, 0], // the left shoulder (the right is mirrored in x)
-  elbow: 0.6,                // x of the elbow
-  hand: 0.86,                // x of the middle of the hand
+  shoulder: [0.33, 1.41, 0.09], // the left shoulder (the right is mirrored in x), on the arm's centre line
+  elbow: [0.6, 1.39, 0.095],
+  // The hollow under the palm, inside the curled fingers, where a held tool's grip sits. The model's
+  // hands are palm down with the fingers curled under, the thumb forward (+z).
+  grip: [0.835, 1.295, 0.11],
 };
-const L1 = J.elbow - J.shoulder[0], L2 = J.hand - J.elbow; // upper arm and forearm
+const L1 = Math.hypot(J.elbow[0] - J.shoulder[0], J.elbow[1] - J.shoulder[1], J.elbow[2] - J.shoulder[2]); // shoulder to elbow
+const GRIP = [J.grip[0] - J.elbow[0], J.grip[1] - J.elbow[1], J.grip[2] - J.elbow[2]];                    // elbow to grip (left arm)
+const L2 = Math.hypot(...GRIP);
 const LEG = J.hip;                                          // hip to sole
 const THIGH = J.hip - J.knee, CALF = J.knee - J.ankle;
 const MAX_KNEE = 1.05;       // radians the thighs come forward at the deepest crouch; the back bends for the rest
 const STRIDE = 1.5;          // metres per full walk cycle: a long lunar lope
 const STAND_EYE = 1.65;      // the pose's h when standing (client/astronaut.js scales to this)
-// Where a held tool sits in the fist. The tire is carried by its rim, so the wheel is out in front.
-const IN_HAND = { tire: { z: -0.32, scale: 0.8 } };
 
 export function buildAvatar(THREE, { shadows = false, ground = () => 0 } = {}) {
   const V = (x = 0, y = 0, z = 0) => new THREE.Vector3(x, y, z);
@@ -49,9 +52,11 @@ export function buildAvatar(THREE, { shadows = false, ground = () => 0 } = {}) {
   const arm = {}, fore = {}, hand = {}, leg = {}, shin = {}, foot = {};
   for (const [s, k] of [['L', 1], ['R', -1]]) {
     arm[s] = joint('Arm_' + s, body, V(k * J.shoulder[0], J.shoulder[1] - J.hip, J.shoulder[2]));
-    fore[s] = joint('Forearm_' + s, arm[s], V(k * L1, 0, 0));
-    hand[s] = joint('Hand_' + s, fore[s], V(k * L2, 0, 0));
-    hand[s].rotation.y = -k * Math.PI / 2; // a held tool's -z runs on down the forearm, out of the fist
+    fore[s] = joint('Forearm_' + s, arm[s], V(k * (J.elbow[0] - J.shoulder[0]), J.elbow[1] - J.shoulder[1], J.elbow[2] - J.shoulder[2]));
+    hand[s] = joint('Hand_' + s, fore[s], V(k * GRIP[0], GRIP[1], GRIP[2]));
+    // The fist's frame: x out past the knuckles, z out past the thumb (forward on both hands), y the back
+    // of the left hand and the palm of the right. client/tools.js grasp() puts a tool in it.
+    if (k < 0) hand[s].rotation.z = Math.PI;
     leg[s] = joint('Leg_' + s, hips, V(k * J.hipX, 0, 0.03));
     shin[s] = joint('Shin_' + s, leg[s], V(0, J.knee - J.hip, 0.02));
     foot[s] = joint('Foot_' + s, shin[s], V(0, J.ankle - J.knee, 0));
@@ -60,7 +65,7 @@ export function buildAvatar(THREE, { shadows = false, ground = () => 0 } = {}) {
   const pivots = { Body: V(0, J.hip, 0) };
   for (const [s, k] of [['L', 1], ['R', -1]]) {
     pivots['Arm_' + s] = V(k * J.shoulder[0], J.shoulder[1], J.shoulder[2]);
-    pivots['Forearm_' + s] = V(k * J.elbow, J.shoulder[1], J.shoulder[2]);
+    pivots['Forearm_' + s] = V(k * J.elbow[0], J.elbow[1], J.elbow[2]);
     pivots['Leg_' + s] = V(k * J.hipX, J.hip, 0.03);
     pivots['Shin_' + s] = V(k * J.hipX, J.knee, 0.05);
     pivots['Foot_' + s] = V(k * J.hipX, J.ankle, 0.05);
@@ -80,7 +85,7 @@ export function buildAvatar(THREE, { shadows = false, ground = () => 0 } = {}) {
   { const head = new THREE.Mesh(new THREE.SphereGeometry(0.2, 14, 10), suit); head.position.y = 0.95; head.castShadow = shadows; body.add(head); stand.push(head); }
   for (const [s, k] of [['L', 1], ['R', -1]]) {
     cap(arm[s], 0.08, L1 - 0.1, V(), V(k * L1, 0, 0));
-    cap(fore[s], 0.075, L2 - 0.1, V(), V(k * L2, 0, 0));
+    cap(fore[s], 0.075, L2 - 0.1, V(), V(k * GRIP[0], GRIP[1], GRIP[2]));
     cap(leg[s], 0.1, LEG - J.knee - 0.12, V(), V(0, J.knee - J.hip, 0));
     cap(shin[s], 0.09, CALF - 0.12, V(), V(0, J.ankle - J.knee, 0));
     cap(foot[s], 0.08, 0.14, V(0, -0.05, -0.04), V(0, -0.05, 0.16));
@@ -90,7 +95,7 @@ export function buildAvatar(THREE, { shadows = false, ground = () => 0 } = {}) {
   // Which part a triangle belongs to, from its centre. The life-support pack (z < -0.15) stays on the body.
   const partOf = (x, y, z) => {
     const s = x > 0 ? 'L' : 'R', ax = Math.abs(x);
-    if (y > 1.15 && ax > J.shoulder[0] + 0.03) return (ax > J.elbow ? 'Forearm_' : 'Arm_') + s;
+    if (y > 1.15 && ax > J.shoulder[0] + 0.03) return (ax > J.elbow[0] ? 'Forearm_' : 'Arm_') + s;
     if (y < J.hip - 0.04 && z > -0.15) return (y > J.knee ? 'Leg_' : y > J.ankle ? 'Shin_' : 'Foot_') + s;
     return 'Body';
   };
@@ -137,7 +142,11 @@ export function buildAvatar(THREE, { shadows = false, ground = () => 0 } = {}) {
   let phase = 0, speed = 0, time = 0;
   const arms = [null, null], armsSmooth = [V(), V()], armsOn = [0, 0];
   const t3 = V(), s3 = V(), e3 = V(), d3 = V(), n3 = V(), el = V(), pole = V(), qi = new THREE.Quaternion();
-  const REST = { L: V(1, 0, 0), R: V(-1, 0, 0) };
+  // Each bone's direction in the T-pose: the upper arm shoulder to elbow, the forearm elbow to the grip.
+  const REST = { L: V(J.elbow[0] - J.shoulder[0], J.elbow[1] - J.shoulder[1], J.elbow[2] - J.shoulder[2]).normalize() };
+  REST.R = REST.L.clone().setX(-REST.L.x);
+  const RESTF = { L: V(...GRIP).normalize() };
+  RESTF.R = RESTF.L.clone().setX(-RESTF.L.x);
 
   // Two-bone IK: put the hand of side s at `target` (in Root's frame), the elbow bent down and out.
   function reach(s, target) {
@@ -158,7 +167,7 @@ export function buildAvatar(THREE, { shadows = false, ground = () => 0 } = {}) {
     const elbow = el.copy(s3).addScaledVector(up, L1);
     const fd = t3.copy(s3).addScaledVector(d3, d).sub(elbow).normalize(); // to the hand, from the elbow
     qi.copy(arm[s].quaternion).invert();
-    fore[s].quaternion.setFromUnitVectors(REST[s], fd.applyQuaternion(qi));
+    fore[s].quaternion.setFromUnitVectors(RESTF[s], fd.applyQuaternion(qi));
   }
 
   // Lay out the whole figure for the current state. walk: 0 standing to 1 striding.
@@ -217,8 +226,7 @@ export function buildAvatar(THREE, { shadows = false, ground = () => 0 } = {}) {
         const id = held?.[i], g = id && tools[id];
         if (!g) return;
         if (g.parent !== hand[s]) hand[s].add(g);
-        const o = IN_HAND[id] || {};
-        g.position.set(0, 0, o.z || 0); g.rotation.set(0, 0, 0); g.scale.setScalar(o.scale || 1);
+        grasp(THREE, g, id); // its grip in the curl of the fingers
         g.visible = true;
       });
     },

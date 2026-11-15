@@ -15,6 +15,28 @@ export const REST = {
   tire:   { turn: [0, Math.PI / 2], y: 0.1 },    // flat, like a dropped wheel
   gen:    { turn: [0, 0], y: 0.19 },             // upright on its skid
 };
+// How a hand closes on each tool: `point` is the bit of the tool that sits in the fist (tool coordinates),
+// `along` the tool's direction that runs through the fist and out past the thumb, `ahead` its direction that
+// points on down the forearm, out past the knuckles. A pistol grip: the barrel runs ahead, the grip through
+// the fist. A brush or a stick is held like a hammer, the head out past the thumb. The patch kit by its top
+// edge, the tire by the top of its rim, the generator by its carry handle: each hangs from the fist.
+export const GRASP = {
+  brush:  { point: [0, 0, -0.01], along: [0, 0, -1], ahead: [0, 1, 0] },
+  patch:  { point: [0, 0.065, -0.06], along: [1, 0, 0], ahead: [0, -1, 0] },
+  welder: { point: [0, -0.06, 0.005], along: [0, 1, 0], ahead: [0, 0, -1] },
+  tire:   { point: [0, 0.32, 0], along: [0, 0, -1], ahead: [0, -1, 0] },
+  gen:    { point: [0, 0.225, 0], along: [0, 0, 1], ahead: [0, -1, 0] },
+};
+// Put tool g into a fist whose frame has x running out past the knuckles and z out past the thumb.
+export function grasp(THREE, g, id) {
+  const G = GRASP[id], ahead = new THREE.Vector3(...G.ahead), along = new THREE.Vector3(...G.along);
+  const third = new THREE.Vector3().crossVectors(along, ahead); // tool axis that becomes the fist's y
+  // The tool's (ahead, third, along) go to the fist's (x, y, z): the inverse of that basis is the rotation.
+  const m = new THREE.Matrix4().makeBasis(ahead, third, along).invert();
+  g.quaternion.setFromRotationMatrix(m);
+  g.position.set(...G.point).applyQuaternion(g.quaternion).negate();
+  g.scale.setScalar(1);
+}
 // Roughly how big each one is, for bouncing it off the ground and for the ring round it: metres.
 export const RADIUS = { brush: 0.12, patch: 0.08, welder: 0.12, tire: 0.32, gen: 0.25 };
 
@@ -75,6 +97,9 @@ export function buildTools(THREE) {
     add(g, new THREE.BoxGeometry(0.46, 0.04, 0.34), paint(dark), 0, -0.17, 0);
     add(g, new THREE.CylinderGeometry(0.05, 0.05, 0.06, 10), paint(dark), -0.1, 0.18, 0);
     add(g, new THREE.TorusGeometry(0.05, 0.014, 6, 14), paint(PAL.hex.red), 0.12, 0.2, 0);
+    // A carry handle, a bent steel bar across the top, front to back.
+    const bar = add(g, new THREE.TorusGeometry(0.075, 0.012, 6, 14, Math.PI), paint(steel, { roughness: 0.45, metalness: 0.8 }), 0, 0.15, 0);
+    bar.rotation.y = Math.PI / 2; bar.name = 'Handle';
     g.userData = { tip: new THREE.Vector3(0, 0, 0), hit: [0.5, 0.45, 0.4, 0] };
     tools.gen = g;
   }

@@ -217,6 +217,8 @@ Things the code needed that sections 1 to 7 did not say. Each is in the code as 
 - **A5 (cards: tools.js).** `RADIUS[id]`, each tool's rough size, for the ring round it. `layDown()` puts a tool in its resting pose; both the astronaut's page and the rover camera use it.
 - **A6 (cards: voice.js, new).** Two sounds: `toss` (a tool leaving the glove at speed) and `thud` (a landing, with a puff of regolith outdoors).
 
+- **A7 (cards: avatar.js, tools.js).** Tools are grasped in the figure's fingers. The model's hands are palm down with the fingers curled under and the thumb forward; `Hand_*` sits in the hollow under the palm (`J.grip`), with x out past the knuckles and z out past the thumb, and the arm's IK aims that point. `GRASP[id]` in tools.js says which bit of each tool sits in the fist and which way it runs: the welder as a pistol grip, the brush like a hammer, the patch kit by its top edge, the tire by the top of its rim, and the generator by a new carry handle. The arm pivots moved onto the arm's centre line (z 0.09). `npm run avatar:shots` draws each tool in each hand close up.
+
 ## 9. Out of scope
 
 - Two-handed carrying of heavy tools, and weight.
