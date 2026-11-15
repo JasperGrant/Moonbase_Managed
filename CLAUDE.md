@@ -2,6 +2,8 @@
 
 Read this file, then [docs/DESIGN.md](docs/DESIGN.md) (the art direction and the palette) and [docs/ASSETS.md](docs/ASSETS.md) (the NASA models and photos, and where each one goes) before you touch a scene, a material, a light, a canvas texture, a stylesheet or a lobby SVG. The game design is in [docs/SPEC-v2.md](docs/SPEC-v2.md). The planned restyle is [docs/SPEC-1960s-pass.md](docs/SPEC-1960s-pass.md). The next gameplay pass (physics tools found in the hall, walk-in airlocks on every HDU door, a stencil-portal porthole, Mission Control calling the astronaut GO) is [docs/SPEC-physical-base.md](docs/SPEC-physical-base.md). The pass after that (a 120 m field, two rovers driven by the Technician, the Scientist's survey chart, rock samples to bring home) is [docs/SPEC-sample-run.md](docs/SPEC-sample-run.md).
 
+Light text guidance for every seat (teletype lines on the consoles, label tape on the cuff, name tags on the tools) is specified in [docs/SPEC-guidance.md](docs/SPEC-guidance.md).
+
 The game is a WebXR co-op fix-it game: one astronaut in a Quest, three Mission Control players on laptops. Everything the pages load is committed under `client/` (three.js is vendored in `client/vendor/`), there is no build step, and the Quest is the performance budget.
 
 ## The look in one paragraph
