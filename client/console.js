@@ -9,7 +9,7 @@ import { drawTool, drawFault, drawGlyph, drawSample } from '/shared/icons.js';
 import { FIELD, CRATERS, BOULDERS, LANDMARKS } from '/shared/field.js';
 import { seatTaken, seatRefused, kicked } from '/seat.js';
 import { createLobby } from '/lobby.js';
-import { briefHTML, lineText, pickLine } from '/shared/guide.js';
+import { briefHTML, pickLine, CAPTIONS } from '/shared/guide.js';
 import { music } from '/music.js';
 import { PAL, FONT, SAMPLE_COL, nixie, jewel, fontsReady } from '/shared/palette.js';
 
@@ -66,10 +66,10 @@ $('run').innerHTML = [
   role === 'all' && strip('all'),
   has('ops') && `<div class="panel ops"><h3>Mission Ops</h3>${role === 'all' ? '' : strip('ops')}
     <button id="ptt">HOLD SPACE TO TALK TO THE ASTRONAUT</button>
-    <h2>Hands</h2><canvas id="handsCv" class="pic" width="560" height="150"></canvas>
-    <h2>Tool log</h2><canvas id="toolCv" class="pic" width="560" height="330"></canvas>
+    <h2>Hands</h2><small class="cap">${CAPTIONS.hands}</small><canvas id="handsCv" class="pic" width="560" height="150"></canvas>
+    <h2>Tool log</h2><small class="cap">${CAPTIONS.tools}</small><canvas id="toolCv" class="pic" width="560" height="330"></canvas>
     <p class="hint">CLICK A TOOL TO LIGHT A BEACON OVER IT FOR THE ASTRONAUT. CLICK IT AGAIN TO PUT IT OUT.</p>
-    <h2>Sample log</h2><canvas id="sampleCv" class="pic" width="560" height="200"></canvas></div>`,
+    <h2>Sample log</h2><small class="cap">${CAPTIONS.samples}</small><canvas id="sampleCv" class="pic" width="560" height="200"></canvas></div>`,
   has('tech') && `<div class="panel tech"><h3>Technician</h3>${role === 'all' ? '' : strip('tech')}
     <div class="camwrap"><canvas id="cam"></canvas><canvas id="camHud"></canvas></div>
     <canvas id="techCv" class="pic" width="920" height="210"></canvas>
@@ -108,28 +108,61 @@ setInterval(() => { $('link').textContent = net.open ? '' : 'NO LINK TO SERVER';
 // ---------- render ----------
 let testSlow = 1; // tests only (moonbase.drawEvery): redraw the instruments this many times less often
 const TOAST = { alarm: 'ALARM', solve: 'FIXED', hit: 'METEOR HIT', power: 'POWER BACK', gen: 'GENERATOR RUNNING', blackout: 'BASE DARK', found: 'SAMPLE BANKED', dud: 'DUD' };
-// ---------- the teletype strip (docs/SPEC-guidance.md, phase 1) ----------
-// What this seat has done, so its lines retire; and the line each strip is typing out.
-const done = { found: false, guide: false, scout: false, hauler: false, missions: 0 };
-let ttPhase = '';
+// ---------- the teletype strip (docs/SPEC-guidance.md, phases 1, 3 and 5) ----------
+// What this seat has done, so its teaching lines retire; whether an alarm is open (Mission Ops is told only
+// that an alarm went and that a fix came); when anything last happened, for the idle line.
+const done = { found: false, guide: false, scout: false, hauler: false, missions: 0, broken: false, brokeAt: 0, quietSince: performance.now(), now: 0 };
+let ttPhase = '', ttEv = 0;
 const strips = role === 'all' ? ['all'] : [role];
 const tt = {}; // seat -> { id, text, shown, at }
+// The GUIDE switch: ON, or QUIET (danger and faults only, and no captions). Kept per seat in this browser.
+let guideQuiet = false;
+try { guideQuiet = localStorage.getItem('moonbase-guide-' + role) === 'quiet'; } catch { /* no storage: ON */ }
+function paintGuide() {
+  const b = $('guideBtn'); if (!b) return;
+  b.textContent = guideQuiet ? 'GUIDE: QUIET' : 'GUIDE: ON';
+  b.classList.toggle('quiet', guideQuiet);
+}
+$('guideBtn')?.addEventListener('click', () => {
+  guideQuiet = !guideQuiet;
+  try { localStorage.setItem('moonbase-guide-' + role, guideQuiet ? 'quiet' : 'on'); } catch { /* not kept */ }
+  paintGuide(); document.body.classList.toggle('guide-quiet', guideQuiet);
+  if (state) { teletype(state); if (state.phase === 'run') renderRun(state); }
+});
+paintGuide(); document.body.classList.toggle('guide-quiet', guideQuiet);
+// A caption under an instrument: what it is for, in small engraved letters, while GUIDE is ON.
+const cap = (g, key, x, y) => { if (!guideQuiet) label(g, CAPTIONS[key], x, y, 8, C.dim); };
 function briefOnce() {
   let seen = false;
   try { seen = sessionStorage.getItem('moonbase-brief-' + role) === '1'; sessionStorage.setItem('moonbase-brief-' + role, '1'); } catch { /* no storage: show it each time */ }
   if (!seen) $('planSheet').hidden = false;
 }
 function teletype(s) {
+  const now = performance.now();
   if (ttPhase === 'run' && s.phase === 'results') done.missions++;
+  if (s.phase !== 'run') { done.broken = false; done.quietSince = now; }
   ttPhase = s.phase;
   if (s.tally?.banked > 0) done.found = true;
+  // Events: an alarm opens (a meteor hit leaves the suit leaking), a fix closes. Anything new resets the idle clock.
+  if (s.ev && s.ev.n !== ttEv) {
+    ttEv = s.ev.n; done.quietSince = now;
+    if (s.ev.kind === 'alarm' || s.ev.kind === 'hit') { done.broken = true; done.brokeAt = CFG.roundSeconds - (s.timeLeft ?? CFG.roundSeconds); }
+    if (s.ev.kind === 'solve') done.broken = false;
+  }
+  if ((has('tech')) && Object.values(s.rovers || {}).some(r => Math.abs(r.v || 0) > 0.2)) done.quietSince = now; // a rover on the move is not idle
+  done.now = now;
   for (const seat of strips) {
     const el = $('tt_' + seat); if (!el) continue;
-    const id = pickLine(seat, s, done), cur = tt[seat];
-    if (!cur || cur.id !== id) {
-      tt[seat] = { id, text: lineText(id, role === 'all'), shown: 0, at: performance.now() };
-      el.hidden = !id;
-      if (id) { el.classList.add('new'); setTimeout(() => el.classList.remove('new'), 1200); }
+    const line = pickLine(seat, s, done, { quiet: guideQuiet }), cur = tt[seat];
+    if (!line) { if (cur?.id) tt[seat] = { id: null, text: '', shown: 0, at: now }; el.hidden = true; continue; }
+    el.hidden = false;
+    el.classList.toggle('t1', line.tier === 1); el.classList.toggle('t2', line.tier === 2);
+    if (!cur || cur.id !== line.id) { // a new line types itself out
+      tt[seat] = { id: line.id, text: line.text, shown: 0, at: now };
+      if (line.tier < 6) done.quietSince = now;
+      el.classList.add('new'); setTimeout(() => el.classList.remove('new'), 1200);
+    } else if (cur.text !== line.text) { // the same line with a new number in it (a countdown): no clatter
+      cur.text = line.text; cur.shown = line.text.length; el.querySelector('span').textContent = line.text;
     }
   }
 }
@@ -427,12 +460,12 @@ function drawTech(s) {
     plate(g, id === 'scout' ? 'SCOUT' : 'HAULER', x0 + 180, 20, 150, 11);
     const h = homeFrom(r);
     homeDial(g, x0 + 70, 110, 56, h.rel);
-    plate(g, 'HOME', x0 + 70, 188, 70, 9);
+    plate(g, 'HOME', x0 + 70, 188, 70, 9); cap(g, 'home', x0 + 70, 203);
     nixie(g, String(Math.round(h.dist)).padStart(3, ' '), x0 + 200, 96, 34);
     label(g, 'METRES', x0 + 200, 132, 11, C.dim);
     const broken = (s.scene?.wheels?.[id] || 0) > 0;
-    jewel(g, x0 + 310, 76, 12, 'red', broken && blinkOn()); label(g, 'WHEEL', x0 + 310, 102, 10, C.dim);
-    if (id === 'hauler') { jewel(g, x0 + 310, 140, 12, 'green', !!s.rider); label(g, 'RIDER', x0 + 310, 166, 10, C.dim); }
+    jewel(g, x0 + 310, 76, 12, 'red', broken && blinkOn()); label(g, 'WHEEL', x0 + 310, 102, 10, C.dim); cap(g, 'wheel', x0 + 310, 115);
+    if (id === 'hauler') { jewel(g, x0 + 310, 140, 12, 'green', !!s.rider); label(g, 'RIDER', x0 + 310, 166, 10, C.dim); cap(g, 'rider', x0 + 310, 179); }
     plate(g, DRIVE[id], x0 + 200, 180, 120, 10);
   });
   // the meteor warning, from the base's own radar
@@ -440,6 +473,7 @@ function drawTech(s) {
   const m = s.meteor;
   jewel(g, 460, 64, 15, 'red', !!m && blinkOn());
   label(g, 'METEOR', 460, 96, 10, C.dim);
+  cap(g, 'meteor', 460, 172);
   nixie(g, m ? (m.falling ? '00' : String(Math.ceil(m.eta)).padStart(2, '0')) : '  ', 460, 140, 32, { lit: !!m });
 }
 let camApi = null; // the rover cameras (client/rovercam.js): their views, switched with C and /
@@ -649,6 +683,8 @@ function drawSurvey(s) {
   // explored, on Nixie tubes
   nixie(g, String(sv.pct).padStart(3, ' '), W - 62, 28, 22);
   label(g, 'SURVEYED %', W - 62, 54, 8, C.dim);
+  cap(g, 'surveyed', W - 62, 66);
+  if (!guideQuiet) label(g, CAPTIONS.chart, 16, 22, 7, C.dim, 'left');
   // the switches and the legend
   knob(g, KNOB.range.x, KNOB.range.y, RANGES.map(String), chart.range, 'RANGE M');
   knob(g, KNOB.centre.x, KNOB.centre.y, CENTRES.map(x => x === 'HAULER' ? 'HAUL' : x), chart.centre, 'CENTRE');
@@ -718,7 +754,7 @@ function drawGuide(s) {
   const ay = H - 74;
   g.fillStyle = PAL.consoleDeep; g.fillRect(14, ay, W - 28, 60);
   g.strokeStyle = PAL.bezel; g.lineWidth = 2; g.strokeRect(15, ay + 1, W - 30, 58);
-  plate(g, 'ASSAY', 70, ay + 30, 90, 10);
+  plate(g, 'ASSAY', 70, ay + 30, 90, 10); cap(g, 'assay', 70, ay + 50);
   const a = s.assay;
   if (a) { drawSample(g, a.look, 170, ay + 30, 46, SAMPLE_COL, PAL.foilGold); if (a.kind !== 'dud') drawGlyph(g, SAMPLES[a.kind].glyph, 220, ay + 30, 18, C.amber); }
   jewel(g, 330, ay + 30, 13, 'green', !!a && a.kind !== 'dud'); label(g, 'FOUND', 330, ay + 52, 8, C.dim);
@@ -732,9 +768,11 @@ function drawPower(s) {
   // The battery: a fuel-gauge dial, laid out like the AIR console's oxygen, with a LOW BATT lamp.
   const low = p.battery < 30;
   dial(g, W * 0.5, 140, 110, p.battery, 100, 'BATTERY', { redBelow: 30, unit: '%' });
+  cap(g, 'battery', W * 0.5, 268);
   jewel(g, W * 0.5 - 160, 160, 9, 'red', low && blinkOn()); label(g, 'LOW', W * 0.5 - 160, 182, 10, C.dim);
   // Power coming in from the sun. Below 100 the panels are dusty and the battery is running down.
   dial(g, W * 0.3, 410, 100, p.solar, 100, 'SOLAR IN', { redBelow: 60, unit: '%' });
+  cap(g, 'solar', W * 0.3, 528);
   // Which way the battery is going: two lamps, one lit.
   const charging = p.solar >= 100, lx = W * 0.74;
   jewel(g, lx, 345, 26, 'green', charging);
@@ -750,13 +788,14 @@ function drawAir(s) {
   // Oxygen left, and how fast it is going.
   dial(g, W * 0.5, 140, 110, s.oxygen, s.o2Max, 'OXYGEN', { redBelow: 25 });
   dial(g, W * 0.3, 410, 100, s.drain, CFG.leakMultiplier * 2 - 0.5, 'DRAIN', { redAbove: 1.6, unit: 'x' });
+  cap(g, 'drain', W * 0.3, 528);
   // The leak lamp. It does not say where.
   const on = s.leak, lx = W * 0.74, ly = 380;
   jewel(g, lx, ly, 60, 'red', on && blinkOn());
   g.strokeStyle = on ? 'rgba(36,34,30,0.8)' : 'rgba(143,138,120,0.35)'; g.lineWidth = 5; g.lineCap = 'round'; // air hissing out of a hole, cast in the lens
   g.beginPath(); g.arc(lx - 26, ly, 8, 0, 7); g.stroke();
   for (const a of [-0.5, 0, 0.5]) { g.beginPath(); g.moveTo(lx - 10 + Math.cos(a) * 6, ly + Math.sin(a) * 6); g.lineTo(lx - 10 + Math.cos(a) * 38, ly + Math.sin(a) * 38); g.stroke(); }
-  plate(g, 'LEAK', lx, ly + 102, 110, 13);
+  plate(g, 'LEAK', lx, ly + 102, 110, 13); cap(g, 'leak', lx, ly + 124);
 }
 
 

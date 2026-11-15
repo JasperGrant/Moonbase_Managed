@@ -12,7 +12,7 @@
 // The hand is the NASA EVA glove model (client/assets/models/glove.glb). Sizes are a suited arm's,
 // in metres. The gauge face is a 1960s instrument (docs/DESIGN.md): cream dials with needles, jewel
 // lamps, no words or numbers, only icons. Beside it is the EXIT button that ends the headset session.
-import { PAL, jewel } from '/shared/palette.js';
+import { PAL, FONT, jewel } from '/shared/palette.js';
 import { loadGlove } from '/shared/assets.js';
 import { drawTool } from '/shared/icons.js';
 
@@ -341,7 +341,8 @@ export function buildArm(THREE) {
     const level = info.zoom > 1.01 ? Math.max(1, Math.min(5, Math.round(info.zoom - 1))) : 0;
     const debrief = !!info.debrief;
     const sm = info.samples;
-    const k = [o2, s && s.o2Max, t, alarms, info.radio, level, info.status, held, debrief, sm ? sm.banked + '/' + sm.wanted : ''].join('|');
+    const tape = debrief ? '' : info.tape || '';
+    const k = [o2, s && s.o2Max, t, alarms, info.radio, level, info.status, held, debrief, sm ? sm.banked + '/' + sm.wanted : '', tape, info.tapeTier].join('|');
     if (k === key) return;
     key = k;
 
@@ -387,6 +388,22 @@ export function buildArm(THREE) {
       if (info.status === 'ok' || info.status === 'won') at(338, 182, 1.15, () => tick(0, 0, GREEN));
       else if (info.status === 'bad' || info.status === 'lost') at(338, 182, 1.15, () => cross(0, 0, RED));
       jewel(g, 338, 330, 13, 'amber', hurry);               // hurry lamp under the dial
+    }
+
+    // The label tape (docs/SPEC-guidance.md, phase 3): the cuff's only words, one line above the dials, embossed
+    // capitals on black tape. Red capitals for danger, amber for a fault, cream for the rest.
+    if (tape) {
+      g.font = `bold 26px ${FONT.label}`; g.textAlign = 'left'; g.textBaseline = 'middle';
+      let size = 26; while (g.measureText(tape).width > 380 && size > 16) g.font = `bold ${--size}px ${FONT.label}`;
+      const w = Math.min(420, g.measureText(tape).width + 36), x0 = 30, y0 = 30, h = 44;
+      g.save(); g.translate(x0 + w / 2, y0 + h / 2); g.rotate(-0.012); // stuck on by hand, a hair off level
+      g.fillStyle = 'rgba(0,0,0,0.35)'; g.fillRect(-w / 2 + 2, -h / 2 + 3, w, h);        // its shadow on the panel
+      g.fillStyle = PAL.bakelite; g.fillRect(-w / 2, -h / 2, w, h);
+      g.fillStyle = 'rgba(255,255,255,0.06)'; g.fillRect(-w / 2, -h / 2, w, 4);          // the sheen along its top edge
+      const ink = info.tapeTier === 1 ? PAL.red : info.tapeTier === 2 ? PAL.amber : PAL.dial;
+      g.fillStyle = 'rgba(0,0,0,0.6)'; g.fillText(tape, -w / 2 + 19, 2);               // embossed: a dark edge under
+      g.fillStyle = ink; g.fillText(tape, -w / 2 + 18, 0);
+      g.restore();
     }
 
     // Radio: a lamp in the radio's colour above the microphone or the loudspeaker.

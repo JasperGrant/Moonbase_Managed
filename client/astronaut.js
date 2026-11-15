@@ -20,7 +20,7 @@ import { createLobby } from '/lobby.js';
 import { isHeadset } from '/device.js';
 import { music } from '/music.js';
 import { makeCueOverlay } from '/hand.js';
-import { BRIEFINGS, briefHTML } from '/shared/guide.js';
+import { BRIEFINGS, briefHTML, pickLine } from '/shared/guide.js';
 
 const REACH = 3.2;        // metres: how far away the mouse can work something
 const REACH_VR = 1.6;     // metres: pointing in VR is a fallback for grabbing, so it only works close up
@@ -130,8 +130,28 @@ function alarms() {
   const sc = state.scene;
   return (sc.dust ? 1 : 0) + (Object.values(sc.wheels || {}).some(Boolean) ? 1 : 0) + (sc.hull ? 1 : 0) + (state.suit ? 1 : 0);
 }
+// The cuff's label tape (docs/SPEC-guidance.md, phase 3): the astronaut's one line, picked from what the
+// astronaut's own page knows. A new danger or fault line ticks and buzzes the left hand.
+const tapeMem = { missions: 0, quietSince: performance.now(), now: 0, outside: false };
+let tapeLine = null, tapeEv = 0, tapePhase = '';
+function cuffTape() {
+  const s = state, t = performance.now();
+  if (!s) return null;
+  if (tapePhase === 'run' && s.phase === 'results') tapeMem.missions++;
+  tapePhase = s.phase;
+  if (s.ev && s.ev.n !== tapeEv) { tapeEv = s.ev.n; tapeMem.quietSince = t; }
+  Object.assign(tapeMem, { now: t, outside: where === 'out' });
+  const line = pickLine('astronaut', s, tapeMem);
+  if (line && line.id !== tapeLine?.id) {
+    if (line.tier < 6) tapeMem.quietSince = t;
+    if (line.tier <= 2 && mode === 'vr') { radio.sfx('click'); const L = controllers.findIndex(c => c.userData.hand === 'left'); if (L >= 0) pulse(L, 0.6, 90); }
+  }
+  tapeLine = line;
+  return line;
+}
 function drawGauges(now) {
-  arm.draw({ state, status: status(now), debrief: !!debrief, zoom: scopeOn() ? zoom : 1, total: CFG.roundSeconds, radio: radioState(),
+  const line = cuffTape();
+  arm.draw({ tape: line?.text || '', tapeTier: line?.tier || 0, state, status: status(now), debrief: !!debrief, zoom: scopeOn() ? zoom : 1, total: CFG.roundSeconds, radio: radioState(),
     alarms: alarms(), held: running() ? fx.hands : [null, null], samples: running() && state.tally ? state.tally : null });
   arm.signal(radioState(), now);
 }

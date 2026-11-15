@@ -305,3 +305,13 @@ body.period { background:var(--p-bakelite); }
 .brief-card table { border-collapse:collapse; width:100%; }
 .brief-card th { font-family:var(--p-label); font-weight:400; font-size:9px; letter-spacing:.14em; text-align:left; vertical-align:top; padding:3px 12px 3px 0; white-space:nowrap; color:var(--p-ink-dial); opacity:.72; }
 .brief-card td { padding:3px 0; border-bottom:1px dotted rgba(36,34,30,.25); }
+
+/* Guidance, phases 3 and 5 (docs/SPEC-guidance.md): danger lines in lamp red, faults in lamp amber; the GUIDE
+   switch in the header; the captions under Mission Ops' logs, hidden on QUIET. */
+.teletype.t1 span { color:var(--p-red); } .teletype.t1.new i { background:var(--p-red); box-shadow:0 0 5px rgba(196,82,58,.7); }
+.teletype.t2 span { color:var(--p-amber); }
+.period #guideBtn { margin-left:auto; background:var(--p-console); border-color:var(--p-bezel); color:var(--p-ink); }
+.period #guideBtn.quiet { color:var(--p-dim); }
+.period #guideBtn ~ #radioBtn { margin-left:0; }
+.cap { display:block; font-family:var(--p-label); font-size:8px; letter-spacing:.14em; color:var(--p-dim); margin:-2px 0 4px; }
+.guide-quiet .cap { display:none; }
