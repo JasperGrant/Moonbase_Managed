@@ -2,6 +2,9 @@
 import * as THREE from 'three';
 import { buildWorld } from '/world.js';
 
+// Tests only: draw one frame in `every` (see the console's moonbase.drawEvery). Players never change it.
+export const camDraw = { every: 1, n: 0 };
+
 export function startRoverCam(canvas, getState) {
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
   renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5));
@@ -24,6 +27,7 @@ export function startRoverCam(canvas, getState) {
     // Nothing arrives during a blackout (no rover, no scene), and there is nothing to draw while the tab is hidden.
     const s = getState();
     if (!w || !h || !s || !s.rover) return;
+    if (camDraw.every > 1 && ++camDraw.n % camDraw.every) return;
     world.moveRover(s.rover);
     world.update(ms / 1000);
     if (s.scene) world.apply(s.scene, ms / 1000);

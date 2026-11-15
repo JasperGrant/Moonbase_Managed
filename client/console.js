@@ -480,4 +480,6 @@ if (has('ops')) {
 }
 
 // For debugging from the browser console.
-window.moonbase = { state: () => state, radio, net, role, debrief: () => debrief };
+window.moonbase = { state: () => state, radio, net, role, debrief: () => debrief,
+  // Tests only: draw the rover camera one frame in n, so a software-WebGL test machine keeps up with the mission.
+  drawEvery: n => import('/rovercam.js').then(m => { m.camDraw.every = Math.max(1, n | 0); }) };
