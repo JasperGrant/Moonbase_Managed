@@ -38,6 +38,15 @@ export function drawTool(g, tool, x, y, size, color) {
     g.beginPath(); g.moveTo(-40, -18); g.lineTo(-40, -40); g.lineTo(40, -40); g.lineTo(40, -18); g.stroke(); // carry frame
     g.globalCompositeOperation = 'destination-out';   // a lightning bolt cut out of the body
     g.beginPath(); g.moveTo(8, -10); g.lineTo(-12, 12); g.lineTo(0, 12); g.lineTo(-8, 28); g.lineTo(14, 4); g.lineTo(2, 4); g.closePath(); g.fill();
+  } else if (tool === 'drill') {
+    g.fillRect(-18, -40, 36, 30);                     // the motor
+    g.lineWidth = 8;
+    g.beginPath(); g.moveTo(-42, -26); g.lineTo(42, -26); g.stroke(); // two handles
+    g.fillRect(-5, -10, 10, 40);                      // the barrel
+    g.lineWidth = 4;
+    for (let y = -6; y < 30; y += 9) { g.beginPath(); g.moveTo(-10, y); g.lineTo(10, y + 5); g.stroke(); } // the auger flight
+    g.lineWidth = 6;
+    g.beginPath(); g.ellipse(0, 38, 26, 7, 0, 0, Math.PI * 2); g.stroke(); // the collar on the rock
   }
   g.restore();
 }

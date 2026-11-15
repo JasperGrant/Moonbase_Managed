@@ -303,7 +303,7 @@ export function buildInterior(THREE, scene, { sfx = () => {} } = {}) {
     box(K, 0.01, 0.5, l, x0 + 0.006, top + 0.3, cz);                      // a dark backing board behind the tools
   }
   box(K, 0.6, 0.006, 0.4, PLACES.toolHomes.welder.x, 0.963, PLACES.toolHomes.welder.z - 0.12); // the welder's mat
-  for (const dx of [-0.2, 0.2]) tube(G, [PLACES.toolHomes.welder.x + dx, 2.12, -4.37], [PLACES.toolHomes.welder.x + dx, 2.25, -4.37], 0.008); // the rods its sign hangs from
+  for (const dx of [-0.24, 0.24]) tube(G, [PLACES.toolHomes.welder.x + dx, 2.1, -4.37], [PLACES.toolHomes.welder.x + dx, 2.25, -4.37], 0.008); // the rods its sign hangs from
   {
     const [x0, x1, z0, z1, , top] = SHELVES[1], cx = (x0 + x1) / 2, cz = (z0 + z1) / 2;
     box(G, x1 - x0, 0.05, z1 - z0, cx, top - 0.025, cz);                   // the top
@@ -364,6 +364,7 @@ export function buildInterior(THREE, scene, { sfx = () => {} } = {}) {
 
   // Engraved signs: a cream plate in a bezel, the tool's picture and its name, screwed to the wall over
   // where it lives. Lit by the room (Lambert), so they go dark with the lights.
+  const SIGN_NAME = { gen: 'Generator' }; // short enough to read across the hall
   function sign(id, w, h, x, y, z, ry) {
     const PW = 512, PH = Math.round(PW * h / w), c = document.createElement('canvas'); c.width = PW; c.height = PH;
     const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = 4;
@@ -377,11 +378,11 @@ export function buildInterior(THREE, scene, { sfx = () => {} } = {}) {
       g.fillStyle = PAL.bezel; for (const [sx, sy] of [[22, 22], [PW - 22, 22], [22, PH - 22], [PW - 22, PH - 22]]) { g.beginPath(); g.arc(sx, sy, 6, 0, 7); g.fill(); } // screws
       const icon = PH - 44;
       drawTool(g, id, 24 + icon / 2 + 8, PH / 2, icon * 0.9, PAL.inkDial);
-      const name = TOOLS[id].name.toUpperCase(), tx = 24 + icon + 26, room = PW - tx - 28;
-      let size = Math.round(PH * 0.34); g.font = `${size}px ${FONT.label}`;
-      while (g.measureText(name).width * 1.08 > room && size > 14) { size -= 2; g.font = `${size}px ${FONT.label}`; }
+      const name = (SIGN_NAME[id] || TOOLS[id].name).toUpperCase(), tx = 24 + icon + 26, room = PW - tx - 28;
+      let size = Math.round(PH * 0.46); g.font = `${size}px ${FONT.label}`;
+      while (g.measureText(name).width * 1.12 > room && size > 14) { size -= 2; g.font = `${size}px ${FONT.label}`; }
       g.fillStyle = PAL.inkDial; g.textAlign = 'left'; g.textBaseline = 'middle';
-      if (g.letterSpacing !== undefined) g.letterSpacing = `${Math.round(size * 0.08)}px`;
+      if (g.letterSpacing !== undefined) g.letterSpacing = `${Math.round(size * (name.length > 6 ? 0.03 : 0.08))}px`;
       g.fillText(name, tx, PH / 2 + 2);
       for (let i = 0; i < 40; i++) { g.fillStyle = `rgba(36,34,30,${0.03 + rnd() * 0.05})`; g.fillRect(rnd() * PW, rnd() * PH, 1 + rnd() * 18, 1 + rnd() * 2); } // wear
       tex.needsUpdate = true;
@@ -390,13 +391,13 @@ export function buildInterior(THREE, scene, { sfx = () => {} } = {}) {
     return root;
   }
   const H_ = PLACES.toolHomes;
-  sign('brush', 0.46, 0.15, -3.488, 1.55, H_.brush.z - 0.12, Math.PI / 2);
-  sign('patch', 0.46, 0.15, -3.488, 1.55, H_.patch.z, Math.PI / 2);
+  sign('brush', 0.62, 0.2, -3.488, 1.62, H_.brush.z - 0.12, Math.PI / 2);
+  sign('patch', 0.62, 0.2, -3.488, 1.62, H_.patch.z - 0.02, Math.PI / 2);
   { // the welder's sign hangs from the gantry over the bench, on two short rods
-    sign('welder', 0.5, 0.16, H_.welder.x, 2.04, -4.36, 0);
+    sign('welder', 0.62, 0.2, H_.welder.x, 2.0, -4.36, 0);
   }
-  sign('tire', 0.56, 0.17, H_.tire.x, 1.25, -11.988, 0);
-  sign('gen', 0.56, 0.17, H_.gen.x, 1.25, -11.988, 0);
+  sign('tire', 0.86, 0.22, H_.tire.x, 1.3, -11.988, 0);
+  sign('gen', 0.86, 0.22, H_.gen.x + 0.05, 1.3, -11.988, 0);
 
   // The hall's twin of each airlock chamber, behind its door. Their inner hatches stand open onto the hall
   // (astronaut.js swings them); their outer hatches stay shut: the Moon is on the other side.

@@ -889,6 +889,15 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
       trayPlate.position.set(0, 0.88, -1.231); trayPlate.rotation.y = Math.PI; rover.add(trayPlate);
       rover.userData.rail = new THREE.Object3D(); rover.userData.rail.position.set(0, 1.42, -1.3); rover.add(rover.userData.rail);
       rover.userData.plate = new THREE.Object3D(); rover.userData.plate.position.set(P.x, P.y, P.z); rover.add(rover.userData.plate);
+      // The core drill's rack on the left flank, between the wheels: a ring clamp round its barrel and a shelf
+      // under its motor, each on a strut back to the chassis. Rack_Drill is where the drill's foot goes.
+      const K = HAULER.rack;
+      const clamp = mesh(new THREE.TorusGeometry(0.07, 0.014, 6, 18), steel, K.x, K.y + 0.28, K.z, body); clamp.rotation.x = Math.PI / 2;
+      tube(steel, [K.x + 0.07, K.y + 0.28, K.z], [-0.72, 0.6, K.z], 0.018, body);
+      mesh(rbox(0.24, 0.03, 0.24, 0.01), dark, K.x, K.y + 0.6, K.z, body);
+      for (const dz of [-0.09, 0.09]) tube(steel, [K.x + 0.1, K.y + 0.6, K.z + dz], [-0.72, 0.68, K.z + dz], 0.015, body);
+      const rack = new THREE.Object3D(); rack.name = 'Rack_Drill'; rack.position.set(K.x, K.y, K.z); rack.rotation.y = K.ry; rover.add(rack);
+      rover.userData.rack = rack;
       // The tray: four open sample cups on the aft bay.
       const tray = new THREE.Group(); tray.name = 'Tray'; rover.add(tray);
       mesh(rbox(1.3, 0.04, 0.32, 0.015), dark, 0, 1.0, HAULER.cups[0].z, tray);
@@ -1009,6 +1018,107 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
   }
   drawPort(0, CFG.sample.manifest);
 
+  // ---------- the core drill: carried in both hands, racked on the Hauler, locked on a rock to take a core ----------
+  // Its foot is its origin and its face (+z) looks at whoever works it: the five Nixie tubes on top, the jewel
+  // lamp, and the tray the core comes up onto. The handles stick out either side (Handle_L at -x, Handle_R at +x).
+  // The drill lives in `drillHome` (a scene child, so the astronaut page hides it indoors with the rest of the
+  // surface) or, while it rides, in the Hauler's rack.
+  const drillHome = new THREE.Group(); drillHome.name = 'Drill_Home'; scene.add(drillHome);
+  const coreDrill = new THREE.Group(); coreDrill.name = 'Drill_Core';
+  {
+    const body = new THREE.Group(); body.name = 'Body'; coreDrill.add(body);
+    const paint = new THREE.MeshStandardMaterial({ map: stencil('CORE', PAL.enamel), roughness: 0.8, metalness: 0.12, bumpMap: regolithBump, bumpScale: 0.02 });
+    const bezelM = new THREE.MeshStandardMaterial({ color: PAL.hex.bezel, roughness: 0.45, metalness: 0.75 });
+    const bakelite = new THREE.MeshStandardMaterial({ color: PAL.hex.bakelite, roughness: 0.45, metalness: 0 });
+    mesh(rbox(0.26, 0.3, 0.22, 0.04), paint, 0, 0.77, 0, body);                          // the motor and battery
+    mesh(rbox(0.28, 0.035, 0.24, 0.012), dark, 0, 0.62, 0, body);                         // its base plate
+    mesh(rbox(0.24, 0.04, 0.08, 0.012), dark, 0, 0.94, 0.02, body);                       // the Nixie row's socket
+    // The foot: a collar that closes round the rock, three clamp pads, and a tripod cage up to the motor.
+    const collar = mesh(new THREE.TorusGeometry(0.2, 0.018, 8, 28), bezelM, 0, 0.03, 0, body); collar.rotation.x = Math.PI / 2;
+    for (let i = 0; i < 3; i++) {
+      const a = i * Math.PI * 2 / 3 + Math.PI / 6, cx = Math.cos(a), cz = Math.sin(a);
+      tube(steel, [cx * 0.2, 0.03, cz * 0.2], [cx * 0.07, 0.61, cz * 0.07], 0.012, body);
+      mesh(rbox(0.05, 0.05, 0.05, 0.01), dark, cx * 0.17, 0.035, cz * 0.17, body);
+    }
+    // The handles, one either side: a bar out of the motor and a Bakelite grip.
+    const gripGeo = new THREE.LatheGeometry([[0, -0.07], [0.022, -0.07], [0.026, -0.05], [0.024, 0], [0.026, 0.05], [0.022, 0.07], [0, 0.07]].map(([x, y]) => new THREE.Vector2(x, y)), 12);
+    gripGeo.rotateZ(Math.PI / 2);
+    const handles = [-1, 1].map(sx => {
+      tube(steel, [sx * 0.12, 0.82, 0], [sx * 0.36, 0.82, 0], 0.014, body);
+      mesh(gripGeo, bakelite, sx * 0.28, 0.82, 0, body);           // merged with the body; the marker is what hands find
+      const g = new THREE.Object3D(); g.name = sx < 0 ? 'Handle_L' : 'Handle_R'; g.position.set(sx * 0.28, 0.82, 0); coreDrill.add(g);
+      return g;
+    });
+    // The tray the core comes up onto, on an arm off the motor's face.
+    tube(steel, [0, 0.64, 0.09], [0, 0.5, 0.2], 0.012, body);
+    const trayGeo = new THREE.LatheGeometry([[0.0, 0], [0.08, 0], [0.09, 0.02], [0.1, 0.07], [0.112, 0.08], [0.104, 0.085], [0.09, 0.025], [0.0, 0.025]].map(([x, y]) => new THREE.Vector2(x, y)), 18);
+    const cupMat = new THREE.MeshStandardMaterial({ color: PAL.hex.aluminium, roughness: 0.45, metalness: 0.8, side: THREE.DoubleSide });
+    mesh(trayGeo, cupMat, 0, 0.47, 0.2, body).name = 'Tray_Core';
+    const trayPt = new THREE.Object3D(); trayPt.name = 'Core_Seat'; trayPt.position.set(0, 0.55, 0.2); coreDrill.add(trayPt);
+    mergeStatic(body);
+    // The barrel and its auger flight: the part that turns.
+    const auger = new THREE.Group(); auger.name = 'Auger'; coreDrill.add(auger);
+    const helix = new THREE.Curve(); helix.getPoint = (t, out = new THREE.Vector3()) => out.set(Math.cos(t * 44) * 0.045, 0.06 + t * 0.52, Math.sin(t * 44) * 0.045);
+    const barrel = new THREE.CylinderGeometry(0.032, 0.036, 0.6, 10).translate(0, 0.32, 0);
+    mesh(mergeGeometries([barrel.toNonIndexed(), new THREE.TubeGeometry(helix, 120, 0.007, 5).toNonIndexed()]), steel, 0, 0, 0, auger).name = 'Auger_Barrel';
+    // Five Nixie tubes: glass envelopes over one lit plane, one digit in each, 5 4 3 2 1 from the left.
+    const glassGeo = mergeGeometries([0, 1, 2, 3, 4].flatMap(i => {
+      const x = (i - 2) * 0.042, c = new THREE.CylinderGeometry(0.019, 0.019, 0.06, 12, 1, true), d = new THREE.SphereGeometry(0.019, 12, 6, 0, Math.PI * 2, 0, Math.PI / 2);
+      c.translate(x, 0.99, 0.02); d.translate(x, 1.02, 0.02);
+      return [c.toNonIndexed(), d.toNonIndexed()];
+    }));
+    const glass = new THREE.Mesh(glassGeo, new THREE.MeshStandardMaterial({ color: PAL.hex.ink, transparent: true, opacity: 0.22, roughness: 0.08, metalness: 0, depthWrite: false, side: THREE.DoubleSide }));
+    glass.name = 'Nixie_Glass'; glass.renderOrder = 2; coreDrill.add(glass);
+    const ncv = document.createElement('canvas'); ncv.width = 256; ncv.height = 80;
+    const ntex = new THREE.CanvasTexture(ncv); ntex.colorSpace = THREE.SRGBColorSpace;
+    const nplate = new THREE.Mesh(new THREE.PlaneGeometry(0.21, 0.066), new THREE.MeshBasicMaterial({ map: ntex, toneMapped: false }));
+    nplate.name = 'Nixie_Count'; nplate.position.set(0, 0.99, 0.02); coreDrill.add(nplate);
+    const lamp = new THREE.Mesh(new THREE.SphereGeometry(0.018, 10, 8), new THREE.MeshBasicMaterial({ color: PAL.hex.greenOff, toneMapped: false }));
+    lamp.name = 'Lamp_Core'; lamp.position.set(0.085, 0.7, 0.112); coreDrill.add(lamp);
+    coreDrill.traverse(o => { if (o.isMesh && o !== glass && o !== nplate && o !== lamp) o.castShadow = true; });
+    coreDrill.userData = { handles, trayPt, auger, lamp, ncv, ntex, key: '', lit: 0, foot: new THREE.Vector3(0, 0.03, 0), handleY: 0.82, handleX: 0.28,
+      left: 0, leftAt: 0, mode: 'rover', dustAt: 0, coreAt: new Map() };
+    drillHome.add(coreDrill);
+  }
+  // The five tubes: n lit, counting down from the left (the 5 goes out first).
+  function drawDrill(n) {
+    const u = coreDrill.userData, key = String(n);
+    if (u.key === key) return; u.key = key;
+    const g = u.ncv.getContext('2d');
+    g.fillStyle = PAL.consoleDeep; g.fillRect(0, 0, 256, 80);
+    for (let i = 0; i < 5; i++) nixie(g, String(5 - i), 128 + (i - 2) * 51.2, 40, 56, { lit: 5 - i <= n });
+    u.ntex.needsUpdate = true;
+  }
+  drawDrill(0);
+  let drillOverride = null; // () => { pos, ry } for a drill in the astronaut's hands (or falling), { rack: true }, or null
+  const dPos = new THREE.Vector3();
+  // Where the drill is: the astronaut's page's word while it has it, otherwise the server's.
+  function placeDrill(d, time) {
+    const u = coreDrill.userData, o = drillOverride ? drillOverride() : null;
+    const at = o ? (o.rack ? 'rover' : 'free') : d ? d.at : 'rover';
+    if (at === 'rover') {
+      const rack = rover.userData.rack;
+      if (coreDrill.parent !== rack) { rack.add(coreDrill); coreDrill.position.set(0, 0, 0); coreDrill.rotation.set(0, 0, 0); }
+    } else {
+      if (coreDrill.parent !== drillHome) drillHome.add(coreDrill);
+      if (o) { coreDrill.position.copy(o.pos); coreDrill.rotation.set(0, o.ry, 0); }
+      else if (d.at === 'hand') {
+        // Seen from a rover: carried in front of the astronaut, its face toward them.
+        const ry = avatar.rotation.y;
+        dPos.set(avatar.position.x + Math.sin(ry) * 0.45, 0, avatar.position.z + Math.cos(ry) * 0.45);
+        coreDrill.position.set(dPos.x, height(dPos.x, dPos.z) + 0.2, dPos.z); coreDrill.rotation.set(0, ry + Math.PI, 0);
+      } else { coreDrill.position.set(d.x, height(d.x, d.z), d.z); coreDrill.rotation.set(0, d.ry || 0, 0); }
+    }
+    // The countdown runs on between the server's words, so the tubes go out a second apart.
+    const left = d && d.at === 'site' && !o ? d.left : 0;
+    if (left !== u.left) { u.left = left; u.leftAt = time; }
+    u.mode = !d || o ? 'idle' : d.at === 'site' ? (left > 0 ? 'drilling' : 'done') : 'idle';
+    const shown = u.mode === 'drilling' ? Math.max(1, Math.ceil(left - (time - u.leftAt) - 1e-3)) : 0;
+    u.lit = shown; drawDrill(shown);
+    coreDrill.updateMatrixWorld(true);
+  }
+  placeDrill(null, 0);
+
   // ---------- the samples: rocks out on the field, one instanced batch per look ----------
   // Bigger than life (15 to 30 cm) so a camera can pick one out at 10 m. Every page sees only the look.
   const sampleGeo = {
@@ -1071,9 +1181,10 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
   const sampleSize = id => 0.17 + hashId(id) * 0.12;
   const sPos = new THREE.Vector3(), sQ = new THREE.Quaternion(), sE = new THREE.Euler(), sS = new THREE.Vector3(), sM = new THREE.Matrix4(), nrm = new THREE.Vector3(), UPV = new THREE.Vector3(0, 1, 0);
   let sampleOverride = null; // (id) => a world position for a sample in a hand, falling or indoors; null: the server's word
-  let lastSamples = [];
+  let lastSamples = [], nowT = 0;
   function drawSamples(list) {
     lastSamples = list || [];
+    for (const id of coreDrill.userData.coreAt.keys()) if (!lastSamples.some(s => s.id === id && s.at === 'drill')) coreDrill.userData.coreAt.delete(id);
     const counts = {}, held = {}; for (const l of LOOKS) counts[l] = held[l] = 0;
     let stainN = 0;
     for (const s of lastSamples) {
@@ -1091,9 +1202,17 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
       let place = null;
       if (s.at === 'ground') place = sPos.set(s.x, height(s.x, s.z) + size * 0.3, s.z);
       else if (s.at === 'tray' && rover.userData.cups[s.slot]) { rover.userData.cups[s.slot].getWorldPosition(sPos); sPos.y += 0.09; place = sPos; }
+      else if (s.at === 'drill') {
+        // The core comes up the barrel onto the tray, in under a second.
+        const u = coreDrill.userData; if (!u.coreAt.has(s.id)) u.coreAt.set(s.id, nowT);
+        const k = Math.min(1, (nowT - u.coreAt.get(s.id)) / 0.9), e = 1 - (1 - k) * (1 - k);
+        u.trayPt.getWorldPosition(sPos);
+        if (k < 1) { coreDrill.localToWorld(nrm.copy(u.foot)); sPos.lerp(nrm, 1 - e); }
+        place = sPos;
+      }
       if (!place) continue;
       sE.set(h * 0.6, h * 6.28, (h - 0.5) * 0.5);
-      sM.compose(place, sQ.setFromEuler(sE), sS.setScalar(s.at === 'tray' ? Math.min(size, 0.13) : size));
+      sM.compose(place, sQ.setFromEuler(sE), sS.setScalar(s.at === 'tray' || s.at === 'drill' ? Math.min(size, 0.13) : size));
       im.setMatrixAt(counts[s.look]++, sM);
       if (s.look === 'ochre-beads' && s.at === 'ground') {
         normalAt(s.x, s.z, nrm); sQ.setFromUnitVectors(UPV, nrm);
@@ -1124,7 +1243,11 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
     doors,
     fixtures: { dustCells, dust, crack, crackPts, wheel: rover.userData.wheel, hub: rover.userData.hub,
       wheels: Object.fromEntries(Object.entries(rovers).map(([id, r]) => [id, { wheel: r.userData.wheel, hub: r.userData.hub }])),
-      rail: rover.userData.rail, grip: rover.userData.grip, plate: rover.userData.plate, cups: rover.userData.cups, portMouth: port.userData.mouth },
+      rail: rover.userData.rail, grip: rover.userData.grip, plate: rover.userData.plate, cups: rover.userData.cups, portMouth: port.userData.mouth,
+      drill: coreDrill, rack: rover.userData.rack },
+    // Where the drill is drawn while the astronaut has it: () => { pos, ry } | { rack: true } | null.
+    set drillOverride(fn) { drillOverride = fn; },
+    placeDrill: (d, time) => placeDrill(d, time),
     // A puff of dust kicked up at a point (boots landing, a rock picked up).
     puff(p, n = 10, speed = 0.6) { for (let i = 0; i < n; i++) { const a = Math.random() * 6.28; kick(p.x, p.y + 0.05, p.z, Math.cos(a) * speed * Math.random(), 0.3 + Math.random() * speed, Math.sin(a) * speed * Math.random()); } },
     // Where a sample in a hand (or falling) is drawn: (id) => world position, or null to leave it to the server's word.
@@ -1136,6 +1259,17 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
     // Call every frame.
     update(time) {
       const dt = Math.min(0.1, Math.max(0, time - dustT)); dustT = time;
+      nowT = time;
+      // The drill at work: the auger turns, the motor shivers, the cuttings spill out round the collar.
+      { const u = coreDrill.userData, on = u.mode === 'drilling';
+        if (on) { u.auger.rotation.y = time * 16; u.auger.position.y = Math.sin(time * 90) * 0.002; }
+        if (on && time > u.dustAt && coreDrill.parent === drillHome) {
+          u.dustAt = time + 0.09;
+          coreDrill.localToWorld(dPos.copy(u.foot));
+          const a = Math.random() * 6.28; kick(dPos.x + Math.cos(a) * 0.12, dPos.y, dPos.z + Math.sin(a) * 0.12, Math.cos(a) * 0.5, 0.4 + Math.random() * 0.5, Math.sin(a) * 0.5);
+        }
+        // Amber blinking at 1 Hz while it works, green once the core is up, dark otherwise.
+        u.lamp.material.color.setHex(on ? (Math.floor(time * 2) % 2 ? PAL.hex.amber : PAL.hex.amberOff) : u.mode === 'done' && lastSamples.some(s => s.at === 'drill') ? PAL.hex.green : PAL.hex.greenOff); }
       stepDust(dt);
       dust.update(dt, time);
       // The port's lid drops shut on each banked sample, and opens again; its lamp says FOUND or DUD.
@@ -1175,6 +1309,7 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
         const a = s.port.assay, u = port.userData;
         if (a && a.n !== u.lastN) { if (u.lastN) { u.flash = a.kind === 'dud' ? 'dud' : 'found'; u.flashUntil = time + 3; } u.lastN = a.n; }
       }
+      placeDrill(s.drill, time);
       drawSamples(s.samples);
 
       // Hull crack, weld beads and the vapour jet.
