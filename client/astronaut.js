@@ -281,10 +281,15 @@ addEventListener('keydown', e => {
   if (e.key.toLowerCase() === 'l' && mode === 'desk' && !e.repeat) debugOutage = !debugOutage;
   if (e.key.toLowerCase() === 'k' && mode === 'desk' && !e.repeat) debugDamage = !debugDamage;
   if (e.key.toLowerCase() === 'q' && mode === 'desk' && !e.repeat) { if (!fx.dropHeld()) fx.dropSample(); }
-  if (e.key.toLowerCase() === 'e' && mode === 'desk' && !e.repeat) { if (riding) dismount(-1); else mount(2); } // on and off the Hauler
+  // E: with a loose tool or a sample in view and in reach, take it and keep it while E is held (let go of E to
+  // let go of it). Otherwise it goes on and off the Hauler, as before.
+  if (e.key.toLowerCase() === 'e' && mode === 'desk' && !e.repeat) {
+    if (!riding && running() && fx.grabKey(targetInReach(null))) { /* held until E comes up */ }
+    else if (riding) dismount(-1); else mount(2);
+  }
 });
-addEventListener('keyup', e => { keys[e.key.toLowerCase()] = false; });
-addEventListener('blur', () => { for (const k in keys) keys[k] = false; });
+addEventListener('keyup', e => { keys[e.key.toLowerCase()] = false; if (e.key.toLowerCase() === 'e') fx.releaseKey(); });
+addEventListener('blur', () => { for (const k in keys) keys[k] = false; fx.releaseKey(); }); // losing focus lets go of what E is holding
 // Chrome reports one huge movementX/Y on the first event after the pointer locks (the cursor
 // snapping to the centre), which used to leave the camera staring at the sky. Clamp it away.
 let lockedAt = 0, skipNext = false;

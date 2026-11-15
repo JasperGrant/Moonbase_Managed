@@ -185,8 +185,10 @@ export function buildFixtures(THREE, world, { rig, camera, send, sfx = () => {},
     lay(id, 'hall', sp.x, sp.y, sp.z);
     // One invisible box per tool to point at: click a loose tool to take it.
     const [w, h, d, z] = g.userData.hit;
-    // Pointed at from a headset (`hand` is the controller's index) it goes into that hand, not the laptop's view.
-    target(add(g, new THREE.BoxGeometry(w, h, d), ghost, 0, 0, z), () => T[id].state === 'loose' && running(), (pt, hand) => take(id, hand ?? DESK)).userData.tool = id;
+    // On a laptop a click (or E) takes it into the view. Pointed at with a headset's trigger (`hand` is the
+    // controller's index) it goes into that hand and is held only while the trigger stays down.
+    const box = target(add(g, new THREE.BoxGeometry(w, h, d), ghost, 0, 0, z), () => T[id].state === 'loose' && running(), (pt, hand) => take(id, hand ?? DESK));
+    box.userData.pickup = true; box.userData.tool = id;
   }
   const running = () => !!st.tools;
   const isTool = h => h?.kind === 'tool';
@@ -538,6 +540,20 @@ export function buildFixtures(THREE, world, { rig, camera, send, sfx = () => {},
     falling.push({ id, p: p.clone(), v: V().fromArray(v).clampLength(0, 5), sent: false, t: clock() });
   }
   // Q on a laptop, or a test: put down the last sample carried.
+  let keyGot = null; // what E took, until E is let go
+  const carriedIds = () => [...held.filter(isTool).map(h => h.id), ...deskSamples, ...held.filter(h => h?.kind === 'sample').map(h => h.id)];
+  // Put the tool in hand i down: on a laptop 0.6 m in front, with a small push forward; in a headset, from the hand.
+  function putDown(i) {
+    if (isDesk(i)) {
+      const g = tools[held[i].id];
+      camera.getWorldPosition(a); camera.getWorldDirection(b); b.y = 0; b.normalize();
+      rig.worldToLocal(c.copy(a).addScaledVector(b, 0.6).setY(Math.max(0.4, a.y - 0.45)));
+      g.position.copy(c);
+      g.updateMatrixWorld(true);
+      follow(held[i].id, 0);
+      drop(i, [b.x * 1.2, 0.4, b.z * 1.2]);
+    } else drop(i);
+  }
   function dropSample() {
     if (deskSamples.length) { letGoSample(DESK, deskSamples[deskSamples.length - 1]); return true; }
     const i = held.findIndex(h => h?.kind === 'sample'); if (i < 0) return false;
@@ -548,7 +564,8 @@ export function buildFixtures(THREE, world, { rig, camera, send, sfx = () => {},
   // Click targets for the laptop: one invisible ball per sample in view, the four cups and the port.
   const sampleHits = Array.from({ length: 24 }, () => {
     const m = add(outside, new THREE.SphereGeometry(0.22, 8, 6), ghost); m.visible = false; m.userData.sid = null;
-    return target(m, () => !!m.userData.sid && running(), () => deskPick(m.userData.sid));
+    target(m, () => !!m.userData.sid && running(), () => deskPick(m.userData.sid)).userData.pickup = true;
+    return m;
   });
   F.cups.forEach((cup, n) => target(add(cup, new THREE.SphereGeometry(0.14, 8, 6), ghost, 0, 0.08, 0), () => deskSamples.length > 0 && slotFree(n), () => { letGoSample(DESK, deskSamples[0], cup.getWorldPosition(V()).setY(cup.getWorldPosition(V()).y + 0.08)); }));
   target(add(world.port, new THREE.SphereGeometry(0.3, 8, 6), ghost, F.portMouth.x, F.portMouth.y, F.portMouth.z), () => deskSamples.length > 0, () => { letGoSample(DESK, deskSamples[0], world.port.localToWorld(F.portMouth.clone())); });
@@ -632,17 +649,29 @@ export function buildFixtures(THREE, world, { rig, camera, send, sfx = () => {},
     // Q on a laptop puts down the right hand's tool, then the left's.
     dropHeld() {
       const i = [DESK, DESK_L, 1, 0].find(k => isTool(held[k])); if (i === undefined) return false;
-      if (isDesk(i)) { // 0.6 m in front, with a small push forward
-        const g = tools[held[i].id];
-        camera.getWorldPosition(a); camera.getWorldDirection(b); b.y = 0; b.normalize();
-        rig.worldToLocal(c.copy(a).addScaledVector(b, 0.6).setY(Math.max(0.4, a.y - 0.45)));
-        g.position.copy(c);
-        g.updateMatrixWorld(true);
-        follow(held[i].id, 0);
-        drop(i, [b.x * 1.2, 0.4, b.z * 1.2]);
-      } else drop(i);
+      putDown(i);
       return true;
     },
+    // E on a laptop, pressed with a loose tool or a sample in view (hit: what the ray found): take it, and
+    // keep it for as long as E is held. True if something came. Otherwise E is left to do its other job.
+    grabKey(hit) {
+      if (!hit?.object.userData.pickup) return false;
+      const before = new Set(carriedIds());
+      hit.object.userData.click(hit.point);
+      keyGot = carriedIds().find(id => !before.has(id)) ?? null;
+      if (keyGot) sfx('click');
+      return keyGot !== null;
+    },
+    // E let go: what it took leaves the hand, down in front of you like Q. True if there was something.
+    releaseKey() {
+      const id = keyGot; keyGot = null;
+      if (!id) return false;
+      const i = handOf(id);
+      if (i >= 0) { putDown(i); return true; }
+      if (deskSamples.includes(id)) { letGoSample(DESK, id); return true; }
+      return false;
+    },
+    get keyHeld() { return keyGot; },
     // What is in the hands: [left, right], the tools' (or decoys') ids or null; inHand is either one.
     get hands() { return hands(); },
     get inHand() { return inHand(); },
