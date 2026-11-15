@@ -9,6 +9,18 @@ A co-op fix-it game. One astronaut is on the Moon in VR. Mission control is on l
 
 Mission control reads pictures, not paragraphs: gauges, a map, a camera, lamps. Nobody is told in words what broke. The design is in [docs/SPEC-v2.md](docs/SPEC-v2.md).
 
+## Screenshots
+
+![The base at the lunar south pole: the habitat, the comms dish and the solar array, the Sun low on the real LOLA horizon and Earth beside the dish](docs/screenshots/base.jpg)
+
+| | |
+| --- | --- |
+| ![The Hauler from behind: the four sample cups, the rider's footplate and the rail, with its SAMPLE TRAY and RIDER: HOLD RAIL plates](docs/screenshots/hauler.jpg) | ![Dust on the solar array: the first fault of the demo mission, with the SOLAR ARRAY plate on the middle post](docs/screenshots/solar.jpg) |
+| ![The hall, where the astronaut starts: the FLIGHT STATUS board waiting for GO, and the astronaut's briefing beside it](docs/screenshots/hall.jpg) | ![The astronaut's wrist cuff, raised: oxygen and the mission clock, and the label tape reading BASE DARK: NO REFILL](docs/screenshots/cuff.jpg) |
+| ![The tool rack: the brush and the patch kit under their signs, each with its name tag](docs/screenshots/rack.jpg) | ![The sample port in the hall, with its Nixie counter: none of four banked yet](docs/screenshots/port.jpg) |
+| ![Mission Ops: the astronaut's hands, the tool board of the hall, the samples on their way home, and the teletype line](docs/screenshots/desk-ops.jpg) | ![The Technician: both rover cameras, each rover's instruments, and the meteor pillar between them](docs/screenshots/desk-tech.jpg) |
+| ![The Scientist: the survey scope, and the AIR page with its strip-chart recorder](docs/screenshots/desk-sci.jpg) | ![The 2-player Mission Control desk: hands, tools and samples, both cameras, the scope and the field guide](docs/screenshots/desk-control.jpg) |
+
 ![The landing page: the base in 3D behind the choice of 2 or 4 players](docs/landing-page.png)
 
 **The landing page** shows the base itself, drawn live from the game's own scene: the habitat, the rover, the comms dish, the Apollo lander and the Viking lander on the skyline, Earth low over the real south-pole horizon, the camera drifting slowly past. Over it is one question: **2 players** or **4 players**. The first visitor to answer sets the game for everyone; later visitors are told which game is being set up and join it.
