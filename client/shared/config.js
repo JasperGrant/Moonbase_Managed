@@ -39,6 +39,9 @@ export const CFG = {
   waypoint: { reach: 2.5 },      // metres round the base that start explored on the Scientist's chart
   // Samples: what the mission is for. Four on the manifest, a tray of four cups on the Hauler.
   sample: { manifest: 4, tray: 4, wanted: 250, extra: 100, dud: 0, drawRadius: 45, reach: 3 },
+  // The core drill: a rock in the ground comes out only through it. Two hands to carry, a rack on the Hauler
+  // to ride in, five seconds locked on a rock (five Nixie tubes count them down), then the core is presented.
+  drill: { seconds: 5, reach: 2.5 },
   // The astronaut starts inside the hall (room coordinates, see client/interior.js), facing up it, with
   // the tools on their racks. The server sees them at door S until they go out.
   spawn: { inside: true, x: 0, z: -1.3, door: 'S' },
@@ -174,7 +177,9 @@ export const ROVERS = {
   hauler: { name: 'Hauler', speed: 4.5, turn: 1.2, riderTurn: 0.7, reveal: 8, radius: 1.6 },
 };
 // Where the rider stands on the Hauler (its own frame: +z is forward), and the tray's four cups.
-export const HAULER = { plate: { x: 0, y: 0.45, z: -1.55, hw: 0.45, hd: 0.25 }, cups: [-0.45, -0.15, 0.15, 0.45].map(x => ({ x, y: 1.02, z: -0.98 })) };
+// rack: where the core drill hangs on the Hauler's left flank (its foot, in the Hauler's frame; ry turns
+// the drill so its face, local +z, looks outboard and its two handles run fore and aft).
+export const HAULER = { plate: { x: 0, y: 0.45, z: -1.55, hw: 0.45, hd: 0.25 }, rack: { x: -1.02, y: 0.3, z: 0, ry: -Math.PI / 2 }, cups: [-0.45, -0.15, 0.15, 0.45].map(x => ({ x, y: 1.02, z: -0.98 })) };
 
 // The rock samples. Each type has one look, and one lookalike (a dud) that differs in a way you can say
 // out loud. Only the Scientist's field guide shows which is which.

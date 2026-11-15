@@ -287,7 +287,8 @@ addEventListener('keydown', e => {
   if (e.key.toLowerCase() === 'k' && mode === 'desk' && !e.repeat) debugDamage = !debugDamage;
   if (e.key.toLowerCase() === 'q' && mode === 'desk' && !e.repeat) { if (!fx.dropHeld()) fx.dropSample(); }
   // E: with a loose tool or a sample in view and in reach, take it and keep it while E is held (let go of E to
-  // let go of it). Otherwise it goes on and off the Hauler, as before.
+  // let go of it). On the core drill, take it up in both hands (Q puts it down). Otherwise it goes on and off
+  // the Hauler, as before.
   if (e.key.toLowerCase() === 'e' && mode === 'desk' && !e.repeat) {
     if (!riding && running() && fx.grabKey(targetInReach(null))) { /* held until E comes up */ }
     else if (riding) dismount(-1); else mount(2);
@@ -1127,7 +1128,7 @@ function deskCue(now) {
 function mount(i) {
   if (riding) return true; // already aboard: the hand just holds the rail
   if (!running() || where !== 'out') return false;
-  if (!haulerStopped()) { radio.sfx('refuse'); return false; }
+  if (!haulerStopped() || fx.drillHeld) { radio.sfx('refuse'); return false; } // and not with the drill in both arms
   camera.getWorldPosition(headPos);
   world.fixtures.plate.getWorldPosition(plateW);
   if (Math.hypot(plateW.x - headPos.x, plateW.z - headPos.z) > CFG.ride.mountReach) return false;

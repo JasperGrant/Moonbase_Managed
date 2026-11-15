@@ -124,7 +124,7 @@ function installVR() {
     haptics: () => X.dev.haptics.splice(0),
     until: async (test, seconds = 5) => { for (const end = Date.now() + seconds * 1000; Date.now() < end;) { const v = test(mb.state()); if (v) return v; await sleep(50); } return null; },
     // The hand badge (client/hand.js) by whatever that hand could grab or use: 'open:TAKE', 'point:WELD', ... or null.
-    ring: s => { const b = mb.fx.badges[index(s)]; return b.sprite.visible && b.cue ? b.cue.shape + ':' + (b.cue.verb || '') : null; },
+    ring: s => { const b = mb.fx.badges[index(s)]; return b.sprite.visible && b.cue ? b.cue.shape + ':' + (b.cue.verb || '') + (b.cue.dim ? ':dim' : '') : null; },
     // Where a tool is: in a hand, loose (lying somewhere), or nowhere (used up).
     parentOf: tool => { const i = [0, 1].find(k => mb.fx.holding(k)?.id === tool); if (i !== undefined) return 'hand:' + side(i); const st = mb.fx.toolState(tool)?.state; return st === 'loose' ? 'loose' : st === 'gone' ? 'nowhere' : st; },
     pose: tool => mb.fx.toolState(tool),
@@ -186,8 +186,8 @@ try {
   });
   check(solid > 1.0, 'walking into a boulder should stop at its edge: ' + solid);
 
-  // ---------- a sample: reach, grip, carry, let go ----------
-  step('2. picking up a rock sample');
+  // ---------- a sample: it needs the drill. Off the Hauler in both hands, onto the rock, five seconds, the core ----------
+  step('2. the core drill: two hands off the rack, locked on a rock, five tubes, the core on its tray');
   const s0 = g.samples.find(s => s.id === 's0');
   g.tools = g.tools; g.astro.inside = false;
   await stand0();
@@ -195,19 +195,75 @@ try {
   await P(() => window.vr.until(s => (s.scene?.samples || []).length > 0, 5));
   const seen = await P(() => window.moonbase.state().scene.samples.map(s => s.id + ':' + s.look));
   check(seen.some(x => x.startsWith('s0:')), 'the astronaut should see the first sample from 1 m: ' + JSON.stringify(seen));
-  const grab = await P(async ({ x, z }) => {
+  // By hand it will not come: an amber ring, a refusal, and the drill's outline over it.
+  const bare = await P(async ({ x, z }) => {
     const v = window.vr, mb = window.moonbase;
     const at = new v.T.Vector3(x, mb.world.height(x, z) + 0.12, z);
     await v.move('right', at, 8); await v.frames(2);
     const ring = v.ring('right');
+    v.grip('right', true); await v.frames(6);
+    const out = { ring, held: v.holding('right')?.kind || null, hint: mb.scene.getObjectByName('Hint_Drill').visible, carry: mb.state().carry };
+    v.grip('right', false); await v.frames(2);
+    return out;
+  }, { x: s0.x, z: s0.z });
+  check(bare.ring === 'open:DRILL:dim' && !bare.held && bare.hint && !g.carry.includes('s0'), 'a rock in the ground should not come by hand, and say it needs the drill: ' + JSON.stringify(bare));
+  check(g.drill.at === 'rover', 'the drill should start in its rack on the Hauler');
+  // To the Hauler's rack: one hand on a grip holds on, the second lifts it.
+  await P(() => { const mb = window.moonbase; mb.world.moveRovers(mb.state().rovers, 1); mb.world.rovers.hauler.updateMatrixWorld(true); });
+  const rackAt = await P(() => window.vr.wp(window.moonbase.world.fixtures.rack).toArray());
+  await P(([x, z]) => window.vr.stand(x - 0.55, z, x, z, 1.7), [rackAt[0], rackAt[2]]);
+  const lift = await P(async () => {
+    const v = window.vr, mb = window.moonbase, U = mb.world.fixtures.drill.userData;
+    const right = new v.T.Vector3(1, 0, 0).applyQuaternion(mb.rig.quaternion);
+    const grips = U.handles.map(h => v.wp(h)).sort((p, q) => p.dot(right) - q.dot(right)); // [left one, right one]
+    await v.move('left', grips[0], 8); await v.frames(2);
+    const ringL = v.ring('left');
+    v.grip('left', true); await v.frames(6);
+    const one = { held: v.holding('left')?.kind, server: mb.state().scene.drill.at };
+    await v.move('right', grips[1], 8); await v.frames(2);
+    const ringR = v.ring('right');
+    v.haptics();
+    v.grip('right', true);
+    await v.until(s => s.scene?.drill?.at === 'hand', 3); await v.frames(4);
+    return { ringL, ringR, one, held: [v.holding('left')?.kind, v.holding('right')?.kind], parent: mb.world.fixtures.drill.parent.name, buzz: v.haptics().length };
+  });
+  check(lift.one.held === 'drillgrip' && lift.one.server === 'rover', 'one hand on a grip should hold on without lifting it: ' + JSON.stringify(lift));
+  check(lift.ringL === 'open:LIFT' && lift.ringR === 'open:LIFT' && g.drill.at === 'hand' && lift.held.every(k => k === 'drill') && lift.parent === 'Drill_Home' && lift.buzz > 0, 'both hands on the grips should lift the drill off the rack: ' + JSON.stringify(lift));
+  // Carried to the rock and lowered onto it: it locks on, with its face toward you.
+  await stand0();
+  const lock = await P(async ({ x, z }) => {
+    const v = window.vr, mb = window.moonbase, U = mb.world.fixtures.drill.userData;
+    const right = new v.T.Vector3(1, 0, 0).applyQuaternion(mb.rig.quaternion), y = mb.world.height(x, z) + U.handleY + 0.08;
+    const from = [v.where('left'), v.where('right')], to = [-1, 1].map(sx => new v.T.Vector3(x, y, z).addScaledVector(right, sx * U.handleX));
+    for (let k = 1; k <= 16; k++) { v.hand('left', from[0].clone().lerp(to[0], k / 16)); v.hand('right', from[1].clone().lerp(to[1], k / 16)); await v.frames(1); }
+    for (let k = 0; k < 30 && mb.state().scene.drill.at !== 'site'; k++) await v.frames(2);
+    await v.until(s => s.scene?.drill?.at === 'site', 3); await v.frames(4);
+    const d = mb.state().scene.drill, head = v.wp(mb.camera);
+    return { at: d.at, site: d.site, left: d.left, lit: U.lit, held: [v.holding('left'), v.holding('right')], faces: Math.cos(d.ry - Math.atan2(head.x - x, head.z - z)) };
+  }, { x: s0.x, z: s0.z });
+  check(lock.at === 'site' && lock.site === 's0' && g.drill.at === 'site', 'lowering the drill onto the rock should lock it there: ' + JSON.stringify(lock));
+  check(lock.lit >= 4 && lock.held.every(h => !h) && lock.faces > 0.9, 'locked on: five tubes lit, the hands free, its face toward you: ' + JSON.stringify(lock));
+  check(await P(async () => { const v = window.vr, mb = window.moonbase; v.grip('left', false); v.grip('right', false); await v.frames(2); return mb.state().scene.drill.at === 'site'; }), 'letting go of the grips should leave it on the rock');
+  const mid = await P(async () => { await new Promise(r => setTimeout(r, 2600)); await window.vr.frames(2); return window.moonbase.world.fixtures.drill.userData.lit; });
+  check(mid >= 1 && mid <= 3, 'the tubes should go out one a second: ' + mid);
+  // Taking it off the rock early is refused: it is locked on.
+  check(await P(() => !window.moonbase.fx.targets().some(m => m.parent === window.moonbase.world.fixtures.drill)), 'the drill should not come up while it works');
+  await P(() => window.vr.until(s => s.scene?.samples?.some(x => x.id === 's0' && x.at === 'drill'), 5));
+  check(g.samples.find(s => s.id === 's0').at === 'drill', 'after five seconds the core should be on the drill\'s tray');
+  const core = await P(async () => {
+    const v = window.vr, mb = window.moonbase, U = mb.world.fixtures.drill.userData;
+    await v.frames(30); // it comes up the barrel first
+    const tray = v.wp(U.trayPt);
+    await v.move('right', tray, 8); await v.frames(2);
+    const ring = v.ring('right');
     v.grip('right', true);
     await v.until(s => (s.carry || []).includes('s0'), 3);
     await v.frames(2);
-    return { ring, held: v.holding('right')?.kind || null, carry: mb.state().carry, buzz: v.haptics().length };
-  }, { x: s0.x, z: s0.z });
-  check(grab.ring === 'open:TAKE', 'no open hand saying TAKE on the sample before grabbing it: ' + JSON.stringify(grab));
-  check(g.carry.includes('s0') && g.samples.find(s => s.id === 's0').at === 'hand', 'the server did not hear that the sample was picked up: ' + JSON.stringify(grab));
-  check(grab.held === 'sample' && grab.buzz > 0, 'the hand should hold the sample and buzz: ' + JSON.stringify(grab));
+    return { ring, lit: U.lit, lamp: '#' + U.lamp.material.color.getHexString(), held: v.holding('right')?.kind || null, carry: mb.state().carry, buzz: v.haptics().length };
+  });
+  check(core.lit === 0 && core.ring === 'open:TAKE', 'the tubes should be out and an open hand saying TAKE on the core on the tray: ' + JSON.stringify(core));
+  check(g.carry.includes('s0') && g.samples.find(s => s.id === 's0').at === 'hand', 'the server did not hear that the core was taken: ' + JSON.stringify(core));
+  check(core.held === 'sample' && core.buzz > 0, 'the hand should hold the core and buzz: ' + JSON.stringify(core));
   // Not told which rock is real: only how it looks.
   check(await P(() => window.moonbase.state().scene.samples.every(s => !('kind' in s))), 'the astronaut page was sent a sample kind');
 
@@ -283,7 +339,7 @@ try {
   });
   check(cup2.carry.includes('s0'), 'a sample should come out of a cup into the hand: ' + JSON.stringify(cup2));
   const dud = g.samples.find(s => s.kind === 'dud');
-  Object.assign(dud, { x: 1.2, z: 5.2 });
+  Object.assign(dud, { x: 1.2, z: 5.2, free: true }); // already cored
   await P(([x, z]) => window.vr.stand(x + 0.6, z, x, z, 1.7), [dud.x, dud.z]);
   await P(id => window.vr.until(s => s.scene.samples.some(x => x.id === id), 2), dud.id);
   const two = await P(async ({ x, z, id }) => {
@@ -363,6 +419,54 @@ try {
   check(rs.shown !== 'dead', 'the radio should not read dead with the base dark: ' + JSON.stringify(rs));
   check(await P(() => window.moonbase.interior.dark !== undefined), 'the hall should have a power state');
   g.blackout = false; g.battery = 100; g.faults = {};
+
+  // ---------- the drill back: up off the rock, put down, into the rack ----------
+  step('8. the drill back up: dropped where you let go, and into the rack on the Hauler');
+  const ds = { x: g.drill.x, z: g.drill.z };
+  Object.assign(g.rovers.hauler, { x: ds.x + 3, z: ds.z, ry: 0, v: 0, throttle: 0, steer: 0 });
+  await wait(400);
+  await P(([x, z]) => window.vr.stand(x, z + 0.7, x, z, 1.7), [ds.x, ds.z]);
+  const back = await P(async () => {
+    const v = window.vr, mb = window.moonbase, U = mb.world.fixtures.drill.userData;
+    mb.world.moveRovers(mb.state().rovers, 1);
+    const right = new v.T.Vector3(1, 0, 0).applyQuaternion(mb.rig.quaternion);
+    const grips = U.handles.map(h => v.wp(h)).sort((p, q) => p.dot(right) - q.dot(right));
+    await v.move('left', grips[0], 6); v.grip('left', true); await v.frames(3);
+    await v.move('right', grips[1], 6); v.grip('right', true);
+    await v.until(s => s.scene?.drill?.at === 'hand', 3); await v.frames(3);
+    const up = mb.state().scene.drill.at;
+    // Lift it clear and let go with one hand: it drops and stands where it lands.
+    v.hand('left', v.where('left').add(new v.T.Vector3(0, 0.3, 0))); v.hand('right', v.where('right').add(new v.T.Vector3(0, 0.3, 0))); await v.frames(10);
+    v.grip('right', false);
+    await v.until(s => s.scene?.drill?.at === 'ground', 4); await v.frames(3);
+    const foot = v.wp(mb.world.fixtures.drill), down = { at: mb.state().scene.drill.at, onGround: Math.abs(foot.y - mb.world.height(foot.x, foot.z)) };
+    v.grip('left', false); await v.frames(2);
+    return { up, down };
+  });
+  check(back.up === 'hand' && back.down.at === 'ground' && back.down.onGround < 0.05, 'the drill should come up off a finished rock, and stand where it was dropped: ' + JSON.stringify(back));
+  const rackAt2 = await P(() => { const mb = window.moonbase; mb.world.rovers.hauler.updateMatrixWorld(true); return window.vr.wp(mb.world.fixtures.rack).toArray(); });
+  const dg = { x: g.drill.x, z: g.drill.z };
+  await P(([x, z]) => window.vr.stand(x - 0.6, z, x, z, 1.7), [dg.x, dg.z]);
+  const stow = await P(async (rack) => {
+    const v = window.vr, mb = window.moonbase, U = mb.world.fixtures.drill.userData;
+    const right = new v.T.Vector3(1, 0, 0).applyQuaternion(mb.rig.quaternion);
+    const grips = U.handles.map(h => v.wp(h)).sort((p, q) => p.dot(right) - q.dot(right));
+    await v.move('left', grips[0], 6); v.grip('left', true); await v.frames(3);
+    await v.move('right', grips[1], 6); v.grip('right', true);
+    await v.until(s => s.scene?.drill?.at === 'hand', 3); await v.frames(3);
+    // Walk it to the rack (stand beside it), hold its foot at the rack and let go.
+    const R = new v.T.Vector3(...rack);
+    await v.stand(R.x - 0.6, R.z, R.x, R.z, 1.7);
+    const r2 = new v.T.Vector3(1, 0, 0).applyQuaternion(mb.rig.quaternion), y = R.y + U.handleY;
+    for (let k = 0; k < 12; k++) { v.hand('left', R.clone().setY(y).addScaledVector(r2, -U.handleX)); v.hand('right', R.clone().setY(y).addScaledVector(r2, U.handleX)); await v.frames(2); }
+    const ring = mb.scene.getObjectByName('Ring_Drill');
+    const aim = ring.visible ? '#' + ring.material.color.getHexString() : null;
+    v.grip('left', false);
+    await v.until(s => s.scene?.drill?.at === 'rover', 3); await v.frames(3);
+    v.grip('right', false);
+    return { aim, at: mb.state().scene.drill.at, parent: mb.world.fixtures.drill.parent.name };
+  }, rackAt2);
+  check(stow.at === 'rover' && g.drill.at === 'rover' && stow.parent === 'Rack_Drill' && stow.aim === '#' + PAL.green.slice(1), 'let go at the rack, the drill should go back in it: ' + JSON.stringify(stow));
 
   // ---------- real frames ----------
   step('7. drawing real frames in the headset');

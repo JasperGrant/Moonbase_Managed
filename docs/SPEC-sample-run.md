@@ -370,6 +370,18 @@ Four types, each a real thing Apollo or the polar missions went looking for, eac
 - **The sample port:** inside the hall, on the east wall across from the end of the workbench, at waist height (samples count once they are brought home, two at a time, one in each hand): a round hopper with a hinged lid (`Port_Lid`) in a bolted `bezel` collar, a jewel lamp (`Lamp_Port`), and a pair of Nixie tubes above it showing banked and wanted. Put a sample in and let go: the lid drops with a clunk, and the lamp goes green for a real sample or amber with a double buzz for a dud. Beside it, a rack on the bench fills with a canister for each one banked. A sample carried indoors stays in the hand through the airlock and is drawn there; one let go in the hall lies on the hall floor and can be picked up again.
 - **Laptop:** click a sample to take it, click a cup or the port to put it there.
 
+### The core drill (added after this spec)
+
+A rock in the ground comes out only through the core drill (`world.js` builds it; `stations.js` handles the hands; `CFG.drill`).
+
+- **Where it lives:** in a rack on the Hauler's left flank (`HAULER.rack`, `Rack_Drill`) at the start of each mission. It does not go through an airlock: carried in, it is left standing outside the door.
+- **Two hands:** a grip either side (`Handle_L`, `Handle_R`). One hand on a grip holds on but does not lift it (its ring is amber while the other hand is full); the second hand on the other grip lifts it. It is carried upright between the hands, face toward you. Nothing else can be held while carrying it, and you cannot ride the Hauler with it.
+- **On a rock:** lower its foot over a rock still in the ground (within 0.3 m, foot within 0.22 m of the ground) and it locks on, face toward you. Five Nixie tubes on top (5 4 3 2 1) go out one a second, the auger turns and spills dust, the lamp blinks amber. At zero the core comes up the barrel onto the tray on its face and the lamp goes green. A lookalike cores the same as the real thing.
+- **After:** take the core off the tray; the drill can then be lifted again (a core still on the tray when it is lifted is left on the ground). Let go beside the rack and it goes back in; let go anywhere else and it drops and stands where it lands.
+- **By hand:** a rock in the ground rings amber, refuses with a double buzz, and shows the drill's outline over it. A core put down (`free`) can be picked up by hand from then on.
+- **Laptop:** click (or E) the drill to take it up in both hands, click a rock to set it there, click the rack to stow it, Q to put it down.
+- **Server:** `drill: { at: 'rover' | 'hand' | 'ground' | 'site', x, z, ry, site, left }`; acts `{ drill: 'take' | 'stow' | 'put' | 'set' }`; a sample gains `at: 'drill'` (on the tray) and `free`. The astronaut and the Technician see the drill in `scene.drill`; Mission Ops' SAMPLE LOG has a DRILL row with its own five-tube countdown.
+
 ### The server (`server/game.js`)
 
 - State: `samples` (each with `at`: `'ground'`, `'hand'`, `'tray'`, `'banked'`), `carry: { left, right }`, `tray: [4]`, `manifest`, `banked`.

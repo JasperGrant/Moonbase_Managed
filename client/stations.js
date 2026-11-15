@@ -11,8 +11,9 @@
 // can be thrown. The astronaut has two hands and holds one tool in each (docs/design/hands-and-avatar.md):
 // hold the trigger or the grip on a tool to take it, let go to drop it or throw it.
 import { FAULTS, TOOLS, PLACES, CFG } from '/shared/config.js';
-// Samples: picked off the ground (or out of a cup on the Hauler) like a tool, two hands' worth at most, then
-// let go over a cup, over the port, or anywhere else to fall.
+// Samples: a rock in the ground comes out only through the core drill (below); a core is then picked off the
+// drill's tray, the ground or a cup on the Hauler like a tool, two hands' worth at most, and let go over a cup,
+// over the port, or anywhere else to fall.
 import { drawTool } from '/shared/icons.js';
 import { PAL } from '/shared/palette.js';
 import { makeCueSprite } from '/hand.js';
@@ -36,6 +37,12 @@ const GRAB_SAMPLE = 0.24;   // metres from a hand to a rock sample to take it
 const GRAB_RAIL = 0.3;      // ... to the Hauler's rail to get on
 const CUP_SNAP = 0.22;      // metres: a sample let go this close to an empty cup goes in it
 const PORT_SNAP = 0.35;     // ... this close to the port's mouth goes in the port
+const GRAB_DRILL = 0.16;    // metres from a hand to one of the drill's grips
+const DRILL_AIM = 0.8;      // metres from the carried drill's foot to a rock in the ground: a ring shows on the rock
+const DRILL_LOCK = 0.3;     // ... this close, and the foot this low over the ground, and it locks on
+const DRILL_LOW = 0.22;
+const RACK_SNAP = 0.5;      // metres from the drill's foot to the Hauler's rack: let go and it goes in
+const DRILL_LAG = 12;       // 1/s: how fast the carried drill catches up with the hands (it is heavy)
 const DESK_SAMPLES = [[-0.26, -0.24, -0.55], [-0.12, -0.3, -0.5]]; // on a laptop, where carried samples sit in the view
 // On a laptop, where the held tools sit in the view: the right hand's, then the left's (held[2], held[3]).
 const DESK_HOLD = { 2: [0.24, -0.26, -0.55], 3: [-0.24, -0.26, -0.55] };
@@ -460,6 +467,10 @@ export function buildFixtures(THREE, world, { rig, camera, send, sfx = () => {},
     } else if (h.kind === 'sample') {
       offer(null, 1.2, 'BANK', world.port.localToWorld(F.portMouth.clone()));
       if (!best) F.cups.forEach((cup, n) => { if (slotFree(n)) offer(cup, 0.8, 'STOW'); });
+    } else if (h.kind === 'drill') {
+      // Carried: the rack it would go back into, or the rock it would lock on.
+      offer(F.rack, 1.0, 'STOW');
+      if (!best) for (const s of st.scene?.samples || []) if (needsDrill(s)) offer(null, 1.0, 'DRILL', samplePos(s, V()));
     }
     return best;
   }
@@ -476,11 +487,17 @@ export function buildFixtures(THREE, world, { rig, camera, send, sfx = () => {},
       offer(b.distanceTo(p), GRAB_CORD, { kind: 'cord', start: p.clone() });
     }
     for (const [rid, w] of Object.entries(F.wheels)) if (wheelOf(rid) === 1) offer(worldPos(w.wheel, b).distanceTo(p), 0.5, { kind: 'wheel', rid, start: p.clone() });
-    // Rock samples where you are: on the ground or in a cup outside, on the floor in the hall.
+    // Rock samples where you are: a core on the ground, on the drill's tray or in a cup outside, on the floor in
+    // the hall. A rock still in the ground offers itself too, but will not come: it needs the drill.
     for (const s of st.scene?.samples || []) {
       if (!reachable(s) || mine(s.id)) continue;
-      offer(samplePos(s, b).distanceTo(p), GRAB_SAMPLE, { kind: 'sample', id: s.id });
+      offer(samplePos(s, b).distanceTo(p), GRAB_SAMPLE, { kind: needsDrill(s) ? 'bedrock' : 'sample', id: s.id });
     }
+    // The drill's two grips, the one the other hand is not already on.
+    if (drillFree()) DU.handles.forEach((hd, k) => {
+      if (held.some((h, n) => n !== i && h?.kind === 'drillgrip' && h.k === k)) return;
+      offer(worldPos(hd, b).distanceTo(p), GRAB_DRILL, { kind: 'drillgrip', k });
+    });
     // The Hauler's rail: grab it to get on.
     if (placeNow() === 'surface') offer(worldPos(F.rail, b).distanceTo(p), GRAB_RAIL, { kind: 'rail' });
     return best;
@@ -526,10 +543,15 @@ export function buildFixtures(THREE, world, { rig, camera, send, sfx = () => {},
   const mine = id => deskSamples.includes(id) || held.some(h => h?.kind === 'sample' && h.id === id) || falling.some(f => f.id === id);
   const sizeOf = id => { let h = 7; for (const ch of id) h = (h * 31 + ch.charCodeAt(0)) % 9973; return 0.17 + h / 9973 * 0.12; };
   // Can a sample be picked up from here? Outside: on the ground or in a cup. In the hall: on its floor.
-  const reachable = s => placeNow() === 'hall' ? s.at === 'ground' && !!s.inside : (s.at === 'ground' && !s.inside) || s.at === 'tray';
+  // A core on the drill's tray counts too, outside.
+  const reachable = s => placeNow() === 'hall' ? s.at === 'ground' && !!s.inside : (s.at === 'ground' && !s.inside) || s.at === 'tray' || s.at === 'drill';
+  // A rock still in the ground (not yet cored): it comes out only through the drill.
+  const needsDrill = s => s.at === 'ground' && !s.inside && !s.cored;
+  const NEED_DRILL = { shape: 'open', verb: 'DRILL', dim: true };
   function samplePos(s, out) {
     if (s.inside) return out.set(s.x + ORIGIN.x, ORIGIN.y + sizeOf(s.id) * 0.3, s.z + ORIGIN.z);
     if (s.at === 'tray' && F.cups[s.slot]) return F.cups[s.slot].getWorldPosition(out).setY(out.y + 0.09);
+    if (s.at === 'drill') return DU.trayPt.getWorldPosition(out);
     return out.set(s.x, world.height(s.x, s.z) + sizeOf(s.id) * 0.3, s.z);
   }
   const slotFree = n => !!st.scene && !st.scene.tray?.[n];
@@ -588,12 +610,21 @@ export function buildFixtures(THREE, world, { rig, camera, send, sfx = () => {},
     const i = held.findIndex(h => h?.kind === 'sample'); if (i < 0) return false;
     letGoSample(i, held[i].id); return true;
   }
-  // A click on a sample (laptop, or pointing): take it into the desk hand.
-  function deskPick(id) { return pickSample(id, DESK); }
+  // A click on a sample (laptop, or pointing): take it into the desk hand. A rock still in the ground will not
+  // come: it needs the drill.
+  function deskPick(id) {
+    const s = (st.scene?.samples || []).find(x => x.id === id);
+    if (s && needsDrill(s)) { needDrill(s); return false; }
+    return pickSample(id, DESK);
+  }
   // Click targets for the laptop: one invisible ball per sample in view, the four cups and the port.
   const sampleHit = parent => {
     const m = add(parent, new THREE.SphereGeometry(0.22, 8, 6), ghost); m.visible = false; m.userData.sid = null;
-    cue(target(m, () => !!m.userData.sid && running(), () => deskPick(m.userData.sid)), () => OPEN('TAKE')).userData.pickup = true;
+    cue(target(m, () => !!m.userData.sid && running(), () => carrying() ? deskDrill(m.userData.sid) : deskPick(m.userData.sid)), () => {
+      if (carrying()) return POINT('DRILL');
+      const s = (st.scene?.samples || []).find(x => x.id === m.userData.sid);
+      return s && needsDrill(s) ? NEED_DRILL : OPEN('TAKE');
+    }).userData.pickup = true;
     return m;
   };
   const sampleHits = Array.from({ length: 24 }, () => sampleHit(outside));
@@ -666,6 +697,7 @@ export function buildFixtures(THREE, world, { rig, camera, send, sfx = () => {},
     for (const s of st.scene?.samples || []) {
       if (n >= set.length) break;
       if (!reachable(s) || mine(s.id)) continue;
+      if (carrying() && !needsDrill(s)) continue; // with the drill in your arms only a rock in the ground is any use
       const m = set[n++]; samplePos(s, m.position); if (hall) m.position.sub(ORIGIN); m.userData.sid = s.id; m.visible = true;
     }
     for (; n < set.length; n++) { set[n].userData.sid = null; set[n].visible = false; }
@@ -673,8 +705,189 @@ export function buildFixtures(THREE, world, { rig, camera, send, sfx = () => {},
     world.redrawSamples?.();
   }
 
+  // ---------- the core drill ----------
+  // Two grips, one either side. One hand on a grip holds on but cannot lift it; the other hand on the other grip
+  // lifts it, and it is carried upright between them with its face toward you. Lower its foot over a rock still in
+  // the ground and it locks on: five seconds on its Nixie tubes, then the core comes up onto its tray. Let go
+  // beside the Hauler's rack and it goes in; anywhere else it drops and stands where it lands. On a laptop: click
+  // it (or E) to take it up, click a rock to set it there, click the rack to stow it, Q to put it down.
+  const D = F.drill, DU = D.userData;
+  let dl = null;                     // this page's word on the drill until the server agrees: { at, t, v }
+  const drillPose = { pos: V(), ry: 0 };
+  const dA = V(), dB = V(), dC = V(), dQ = new THREE.Quaternion(), dE = new THREE.Euler();
+  const sd = () => st.scene?.drill || null;
+  const carrying = () => dl?.at === 'hand';
+  const drillFree = () => { const d = sd(); return !!d && running() && placeNow() === 'surface' && !dl && d.at !== 'hand' && !(d.at === 'site' && d.left > 0); };
+  world.drillOverride = () => !dl ? null : dl.at === 'rover' ? { rack: true } : drillPose;
+  const emptyDrillHands = () => held.forEach((h, k) => { if (h?.kind === 'drill' || h?.kind === 'drillgrip') held[k] = null; });
+  const drillSound = (kind, p, gain = 1, o) => { if (sfxAt) sfxAt(kind, p, gain, o); else sfx(kind); };
+  const both = (s, ms) => { pulse(0, s, ms); pulse(1, s, ms); };
+  // Up off the rack, the ground or a finished rock: into both hands (both headset hands on its grips, or a laptop's two).
+  function liftDrill(i) {
+    if (!drillFree()) return false;
+    if (isDesk(i)) {
+      if (held[DESK] || held[DESK_L] || deskSamples.length) { refusedAt = clock(); refused = 'drill'; sfx('refuse'); return false; } // it takes both hands
+      held[DESK] = { kind: 'drill' }; held[DESK_L] = { kind: 'drill' };
+    } else for (const k of [0, 1]) held[k] = { kind: 'drill', k: held[k].k };
+    D.getWorldPosition(drillPose.pos); D.getWorldQuaternion(dQ); drillPose.ry = dE.setFromQuaternion(dQ, 'YXZ').y;
+    dl = { at: 'hand', t: clock(), fresh: true };
+    send({ drill: 'take' });
+    drillSound('clank', drillPose.pos, 0.8);
+    if (!isDesk(i)) both(0.8, 70);
+    return true;
+  }
+  const nearRack = () => F.rack.getWorldPosition(dA).distanceTo(drillPose.pos) < RACK_SNAP;
+  function stowDrill() {
+    emptyDrillHands();
+    dl = { at: 'rover', t: clock() };
+    send({ drill: 'stow' });
+    drillSound('lock', F.rack.getWorldPosition(dA), 0.9);
+    both(0.9, 80);
+  }
+  // Locked on a rock, its face toward you.
+  function setDrill(s) {
+    camera.getWorldPosition(dA);
+    const ry = Math.atan2(dA.x - s.x, dA.z - s.z);
+    emptyDrillHands();
+    drillPose.pos.set(s.x, world.height(s.x, s.z), s.z); drillPose.ry = ry;
+    dl = { at: 'site', t: clock() };
+    send({ drill: 'set', id: s.id, ry: +ry.toFixed(3) });
+    drillSound('lock', drillPose.pos, 1);
+    world.puff?.(drillPose.pos, 12, 0.5);
+    both(1, 120);
+  }
+  // Let go anywhere else: it drops at lunar gravity and stands on its collar where it lands.
+  function dropDrill() { emptyDrillHands(); dl = { at: 'falling', t: clock(), v: 0 }; }
+  function deskDrill(id) {
+    const s = (st.scene?.samples || []).find(x => x.id === id);
+    camera.getWorldPosition(dA);
+    if (!s || s.at !== 'ground' || s.cored || Math.hypot(s.x - dA.x, s.z - dA.z) > CFG.drill.reach) { sfx('refuse'); return false; }
+    setDrill(s); return true;
+  }
+  // A rock still in the ground, reached for by hand: it will not come, and the drill's outline says why.
+  let hintUntil = 0;
+  const hintAt = V();
+  function needDrill(s, i) {
+    hintAt.set(s.x, world.height(s.x, s.z) + 0.45, s.z); hintUntil = clock() + 2.5;
+    once('needDrill', () => { sfx('refuse'); if (i === 0 || i === 1) { pulse(i, 0.6, 40); setTimeout(() => pulse(i, 0.6, 40), 120); } }, 0.6);
+  }
+  const drillHint = (() => {
+    const cv = document.createElement('canvas'); cv.width = cv.height = 128;
+    const g = cv.getContext('2d');
+    g.fillStyle = 'rgba(43,50,48,0.85)'; g.beginPath(); g.arc(64, 64, 62, 0, 7); g.fill();
+    g.strokeStyle = PAL.bezel; g.lineWidth = 5; g.beginPath(); g.arc(64, 64, 59, 0, 7); g.stroke();
+    drawTool(g, 'drill', 64, 64, 84, PAL.amber);
+    const tex = new THREE.CanvasTexture(cv); tex.colorSpace = THREE.SRGBColorSpace;
+    const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthTest: false, toneMapped: false }));
+    sp.name = 'Hint_Drill'; sp.scale.setScalar(0.32); sp.visible = false; sp.renderOrder = 9;
+    world.rover.parent.add(sp);
+    return sp;
+  })();
+  // A flat ring on the ground round the rock the carried drill would lock on (amber, green when it will), or round
+  // the rack it would go into.
+  const aimRing = new THREE.Mesh(new THREE.TorusGeometry(1, 0.04, 6, 32), new THREE.MeshBasicMaterial({ color: PAL.hex.amber, toneMapped: false, transparent: true, opacity: 0.85, depthWrite: false }));
+  aimRing.name = 'Ring_Drill'; aimRing.rotation.x = Math.PI / 2; aimRing.visible = false; aimRing.renderOrder = 8;
+  world.rover.parent.add(aimRing);
+  cue(target(add(D, new THREE.SphereGeometry(0.32, 8, 6), ghost, 0, 0.7, 0), () => drillFree(), () => liftDrill(DESK)), () => OPEN('LIFT')).userData.pickup = true;
+  cue(target(add(F.rack, new THREE.SphereGeometry(0.45, 8, 6), ghost, 0, 0.6, 0), () => carrying(), () => stowDrill()), () => POINT('STOW'));
+
+  let lastLit = 0, motorAt = 0;
+  const cores = new Set();
+  function stepDrill(dt, hands, vr) {
+    const d = sd();
+    if (dl && placeNow() !== 'surface') { emptyDrillHands(); dl = null; } // carried through a hatch: the server stands it outside the door
+    if (!vr) { if (held[0]?.kind === 'drillgrip' || held[1]?.kind === 'drillgrip') { held[0] = held[0]?.kind === 'drillgrip' ? null : held[0]; held[1] = held[1]?.kind === 'drillgrip' ? null : held[1]; } }
+    if (carrying()) {
+      let ry = drillPose.ry;
+      const want = dB;
+      if (vr && held[0]?.kind === 'drill' && hands[0] && hands[1]) {
+        // Between the hands: upright, the grips along the line from one hand to the other, its face toward you.
+        const pA = hands[0].point, pB = hands[1].point;
+        want.copy(pA).add(pB).multiplyScalar(0.5);
+        camera.getWorldPosition(dC);
+        dA.copy(pB).sub(pA).setY(0);
+        if (dA.lengthSq() < 0.01) ry = Math.atan2(dC.x - want.x, dC.z - want.z);
+        else { let zx = -dA.z, zz = dA.x; if (zx * (dC.x - want.x) + zz * (dC.z - want.z) < 0) { zx = -zx; zz = -zz; } ry = Math.atan2(zx, zz); }
+        want.y -= DU.handleY;
+      } else if (!vr && held[DESK]?.kind === 'drill') {
+        // On a laptop: carried in front, low in the view.
+        camera.getWorldPosition(dC); camera.getWorldDirection(dA); dA.y = 0; if (dA.lengthSq() < 1e-6) dA.set(0, 0, -1); dA.normalize();
+        want.copy(dC).addScaledVector(dA, 0.85); want.y = dC.y - 1.25;
+        ry = Math.atan2(-dA.x, -dA.z);
+      } else { dropDrill(); return stepDrill(dt, hands, vr); } // a hand went away (the controllers put down)
+      want.y = Math.max(want.y, world.height(want.x, want.z));
+      const k = dl.fresh ? 1 : 1 - Math.exp(-dt * DRILL_LAG); dl.fresh = false;
+      drillPose.pos.lerp(want, k);
+      drillPose.ry += Math.atan2(Math.sin(ry - drillPose.ry), Math.cos(ry - drillPose.ry)) * k;
+      // What it would lock on: the nearest rock still in the ground under its foot. Or the rack.
+      let best = null, bd = DRILL_AIM;
+      for (const s of st.scene?.samples || []) {
+        if (s.at !== 'ground' || s.cored) continue;
+        const dd = Math.hypot(s.x - drillPose.pos.x, s.z - drillPose.pos.z);
+        if (dd < bd) { bd = dd; best = s; }
+      }
+      const low = drillPose.pos.y - world.height(drillPose.pos.x, drillPose.pos.z) < DRILL_LOW;
+      if (best && vr && bd < DRILL_LOCK && low) { setDrill(best); aimRing.visible = false; return; }
+      const rack = nearRack();
+      aimRing.visible = !!best || rack;
+      if (rack) { F.rack.getWorldPosition(aimRing.position); aimRing.scale.setScalar(0.24); aimRing.material.color.setHex(PAL.hex.green); }
+      else if (best) {
+        aimRing.position.set(best.x, world.height(best.x, best.z) + 0.03, best.z);
+        aimRing.scale.setScalar(0.24 * (0.94 + Math.sin(clock() * 8) * 0.06));
+        aimRing.material.color.setHex(bd < DRILL_LOCK || !vr ? PAL.hex.green : PAL.hex.amber);
+      }
+    } else aimRing.visible = false;
+    if (dl?.at === 'falling') {
+      dl.v -= 1.62 * dt; drillPose.pos.y += dl.v * dt;
+      const floor = world.height(drillPose.pos.x, drillPose.pos.z);
+      if (drillPose.pos.y <= floor) {
+        drillPose.pos.y = floor;
+        camera.getWorldPosition(dC);
+        if (drillPose.pos.distanceTo(dC) < 5) drillSound('thud', drillPose.pos, 0.7, { mass: 18 });
+        world.puff?.(drillPose.pos, 14, 0.6);
+        send({ drill: 'put', x: +drillPose.pos.x.toFixed(2), z: +drillPose.pos.z.toFixed(2), ry: +drillPose.ry.toFixed(3) });
+        dl = { at: 'ground', t: clock() };
+      }
+    }
+    // At work on a rock: the motor through your boots when you are near, a tick as each tube goes out, and a
+    // pop and a clink as the core comes up onto the tray.
+    if (d && d.at === 'site' && !dl && placeNow() === 'surface') {
+      camera.getWorldPosition(dC); D.getWorldPosition(dA);
+      const close = dA.distanceTo(dC) < 6;
+      if (DU.lit !== lastLit) { if (DU.lit > 0 && DU.lit < lastLit && close) drillSound('tick', DU.trayPt.getWorldPosition(dB), 0.8); lastLit = DU.lit; }
+      if (d.left > 0 && close && clock() > motorAt) { motorAt = clock() + 0.28; drillSound('drill', dA, 0.7); }
+    } else lastLit = 0;
+    for (const s of st.scene?.samples || []) if (s.at === 'drill' && !cores.has(s.id)) {
+      cores.add(s.id);
+      if (placeNow() === 'surface') { drillSound('core', DU.trayPt.getWorldPosition(dB), 1); both(0.5, 60); }
+    }
+    // The drill's outline over a rock an empty hand reached for, for a moment.
+    drillHint.visible = clock() < hintUntil && placeNow() === 'surface';
+    if (drillHint.visible) drillHint.position.set(hintAt.x, hintAt.y + Math.sin(clock() * 2) * 0.03, hintAt.z);
+    if (dl && running()) world.placeDrill(d, clock()); // where the hands have it this frame, not last frame
+  }
+  // The server's word on the drill: once it agrees with what we did, it is the server's again. A take it refused
+  // goes back where it was.
+  function syncDrill() {
+    const d = sd(); if (!d) return;
+    if (dl) {
+      const age = clock() - dl.t;
+      if (dl.at === 'hand') { if (d.at !== 'hand' && age > 2) { emptyDrillHands(); dl = null; sfx('refuse'); } }
+      else if (dl.at !== 'falling' && (d.at === dl.at || age > 2.5)) dl = null;
+      return;
+    }
+    // The server has it in our arms and we do not (a reload): on a laptop take it back up, in a headset stand it down here.
+    if (d.at === 'hand' && running() && placeNow() === 'surface') once('drillOrphan', () => {
+      if (!handPts[0] && !handPts[1] && !held[DESK] && !held[DESK_L] && !deskSamples.length) { held[DESK] = { kind: 'drill' }; held[DESK_L] = { kind: 'drill' }; camera.getWorldPosition(drillPose.pos); dl = { at: 'hand', t: clock(), fresh: true }; }
+      else { camera.getWorldPosition(dA); send({ drill: 'put', x: +dA.x.toFixed(2), z: +dA.z.toFixed(2) }); }
+    }, 2);
+  }
+
   const api = {
     tools, badges, gloves, spot, outside, railHit,
+    // The drill: carried (in both hands), and where this page has it until the server agrees.
+    get drillHeld() { return carrying(); },
+    drill: () => dl && { at: dl.at, x: drillPose.pos.x, y: drillPose.pos.y, z: drillPose.pos.z, ry: drillPose.ry },
     get carried() { return [...deskSamples, ...held.filter(h => h?.kind === 'sample').map(h => h.id)]; },
     dropSample, deskPick,
     get refusedAt() { return refusedAt; },
@@ -687,6 +900,7 @@ export function buildFixtures(THREE, world, { rig, camera, send, sfx = () => {},
     patchSuit, pullCord,
     // Q on a laptop puts down the right hand's tool, then the left's.
     dropHeld() {
+      if (carrying()) { dropDrill(); sfx('click'); return true; }
       const i = [DESK, DESK_L, 1, 0].find(k => isTool(held[k])); if (i === undefined) return false;
       putDown(i);
       return true;
@@ -695,8 +909,9 @@ export function buildFixtures(THREE, world, { rig, camera, send, sfx = () => {},
     // keep it for as long as E is held. True if something came. Otherwise E is left to do its other job.
     grabKey(hit) {
       if (!hit?.object.userData.pickup) return false;
-      const before = new Set(carriedIds());
+      const before = new Set(carriedIds()), dlWas = dl;
       hit.object.userData.click(hit.point);
+      if (dl !== dlWas) { keyGot = null; return true; } // the drill taken up, or set on a rock: it stays put until Q or a click
       keyGot = carriedIds().find(id => !before.has(id)) ?? null;
       if (keyGot) sfx('click');
       return keyGot !== null;
@@ -736,6 +951,14 @@ export function buildFixtures(THREE, world, { rig, camera, send, sfx = () => {},
       const what = nearest(p, i);
       if (!what) return false;
       if (what.kind === 'tool') { take(what.id, i); return true; }
+      if (what.kind === 'bedrock') { needDrill((st.scene?.samples || []).find(x => x.id === what.id) || { x: p.x, z: p.z }, i); return false; }
+      if (what.kind === 'drillgrip') {
+        // One hand holds on; the second, on the other grip, lifts it.
+        held[i] = { kind: 'drillgrip', k: what.k };
+        sfx('click'); pulse(i, 0.5, 40);
+        if (held[1 - i]?.kind === 'drillgrip') liftDrill(i);
+        return true;
+      }
       held[i] = what;
       if (what.kind === 'wheel') F.wheels[what.rid].wheel.userData.held = true;
       if (what.kind === 'sample') { held[i] = null; return pickSample(what.id, i); }
@@ -750,6 +973,7 @@ export function buildFixtures(THREE, world, { rig, camera, send, sfx = () => {},
       if (!h) return;
       if (isTool(h)) { const v = velocity(h.id), fast = Math.hypot(...v) > 1.5; drop(i, v); if (fast) pulse(i, 0.8, 60); return; }
       if (h.kind === 'sample') { letGoSample(i, h.id); return; }
+      if (h.kind === 'drill') { if (nearRack()) stowDrill(); else dropDrill(); return; } // either hand opening lets it go
       held[i] = null;
       if (h.kind === 'wheel') F.wheels[h.rid].wheel.userData.held = false;
     },
@@ -758,6 +982,7 @@ export function buildFixtures(THREE, world, { rig, camera, send, sfx = () => {},
     reset() {
       held.forEach((h, i) => { if (isTool(h)) drop(i, [0, 0, 0], true); held[i] = null; });
       deskSamples.length = 0; falling.length = 0; pending.clear();
+      emptyDrillHands(); dl = null; cores.clear(); lastLit = 0;
       for (const id in T) { T[id].seen = ''; T[id].report = null; T[id].drop = -9; }
       for (const [id, d] of Object.entries(DECOYS)) { if (T[id].state === 'gone' && phys) phys.restore(id); T[id].state = 'loose'; lay(id, 'hall', ...d.at); }
     },
@@ -798,6 +1023,7 @@ export function buildFixtures(THREE, world, { rig, camera, send, sfx = () => {},
         }
       }
       syncSamples();
+      syncDrill();
       held.forEach((h, i) => { // you cannot work what is already fixed
         if (h?.kind === 'wheel' && wheelOf(h.rid) !== 1) { F.wheels[h.rid].wheel.userData.held = false; held[i] = null; }
         if (h?.kind === 'cord' && T.gen.state === 'gone') held[i] = null;
@@ -813,6 +1039,7 @@ export function buildFixtures(THREE, world, { rig, camera, send, sfx = () => {},
       handObj[0] = hands[0]?.obj || null; handObj[1] = hands[1]?.obj || null;
       sides[0] = hands[0]?.side || sides[0]; sides[1] = hands[1]?.side || sides[1];
       // Tools held in a headset move to the laptop's hands, on the same side, when the headset comes off.
+      if (!vr && held[0]?.kind === 'drill') { held[0] = held[1] = null; held[DESK] = { kind: 'drill' }; held[DESK_L] = { kind: 'drill' }; }
       if (!vr) for (const i of [0, 1]) if (isTool(held[i])) { const k = slotOf(i) ? DESK : DESK_L, to = held[k] ? (k === DESK ? DESK_L : DESK) : k; held[to] = held[i]; held[i] = null; held[to].grip = null; }
 
       // Held tools: placed in the rig's frame (so they come with you through an airlock), the light ones
@@ -927,11 +1154,18 @@ export function buildFixtures(THREE, world, { rig, camera, send, sfx = () => {},
           const what = nearest(hand.point, i);
           if (what) {
             at = a.set(0, 0, 0);
-            if (what.kind === 'sample') { const sm = (st.scene?.samples || []).find(x => x.id === what.id); if (sm) samplePos(sm, at); }
+            if (what.kind === 'sample' || what.kind === 'bedrock') { const sm = (st.scene?.samples || []).find(x => x.id === what.id); if (sm) samplePos(sm, at); }
+            else if (what.kind === 'drillgrip') worldPos(DU.handles[what.k], at);
             else worldPos(what.kind === 'wheel' ? F.wheels[what.rid].wheel : what.kind === 'cord' ? tools.gen.userData.handle : what.kind === 'rail' ? F.rail : tools[what.id], at);
-            shown = what.kind === 'rail' ? rideCue(false) : OPEN(what.kind === 'wheel' ? 'PULL' : what.kind === 'cord' ? 'PULL CORD' : 'TAKE');
+            // The drill lifts with both hands: its grip reads dim while the other hand is full. A rock still in the
+            // ground reads dim too, and the drill's outline shows over it.
+            const other = held[1 - i];
+            shown = what.kind === 'rail' ? rideCue(false) : what.kind === 'bedrock' ? NEED_DRILL
+              : what.kind === 'drillgrip' ? (other && other.kind !== 'drillgrip' ? { shape: 'open', verb: 'LIFT', dim: true } : OPEN('LIFT'))
+              : OPEN(what.kind === 'wheel' ? 'PULL' : what.kind === 'cord' ? 'PULL CORD' : 'TAKE');
             if (what.kind === 'rail') railLit = !!shown && !shown.dim;
-            name = what.kind + (what.id || what.i || '');
+            if (what.kind === 'bedrock') { hintAt.set(at.x, at.y + 0.4, at.z); hintUntil = Math.max(hintUntil, clock() + 0.1); }
+            name = what.kind + (what.id || what.k || what.i || '');
           }
         }
         badge.set(shown);
@@ -946,6 +1180,7 @@ export function buildFixtures(THREE, world, { rig, camera, send, sfx = () => {},
       for (let i = hands.length; i < 2; i++) { badges[i].set(null); gloves[i].visible = false; }
 
       stepSamples(dt, hands, vr);
+      stepDrill(dt, hands, vr);
 
       // Crack hit targets follow the crack to its current spot.
       weldHits.forEach((m, n) => m.position.copy(F.crackPts[n]));
