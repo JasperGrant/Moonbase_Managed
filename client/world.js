@@ -5,6 +5,7 @@
 import { CFG, PLACES, CABLE_COLORS, SOCKET_SHAPES, DUST_COLS, DUST_ROWS, CRACK_POINTS, HAULER, LOOKS } from '/shared/config.js';
 import { CRATERS, BOULDERS as FIELD_BOULDERS, LANDMARKS } from '/shared/field.js';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { drawShape } from '/shared/icons.js';
 import { HORIZON, TERRAIN, SUN_AZ_DEG } from '/shared/horizon.js';
 import { PAL, CABLE_HEX, SAMPLE_COL, FONT, nixie } from '/shared/palette.js';
@@ -853,6 +854,17 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
     if (text) { g.fillStyle = 'rgba(36,34,30,0.75)'; g.font = `bold 34px ${FONT.label}`; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(text, w * 0.27, h / 2 + 2); }
     g.globalAlpha = 0.12; for (let i = 0; i < 60; i++) { g.fillStyle = i % 2 ? '#24221e' : '#8f8a78'; g.fillRect((i * 97) % w, (i * 41) % h, 2 + i % 4, 1 + i % 2); } // a little wear
   });
+  // Merge the static meshes directly under a group into one mesh per material (the Quest is the budget: a rover
+  // of a hundred parts is a handful of draw calls). Parts that move or light up are not put under it.
+  function mergeStatic(parent) {
+    const by = new Map(), drop = [];
+    for (const o of parent.children) if (o.isMesh && !Array.isArray(o.material)) { o.updateMatrix(); (by.get(o.material) || by.set(o.material, []).get(o.material)).push(o); drop.push(o); }
+    for (const [mat, list] of by) {
+      const geos = list.map(o => { const g = o.geometry.index ? o.geometry.toNonIndexed() : o.geometry.clone(); for (const k of Object.keys(g.attributes)) if (!['position', 'normal', 'uv'].includes(k)) g.deleteAttribute(k); if (!g.attributes.uv) g.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(g.attributes.position.count * 2), 2)); g.applyMatrix4(o.matrix); return g; });
+      const m = new THREE.Mesh(mergeGeometries(geos), mat); m.castShadow = m.receiveShadow = true; parent.add(m);
+    }
+    for (const o of drop) parent.remove(o);
+  }
   const wheelGeo = new THREE.TorusGeometry(0.32, 0.09, 10, 24); wheelGeo.rotateY(Math.PI / 2);
   const hubGeo = new THREE.CylinderGeometry(0.1, 0.1, 0.22, 10); hubGeo.rotateZ(Math.PI / 2);
   function buildRover(kind) {
@@ -866,6 +878,7 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
       if (kind === 'hauler') for (let i = 0; i < 6; i++) { const sp = tube(steel, [0, 0, 0], [0, Math.cos(i) * 0.3, Math.sin(i) * 0.3], 0.012, wg); sp.castShadow = false; }
       else mesh(new THREE.CylinderGeometry(0.2, 0.2, 0.1, 12), gold, 0, 0, 0, wg).rotation.z = Math.PI / 2;
       mesh(hubGeo, steel, x, wy, z, rover).scale.setScalar(k);
+      mergeStatic(wg);
       wheels[id] = wg;
     }
     // The front right wheel is the one that breaks and comes off.
@@ -939,6 +952,7 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
       beacon.position.set(0.3, 2.0, 0.42); beacon.scale.setScalar(0.8);
       tube(steel, [0.3, 1.88, 0.42], [0.3, 1.96, 0.42], 0.015, body);
     }
+    mergeStatic(body);
     return rover;
   }
   const rovers = { hauler: buildRover('hauler'), scout: buildRover('scout') };
