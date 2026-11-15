@@ -15,6 +15,7 @@ import { FAULTS, TOOLS, PLACES, CFG } from '/shared/config.js';
 // let go over a cup, over the port, or anywhere else to fall.
 import { drawTool } from '/shared/icons.js';
 import { PAL } from '/shared/palette.js';
+import { makeCueSprite } from '/hand.js';
 import { loadGlove, loadPeriod, MODELS } from '/shared/assets.js';
 import { HALL, COR, SOLIDS, SHELVES, ROOM } from '/interior.js';
 import { CHAMBER } from '/airlock.js';
@@ -59,7 +60,7 @@ const DECOYS = {
 };
 const BIG = id => id === 'tire' || id === 'gen';
 
-export function buildFixtures(THREE, world, { rig, camera, send, sfx = () => {}, sfxAt = null, pulse = () => {}, phys = null, interior = null, where = () => 'out', onRail = () => false }) {
+export function buildFixtures(THREE, world, { rig, camera, send, sfx = () => {}, sfxAt = null, pulse = () => {}, phys = null, interior = null, where = () => 'out', onRail = () => false, rideCue = () => null }) {
   const F = world.fixtures;
   const V = () => new THREE.Vector3();
   const a = V(), b = V(), c = V(), q4 = new THREE.Quaternion();
@@ -71,7 +72,6 @@ export function buildFixtures(THREE, world, { rig, camera, send, sfx = () => {},
   const sent = new Map();    // repairs already reported, so one sweep does not send a cell fifty times
   const once = (key, fn, every = 1) => { const t = clock(); if ((sent.get(key) || -9) + every > t) return false; sent.set(key, t); fn(); return true; };
   let refusedAt = -9, refused = '';
-  let inVR = false; // set each frame by update(): a headset is on
   const DESK = 2, DESK_L = 3;
   const isDesk = i => i === DESK || i === DESK_L;
   // The server's hand for one of ours: 0 left, 1 right.
@@ -82,6 +82,11 @@ export function buildFixtures(THREE, world, { rig, camera, send, sfx = () => {},
   const add = (parent, geo, material, x = 0, y = 0, z = 0) => { const m = new THREE.Mesh(geo, material); m.position.set(x, y, z); parent.add(m); return m; };
   // A mesh you can point at. `hold` means it keeps working while the trigger or mouse stays down.
   const target = (mesh, enabled, click, hold = false) => { Object.assign(mesh.userData, { enabled, click, hold }); hits.push(mesh); return mesh; };
+  // The hand (client/hand.js): what a target offers, as a glove shape and a verb, or null for nothing to show
+  // (a fixture that needs a tool you are not holding keeps the floating tool outline instead).
+  const OPEN = verb => ({ shape: 'open', verb }), POINT = verb => ({ shape: 'point', verb });
+  const cue = (mesh, fn) => { mesh.userData.cue = fn; return mesh; };
+  let cueVR = false; // set each frame by update(): the verbs a headset uses (no keys)
   // ---------- the five tools. Each is modelled in the hand: local -z points away from you. ----------
   const tools = {};
   const orange = PAL.hex.orange, steel = PAL.hex.aluminium, dark = 0x2b2a26;
@@ -187,9 +192,11 @@ export function buildFixtures(THREE, world, { rig, camera, send, sfx = () => {},
     lay(id, 'hall', sp.x, sp.y, sp.z);
     // One invisible box per tool to point at: click a loose tool to take it.
     const [w, h, d, z] = g.userData.hit;
-    // Laptop only: in a headset a tool is taken by closing the hand on it (grab) and is held only while the
-    // trigger stays down. A point-and-click pickup would pin it to the rig with no hand to let go of it.
-    target(add(g, new THREE.BoxGeometry(w, h, d), ghost, 0, 0, z), () => T[id].state === 'loose' && running() && !inVR, () => take(id, DESK)).userData.pickup = true;
+    // On a laptop a click (or E) takes it into the view. Pointed at with a headset's trigger (`hand` is the
+    // controller's index) it goes into that hand and is held only while the trigger stays down.
+    const box = target(add(g, new THREE.BoxGeometry(w, h, d), ghost, 0, 0, z), () => T[id].state === 'loose' && running(), (pt, hand) => take(id, hand ?? DESK));
+    box.userData.pickup = true; box.userData.tool = id;
+    cue(box, () => OPEN('TAKE'));
   }
   const running = () => !!st.tools;
   const isTool = h => h?.kind === 'tool';
@@ -211,7 +218,8 @@ export function buildFixtures(THREE, world, { rig, camera, send, sfx = () => {},
     if (BIG(id) && !isDesk(i)) {
       // Heavy things are held where the hand closed on them, not snapped to it.
       const obj = handObj[i];
-      if (obj) { obj.updateWorldMatrix(true, false); g.updateWorldMatrix(true, false); held[i].grip = new THREE.Matrix4().copy(obj.matrixWorld).invert().multiply(g.matrixWorld); }
+      // Taken by pointing from further off, it swings into the hand instead of hanging out at arm's length.
+      if (obj && obj.getWorldPosition(a).distanceTo(g.getWorldPosition(b)) < GRAB_BIG * 1.5) { obj.updateWorldMatrix(true, false); g.updateWorldMatrix(true, false); held[i].grip = new THREE.Matrix4().copy(obj.matrixWorld).invert().multiply(g.matrixWorld); }
     }
     T[id].state = 'held'; T[id].took = clock(); T[id].trail.length = 0;
     rig.attach(g); // carried in the rig's frame, so it comes through the airlock with you
@@ -334,11 +342,11 @@ export function buildFixtures(THREE, world, { rig, camera, send, sfx = () => {},
   // ---------- things to point at on the fixtures themselves ----------
   // Pointing at a dusty cell (a laptop, or a trigger at arm's length) runs the brush along it, the
   // whole width of the cell at the height you pointed. In the hand, the brush wipes where it goes (below).
-  F.dustCells.forEach((cell, i) => target(cell, () => !!st.scene?.dust?.[i], point => {
+  F.dustCells.forEach((cell, i) => cue(target(cell, () => !!st.scene?.dust?.[i], point => {
     if (!need('dust') || !st.scene?.dust?.[i]) return false;
     if (!sent.has('dust' + i) || clock() - sent.get('dust' + i) > 1) { F.dust.sweepCell(i, point); sfxAt ? sfxAt('brush', point || worldPos(cell, b), 0.8) : sfx('brush'); }
     return brushCell(i);
-  }, true));
+  }, true), () => need('dust') ? POINT('BRUSH') : null));
   function brushCell(i) {
     if (!need('dust') || !st.scene?.dust?.[i]) return false;
     return once('dust' + i, () => send({ fix: 'dust', cell: i }));
@@ -349,15 +357,15 @@ export function buildFixtures(THREE, world, { rig, camera, send, sfx = () => {},
   const wheelOf = rid => st.scene?.wheels?.[rid] || 0;
   const brokenRover = () => Object.keys(F.wheels).find(rid => wheelOf(rid) > 0) || null;
   for (const [rid, w] of Object.entries(F.wheels)) {
-    target(add(w.wheel, new THREE.SphereGeometry(0.45, 8, 6), ghost), () => wheelOf(rid) === 1, () => pullWheel());
-    target(add(w.hub, new THREE.SphereGeometry(0.3, 8, 6), ghost), () => wheelOf(rid) === 2, () => fitTire());
+    cue(target(add(w.wheel, new THREE.SphereGeometry(0.45, 8, 6), ghost), () => wheelOf(rid) === 1, () => pullWheel()), () => OPEN('PULL'));
+    cue(target(add(w.hub, new THREE.SphereGeometry(0.3, 8, 6), ghost), () => wheelOf(rid) === 2, () => fitTire()), () => need('wheel') ? POINT('FIT') : null);
   }
   function pullWheel() { once('pull', () => { sfx('click'); send({ fix: 'wheel', pull: true }); }); }
   function fitTire() { return need('wheel') && once('fit', () => { sfx('click'); send({ fix: 'wheel', fit: true }); }); }
 
   const weldHits = F.crackPts.map((p, i) => {
     const m = add(world.fixtures.crack, new THREE.SphereGeometry(0.09, 8, 6), ghost);
-    return target(m, () => !!st.scene?.hull && !st.scene.hull.welded[i], () => weldPoint(i), true);
+    return cue(target(m, () => !!st.scene?.hull && !st.scene.hull.welded[i], () => weldPoint(i), true), () => need('hull') ? POINT('WELD') : null);
   });
   function weldPoint(i) {
     if (!need('hull') || !st.scene?.hull || st.scene.hull.welded[i]) return false;
@@ -369,7 +377,7 @@ export function buildFixtures(THREE, world, { rig, camera, send, sfx = () => {},
   const spot = new THREE.Mesh(new THREE.SphereGeometry(0.04, 12, 8), new THREE.MeshBasicMaterial({ color: PAL.hex.red, toneMapped: false }));
   spot.visible = false;
   const spotHit = add(spot, new THREE.SphereGeometry(0.1, 8, 6), ghost);
-  target(spotHit, () => st.suit && spot.visible, () => patchSuit());
+  cue(target(spotHit, () => st.suit && spot.visible, () => patchSuit()), () => has('patch') ? POINT(cueVR ? 'PATCH' : 'F: PATCH') : null);
 
   // ---------- "you need this tool": its outline floats over a fixture you walked up to without it ----------
   const hints = {};
@@ -388,13 +396,9 @@ export function buildFixtures(THREE, world, { rig, camera, send, sfx = () => {},
   }
 
   // ---------- things only a headset shows ----------
-  // A ring round whatever each empty hand would grab if it closed now.
-  const rings = [0, 1].map(() => {
-    const r = new THREE.Mesh(new THREE.TorusGeometry(1, 0.06, 6, 24), new THREE.MeshBasicMaterial({ color: PAL.hex.green, toneMapped: false, depthTest: false, transparent: true, opacity: 0.9 }));
-    r.visible = false; r.renderOrder = 8;
-    world.rover.parent.add(r);
-    return r;
-  });
+  // The hand (client/hand.js): a badge by whatever each hand could grab or use right now, with its verb.
+  const badges = [0, 1].map(() => { const c = makeCueSprite(THREE); world.rover.parent.add(c.sprite); return c; });
+  const fistUntil = [0, 0], fistAt = [V(), V()], wasHeld = [null, null];
   const hover = [null, null]; // a short name for what each ring is on, to buzz once when it changes
   // The NASA EVA glove on each controller, so there is a hand to see. Tracked hands are drawn by the page itself.
   // loadGlove gives the glove in the cuff arm's axes (client/arm.js): fingers +x, back of the hand +z, thumb
@@ -443,6 +447,22 @@ export function buildFixtures(THREE, world, { rig, camera, send, sfx = () => {},
   const headXZ = V();
 
   // What could this hand grab right now? Each thing has its own reach; the one the hand is deepest inside wins.
+  // Where a held tool or sample would work, if that place is near the hand: the badge goes there.
+  function useCue(h, p) {
+    let best = null, bestD = Infinity;
+    const offer = (obj, limit, verb, pos = worldPos(obj, V())) => { const d = pos.distanceTo(p); if (d < limit && d < bestD) { bestD = d; best = { cue: POINT(verb), pos }; } };
+    if (h.kind === 'tool') {
+      if (h.id === 'brush' && st.scene?.dust) F.dustCells.forEach((cell, n) => { if (st.scene.dust[n]) offer(cell, 1.2, 'BRUSH'); });
+      if (h.id === 'welder' && st.scene?.hull) weldHits.forEach((m, n) => { if (!st.scene.hull.welded[n]) offer(m, 1.2, 'WELD'); });
+      if (h.id === 'patch' && st.suit && spot.visible) offer(spot, 0.9, 'PATCH');
+      const br = brokenRover();
+      if (h.id === 'tire' && br && wheelOf(br) === 2) offer(F.wheels[br].hub, 1.5, 'FIT');
+    } else if (h.kind === 'sample') {
+      offer(null, 1.2, 'BANK', world.port.localToWorld(F.portMouth.clone()));
+      if (!best) F.cups.forEach((cup, n) => { if (slotFree(n)) offer(cup, 0.8, 'STOW'); });
+    }
+    return best;
+  }
   function nearest(p, i) {
     let best = null, bestD = Infinity;
     const offer = (d, limit, what) => { if (d < limit && d / limit < bestD) { bestD = d / limit; best = what; } };
@@ -565,12 +585,12 @@ export function buildFixtures(THREE, world, { rig, camera, send, sfx = () => {},
   // Click targets for the laptop: one invisible ball per sample in view, the four cups and the port.
   const sampleHits = Array.from({ length: 24 }, () => {
     const m = add(outside, new THREE.SphereGeometry(0.22, 8, 6), ghost); m.visible = false; m.userData.sid = null;
-    target(m, () => !!m.userData.sid && running(), () => deskPick(m.userData.sid)).userData.pickup = true;
+    cue(target(m, () => !!m.userData.sid && running(), () => deskPick(m.userData.sid)), () => OPEN('TAKE')).userData.pickup = true;
     return m;
   });
-  F.cups.forEach((cup, n) => target(add(cup, new THREE.SphereGeometry(0.14, 8, 6), ghost, 0, 0.08, 0), () => deskSamples.length > 0 && slotFree(n), () => { letGoSample(DESK, deskSamples[0], cup.getWorldPosition(V()).setY(cup.getWorldPosition(V()).y + 0.08)); }));
-  target(add(world.port, new THREE.SphereGeometry(0.3, 8, 6), ghost, F.portMouth.x, F.portMouth.y, F.portMouth.z), () => deskSamples.length > 0, () => { letGoSample(DESK, deskSamples[0], world.port.localToWorld(F.portMouth.clone())); });
-  target(add(F.rail, new THREE.SphereGeometry(0.35, 8, 6), ghost), () => running(), () => onRail(DESK));
+  F.cups.forEach((cup, n) => cue(target(add(cup, new THREE.SphereGeometry(0.14, 8, 6), ghost, 0, 0.08, 0), () => deskSamples.length > 0 && slotFree(n), () => { letGoSample(DESK, deskSamples[0], cup.getWorldPosition(V()).setY(cup.getWorldPosition(V()).y + 0.08)); }), () => POINT('STOW')));
+  cue(target(add(world.port, new THREE.SphereGeometry(0.3, 8, 6), ghost, F.portMouth.x, F.portMouth.y, F.portMouth.z), () => deskSamples.length > 0, () => { letGoSample(DESK, deskSamples[0], world.port.localToWorld(F.portMouth.clone())); }), () => POINT('BANK'));
+  const railHit = cue(target(add(F.rail, new THREE.SphereGeometry(0.35, 8, 6), ghost), () => running(), () => onRail(DESK)), () => rideCue(!cueVR));
   // Where a sample we have is drawn.
   const ov = V();
   world.sampleOverride = id => {
@@ -636,13 +656,14 @@ export function buildFixtures(THREE, world, { rig, camera, send, sfx = () => {},
   }
 
   const api = {
-    tools, rings, gloves, spot, outside,
+    tools, badges, gloves, spot, outside, railHit,
     get carried() { return [...deskSamples, ...held.filter(h => h?.kind === 'sample').map(h => h.id)]; },
     dropSample, deskPick,
     get refusedAt() { return refusedAt; },
     // Meshes that can be pointed at right now.
     targets: () => hits.filter(m => m.userData.enabled() && m.parent && isShown(m)),
-    click(mesh, point) { mesh.userData.click(point); },
+    // `hand`: the headset hand (0 or 1) that pointed, or undefined on a laptop.
+    click(mesh, point, hand) { mesh.userData.click(point, hand); },
 
     // Desk keys for the things you cannot point at, and Q to put the held tool down.
     patchSuit, pullCord,
@@ -768,7 +789,7 @@ export function buildFixtures(THREE, world, { rig, camera, send, sfx = () => {},
     // Every frame. hands: [{ obj, point, side, tracked }] for the two hands (obj is where a held tool is
     // drawn, point is where the fingers are, tracked means bare hands, not controllers); empty on a laptop.
     update(dt, now, hands, vr) {
-      inVR = !!vr;
+      cueVR = !!vr;
       camera.getWorldPosition(headXZ);
       const place = placeNow();
       handObj[0] = hands[0]?.obj || null; handObj[1] = hands[1]?.obj || null;
@@ -870,30 +891,41 @@ export function buildFixtures(THREE, world, { rig, camera, send, sfx = () => {},
       F.crack.userData.heat = weldHits.map(m => Math.min(1, (m.userData.dwell || 0) / WELD_DWELL));
       if (!held.some(h => h?.kind === 'cord')) cord.visible = false;
 
-      // Gloves on controllers, and a ring on whatever each empty hand could grab. A light tick as the ring lands on something.
+      // Gloves on controllers, and the hand badge: on whatever an empty hand could grab, on where a held tool or
+      // sample would work, and a fist for a moment after a grab. A light tick as it lands on something new.
+      let railLit = false;
       hands.forEach((hand, i) => {
         const glove = gloves[i];
         if (glove.parent !== hand.obj) hand.obj.add(glove);
         glove.visible = !hand.tracked && !!hand.side;
         glove.userData.left.visible = hand.side !== 'right'; glove.userData.right.visible = hand.side === 'right';
-        const what = held[i] ? null : nearest(hand.point, i);
-        const ring = rings[i], name = what ? what.kind + (what.id || what.i || '') : null;
-        ring.visible = !!what;
-        if (what) {
-          if (what.kind === 'sample') { const sm = (st.scene?.samples || []).find(x => x.id === what.id); if (sm) samplePos(sm, ring.position); }
-          else {
-            const obj = what.kind === 'wheel' ? F.wheels[what.rid].wheel : what.kind === 'cord' ? tools.gen.userData.handle : what.kind === 'rail' ? F.rail : tools[what.id];
-            worldPos(obj, ring.position);
+        const h = held[i], badge = badges[i];
+        if (h && !wasHeld[i]) { fistUntil[i] = now + 0.5; fistAt[i].copy(hand.point); } // the grab worked: the hand closes
+        wasHeld[i] = h || null;
+        let shown = null, at = null, name = null;
+        if (now < fistUntil[i]) { shown = { shape: 'fist', verb: '' }; at = fistAt[i]; }
+        else if (h) { const u = useCue(h, hand.point); if (u) { shown = u.cue; at = u.pos; name = 'use' + u.cue.verb; } }
+        else {
+          const what = nearest(hand.point, i);
+          if (what) {
+            at = a.set(0, 0, 0);
+            if (what.kind === 'sample') { const sm = (st.scene?.samples || []).find(x => x.id === what.id); if (sm) samplePos(sm, at); }
+            else worldPos(what.kind === 'wheel' ? F.wheels[what.rid].wheel : what.kind === 'cord' ? tools.gen.userData.handle : what.kind === 'rail' ? F.rail : tools[what.id], at);
+            shown = what.kind === 'rail' ? rideCue(false) : OPEN(what.kind === 'wheel' ? 'PULL' : what.kind === 'cord' ? 'PULL CORD' : 'TAKE');
+            if (what.kind === 'rail') railLit = !!shown && !shown.dim;
+            name = what.kind + (what.id || what.i || '');
           }
-          const big = what.kind === 'wheel' || BIG(what.id);
-          ring.scale.setScalar((big ? 0.3 : what.kind === 'cord' ? 0.09 : what.kind === 'rail' ? 0.18 : 0.14) * (0.94 + Math.sin(now * 8) * 0.06));
-          ring.quaternion.copy(camera.getWorldQuaternion(q4));
-          // Red if the other hand already has a tool: one at a time.
-          ring.material.color.setHex(PAL.hex.green); // an empty hand can always take what its ring is on
+        }
+        badge.set(shown);
+        if (shown) {
+          // 8 cm off the thing, toward the hand that would act, and a little above it.
+          const d = c.copy(hand.point).sub(at), len = d.length();
+          badge.sprite.position.copy(at).addScaledVector(d, len > 1e-3 ? Math.min(0.08, len) / len : 0).y += 0.05;
         }
         if (name !== hover[i]) { hover[i] = name; if (name) pulse(i, 0.25, 20); }
       });
-      for (let i = hands.length; i < 2; i++) rings[i].visible = gloves[i].visible = false;
+      if (vr) F.grip?.userData.glow(railLit, now);
+      for (let i = hands.length; i < 2; i++) { badges[i].set(null); gloves[i].visible = false; }
 
       stepSamples(dt, hands, vr);
 

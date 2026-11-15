@@ -19,6 +19,7 @@ import { PAL, FONT, nixie, fontsReady } from '/shared/palette.js';
 import { createLobby } from '/lobby.js';
 import { isHeadset } from '/device.js';
 import { music } from '/music.js';
+import { makeCueOverlay } from '/hand.js';
 
 const REACH = 3.2;        // metres: how far away the mouse can work something
 const REACH_VR = 1.6;     // metres: pointing in VR is a fallback for grabbing, so it only works close up
@@ -74,7 +75,7 @@ function pulse(i, strength = 0.5, ms = 40) {
   src?.gamepad?.hapticActuators?.[0]?.pulse?.(strength, ms)?.catch?.(() => {});
 }
 const phys = buildPhysics();
-const fx = buildFixtures(THREE, world, { rig, camera, send: a => net.send({ t: 'do', a }), sfx: k => radio.sfx(k), sfxAt: (k, p, g, o) => radio.sfxAt(k, p, g, o), pulse, phys, interior, where: () => where, onRail: i => mount(i) });
+const fx = buildFixtures(THREE, world, { rig, camera, send: a => net.send({ t: 'do', a }), sfx: k => radio.sfx(k), sfxAt: (k, p, g, o) => radio.sfxAt(k, p, g, o), pulse, phys, interior, where: () => where, onRail: i => mount(i), rideCue: desk => rideCue(desk) });
 // Mission Control's waypoint: a beacon in the world where they want the astronaut to go (client/waypoint.js).
 const waypoint = buildWaypoint(THREE, { scene, interior, world, toolAt: id => { const t = fx.tools[id]; return t && t.parent ? t.getWorldPosition(new THREE.Vector3()) : null; } });
 
@@ -340,7 +341,10 @@ function targetInReach(controller) {
 function use(controller, holding = false) {
   const hit = targetInReach(controller);
   if (!hit || (holding && !hit.object.userData.hold)) return !!hit && !holding;
-  fx.click(hit.object, hit.point);
+  const hand = controller ? controllers.indexOf(controller) : -1;
+  // A bare hand's pinch acts on release, so it cannot hold a tool it pointed at: it has to reach for it.
+  if (hit.object.userData.tool && controller?.userData.isHand) return false;
+  fx.click(hit.object, hit.point, hand >= 0 ? hand : undefined);
   return true;
 }
 // Use whatever is being pointed at: a loose tool, something to fix. (The airlocks are walked into.)
@@ -456,6 +460,7 @@ for (const i of [0, 1]) {
     const other = controllers[1 - i];
     // A trigger pulled, or a bare hand pinched, on something in reach grabs it and holds it until it lets
     // go. That is not a zoom, a turn, a teleport, the radio or a point at the panel.
+    if (c.userData.grabbed && !fx.holding(i)) c.userData.grabbed = null; // what it held was taken from it (dropped by the server, a new mission)
     if (c.userData.grabbed) return; // already holding on with the grip
     if (running() && fx.grab(i, handPoint(i, new THREE.Vector3()))) { c.userData.grabbed = 'select'; return; }
     c.userData.pinched = true;
@@ -467,7 +472,11 @@ for (const i of [0, 1]) {
       return;
     }
     if (c.userData.hand === 'left') { if (c.userData.isHand) leftDrag = { x: lateral(c) }; return; }
-    if (!c.userData.isHand && useAny(c)) { pressed = c; nextUse = performance.now() / 1000 + 0.1; } // a bare hand acts when the pinch lets go, see below
+    if (!c.userData.isHand && useAny(c)) {
+      // Pointed at a loose tool: it is in this hand now, and comes out of it when the trigger lets go.
+      if (fx.holding(i)) { c.userData.grabbed = 'select'; return; }
+      pressed = c; nextUse = performance.now() / 1000 + 0.1;
+    } // a bare hand acts when the pinch lets go, see below
   });
   c.addEventListener('selectend', () => {
     if (pressed === c) pressed = null;
@@ -481,7 +490,7 @@ for (const i of [0, 1]) {
     if (c.userData.isHand && act && !c.userData.exitAim && !useAny(c) && groundTarget(c, hitPoint)) teleport(hitPoint);
   });
   // The grip button does the same as the trigger. Whichever closed the hand is the one that opens it.
-  c.addEventListener('squeezestart', () => { if (!c.userData.grabbed && running() && fx.grab(i, handPoint(i, new THREE.Vector3()))) c.userData.grabbed = 'squeeze'; });
+  c.addEventListener('squeezestart', () => { if (c.userData.grabbed && !fx.holding(i)) c.userData.grabbed = null; if (!c.userData.grabbed && running() && fx.grab(i, handPoint(i, new THREE.Vector3()))) c.userData.grabbed = 'squeeze'; });
   c.addEventListener('squeezeend', () => { if (c.userData.grabbed === 'squeeze') { c.userData.grabbed = null; fx.release(i, handPoint(i, new THREE.Vector3())); } });
   rig.add(c);
   controllers.push(c);
@@ -583,7 +592,9 @@ function followArm(dt = 0) {
 // only works again once the finger has come off it and the trigger or pinch has been let go.
 // Aimed at, its lamp glows amber; in the debrief it blinks amber, once a second, to say "press me".
 const EXIT = { reach: 0.045, hold: 0.6, aim: 0.03, aimFar: 1.2 };
-let exitHeld = 0, exitTouched = false, exitGone = false, tipLost = 0;
+let exitHeld = 0, exitTouched = false, exitGone = false, tipLost = 0, exitClock = 0;
+// The hold is timed in real seconds, like the airlock and the arm: 0.6 s is 0.6 s on a slow machine too.
+const exitStep = now => { const d = exitClock ? Math.min(0.25, now - exitClock) : 0; exitClock = now; return d; };
 const exitPos = new THREE.Vector3(), tipPos = new THREE.Vector3(), aimV = new THREE.Vector3(), exitRay = new THREE.Ray();
 const exitInvite = now => !!debrief && Math.floor(now * 2) % 2 === 0;
 // Is controller c's pointing ray on the cap?
@@ -595,7 +606,8 @@ function aimsAtExit(c) {
   const along = aimV.copy(exitPos).sub(exitRay.origin).dot(exitRay.direction);
   return along > 0.02 && along < EXIT.aimFar && exitRay.distanceToPoint(exitPos) < EXIT.aim;
 }
-function exitButton(dt, now, session) {
+function exitButton(_dt, now, session) {
+  const dt = exitStep(now);
   let near = false, hand = -1, have = false, aimed = false, pointing = false;
   for (const c of controllers) c.userData.exitAim = false;
   if (arm.group.visible) {
@@ -632,7 +644,8 @@ function exitButton(dt, now, session) {
   }
 }
 // On a laptop, hold X for the same moment.
-function deskExit(dt, now) {
+function deskExit(_dt, now) {
+  const dt = exitStep(now);
   const down = !!keys.x;
   if (exitGone) { if (!down) exitGone = false; }
   else exitHeld = down ? exitHeld + dt : 0;
@@ -645,7 +658,7 @@ function deskExit(dt, now) {
   }
 }
 function leaveDesk() {
-  mode = null; keyed = false; $('cross').hidden = true;
+  mode = null; keyed = false; $('cross').hidden = true; cueOverlay.set(null);
   try { document.exitPointerLock?.(); } catch {}
   lobby.show(true);
 }
@@ -1081,6 +1094,35 @@ function clampWalk() {
 let riding = false, rideAt = 0, rideWas = null, rideFloor = 0, rumbleAt = 0;
 const plateW = new THREE.Vector3(), rideM = new THREE.Matrix4(), rideT = new THREE.Matrix4();
 const haulerStopped = () => Math.abs(state?.rovers?.hauler?.v || 0) < 0.25;
+// ---------- the hand on a laptop: the centre dot becomes a badge on whatever is in reach (client/hand.js) ----------
+// What the Hauler's rail offers: ride it, wait for it to stop, come closer, or step off once it has stopped.
+function rideCue(desk) {
+  const v = verb => ({ shape: 'open', verb: desk ? 'E: ' + verb : verb });
+  if (riding) return haulerStopped() ? v('STEP OFF') : null;
+  if (!haulerStopped()) return { shape: 'open', verb: 'WAIT', dim: true };
+  camera.getWorldPosition(headPos); world.fixtures.plate.getWorldPosition(plateW);
+  return Math.hypot(plateW.x - headPos.x, plateW.z - headPos.z) > CFG.ride.mountReach ? { shape: 'open', verb: 'CLOSER', dim: true } : v('RIDE');
+}
+const cueOverlay = makeCueOverlay(document.getElementById('handCue'));
+let cueCount = -1, cueFist = 0;
+function deskCue(now) {
+  if (mode !== 'desk' || !running() || debrief) { cueOverlay.set(null); if (mode === 'desk') $('cross').hidden = false; return; }
+  // A grab that worked: the hand closes for a moment.
+  const count = fx.hands.filter(Boolean).length + (state.carry || []).length; // tools and samples in hand
+  if (cueCount >= 0 && count > cueCount) cueFist = now + 0.4;
+  cueCount = count;
+  let cue = null, onRail = false;
+  if (now < cueFist) cue = { shape: 'fist', verb: '' };
+  else {
+    aim(null); raycaster.far = 8;
+    const hit = raycaster.intersectObjects(fx.targets(), false)[0];
+    const c = hit && hit.object.userData.cue ? hit.object.userData.cue() : null;
+    if (c) { cue = hit.distance > REACH ? { shape: c.shape, verb: 'CLOSER', dim: true } : c; onRail = hit.object === fx.railHit && !cue.dim; }
+  }
+  cueOverlay.set(cue);
+  $('cross').hidden = !!cue;
+  world.fixtures.grip?.userData.glow(onRail, now);
+}
 function mount(i) {
   if (riding) return true; // already aboard: the hand just holds the rail
   if (!running() || where !== 'out') return false;
@@ -1142,10 +1184,10 @@ function rideStep(dt, now) {
 let vy = 0, turnArmed = true, lastPose = 0, shake = 0, grounded = true;
 const footV = new THREE.Vector3();
 // The height of the ground under the head: the drawn lunar surface outside, the floor (0) indoors
-// and in an airlock.
+// and in an airlock chamber.
 function floorY() {
   if (riding) return rideFloor;
-  if (where !== 'out' || cycle) return 0;
+  if (where !== 'out' || cycle || chamberAt(footV)) return 0; // an airlock chamber has its own floor
   camera.getWorldPosition(footV);
   return world.ground ? world.ground(footV.x, footV.z) : 0;
 }
@@ -1250,6 +1292,7 @@ let snapWaiting = null;
 const snap = () => new Promise(resolve => { snapWaiting = resolve; });
 let lastFrame = performance.now() / 1000, mainCalls = 0;
 let armFrame = lastFrame;
+let drawEvery = 1, skipped = 0; // see moonbase.drawEvery
 renderer.setAnimationLoop(() => {
   const now = performance.now() / 1000, dt = Math.min(0.05, now - lastFrame);
   lastFrame = now;
@@ -1322,6 +1365,7 @@ renderer.setAnimationLoop(() => {
     h.obj = c; h.side = c.userData.hand || ''; h.tracked = !!c.userData.isHand; handPoint(i, h.point);
   }
   fx.update(dt, now, vr ? handInfo : [], vr);
+  deskCue(now);
   // Under cover while rocks are falling: the cuff says so, because there is no other way to know.
   covered = run && s.scene.meteor !== null && sheltered(myPose(), s.rovers.hauler);
   // The shadow map's box follows the head round the field.
@@ -1332,11 +1376,14 @@ renderer.setAnimationLoop(() => {
   shake *= 0.86;
   if (mode === 'desk') camera.rotation.z = (Math.random() - 0.5) * shake;
   drawResultBoard();
-  debriefStep(dt, now);
+  debriefStep(Math.min(0.25, now - armFrame), now); // real time, like the arm and the airlock: a second of reading is a second on a slow machine too
   // On a laptop the radio key swings the arm up. In a headset it is on your own arm (see followArm).
   if (!arm.tracked) arm.update(Math.min(0.25, now - armFrame), keyed || (!!debrief && !!mode)); // real time, so the arm is as quick on a slow machine
   armFrame = now;
   if (arm.group.visible) drawGauges(now);
+  // Tests only (moonbase.drawEvery): on a machine with software WebGL, draw one frame in n so the game's
+  // logic keeps pace with a scripted mission. Matrices still update, so aiming and clicking stay right.
+  if (drawEvery > 1 && ++skipped % drawEvery && !snapWaiting) { scene.updateMatrixWorld(); return; }
   renderScope();
   choosePortal(now);
   keepStencil(!!chosen);
@@ -1350,6 +1397,7 @@ renderer.setAnimationLoop(() => {
 // For debugging from the browser console, and for the tests: moonbase.state(), moonbase.fx.targets() ...
 window.moonbase = { waypoint, mount: () => mount(2), dismount: () => dismount(-1), riding: () => riding, resetStanding: () => { standing = 1.2; }, state: () => state, fx, world, interior, radio, rig, camera, net, board, THREE, scene, use: () => use(null), headset: () => headset, sendPose, myPose, teleport, turnRig,
   where: () => where, placeInside, showPlace, renderer, phys, forcePortal: false,
+  drawEvery: n => { drawEvery = Math.max(1, n | 0); }, // tests: draw one frame in n (the logic still runs every frame)
   // For the tests: stand the head at (x, z) in a place ('in': room coordinates, 'out': world), facing yaw (0 = north).
   standAt(to, x, z, yaw = 0) { cycle = null; showPlace(to); rig.rotation.set(0, yaw, 0); rig.position.set(0, 0, 0); rig.updateMatrixWorld(true); camera.getWorldPosition(headPos); const p = to === 'in' ? interior.toWorld(x, z) : { x, z }; rig.position.x = p.x - headPos.x; rig.position.z = p.z - headPos.z; riding = false; vy = 0; grounded = true; rig.position.y = to === 'in' ? 0 : world.height(p.x, p.z); rig.updateMatrixWorld(true); },
   airlock: () => cycle && { ...cycle }, door: () => door, portal: () => chosen && { to: chosen.to, glass: chosen.glass.name, calls: portalCalls }, calls: () => ({ portalMs, main: mainCalls, portal: chosen ? portalCalls : 0, physicsMs: phys.stepMs, bodies: phys.count() }), outage: on => { debugOutage = on; }, wreck: on => { debugDamage = on; },

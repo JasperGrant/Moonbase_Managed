@@ -123,7 +123,8 @@ function installVR() {
     holding: s => mb.fx.holding(index(s)),
     haptics: () => X.dev.haptics.splice(0),
     until: async (test, seconds = 5) => { for (const end = Date.now() + seconds * 1000; Date.now() < end;) { const v = test(mb.state()); if (v) return v; await sleep(50); } return null; },
-    ring: s => { const r = mb.fx.rings[index(s)]; return r.visible ? '#' + r.material.color.getHexString() : null; },
+    // The hand badge (client/hand.js) by whatever that hand could grab or use: 'open:TAKE', 'point:WELD', ... or null.
+    ring: s => { const b = mb.fx.badges[index(s)]; return b.sprite.visible && b.cue ? b.cue.shape + ':' + (b.cue.verb || '') : null; },
     // Where a tool is: in a hand, loose (lying somewhere), or nowhere (used up).
     parentOf: tool => { const i = [0, 1].find(k => mb.fx.holding(k)?.id === tool); if (i !== undefined) return 'hand:' + side(i); const st = mb.fx.toolState(tool)?.state; return st === 'loose' ? 'loose' : st === 'gone' ? 'nowhere' : st; },
     pose: tool => mb.fx.toolState(tool),
@@ -204,7 +205,7 @@ try {
     await v.frames(2);
     return { ring, held: v.holding('right')?.kind || null, carry: mb.state().carry, buzz: v.haptics().length };
   }, { x: s0.x, z: s0.z });
-  check(grab.ring === '#' + PAL.green.slice(1) || grab.ring, 'no ring on the sample before grabbing it: ' + JSON.stringify(grab));
+  check(grab.ring === 'open:TAKE', 'no open hand saying TAKE on the sample before grabbing it: ' + JSON.stringify(grab));
   check(g.carry.includes('s0') && g.samples.find(s => s.id === 's0').at === 'hand', 'the server did not hear that the sample was picked up: ' + JSON.stringify(grab));
   check(grab.held === 'sample' && grab.buzz > 0, 'the hand should hold the sample and buzz: ' + JSON.stringify(grab));
   // Not told which rock is real: only how it looks.

@@ -871,6 +871,13 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
       const railPath = new THREE.CatmullRomCurve3([[-0.42, 0.66, -1.24], [-0.42, 1.3, -1.3], [-0.3, 1.42, -1.3], [0.3, 1.42, -1.3], [0.42, 1.3, -1.3], [0.42, 0.66, -1.24]].map(p => new THREE.Vector3(...p)), false, 'catmullrom', 0.1);
       const rail = mesh(new THREE.TubeGeometry(railPath, 24, 0.022, 8), new THREE.MeshStandardMaterial({ color: PAL.hex.hazard, roughness: 0.55, metalness: 0.3 }), 0, 0, 0, rover);
       rail.name = 'Rail_Rider';
+      // Grip tape on the rail's top bar: where you take hold. It glows warm while the rail can be taken (the hand,
+      // client/hand.js), and sits dark the rest of the time.
+      const gripMat = new THREE.MeshStandardMaterial({ color: PAL.hex.bakelite, roughness: 0.92, metalness: 0, bumpMap: regolithBump, bumpScale: 0.02, emissive: PAL.hex.amber, emissiveIntensity: 0 });
+      const grip = mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.5, 14), gripMat, 0, 1.42, -1.3, rover);
+      grip.rotation.z = Math.PI / 2; grip.name = 'Grip_Rail';
+      grip.userData.glow = (on, t) => { gripMat.emissiveIntensity = on ? 0.55 + 0.25 * Math.sin(t * 5) : 0; };
+      rover.userData.grip = grip;
       rover.userData.rail = new THREE.Object3D(); rover.userData.rail.position.set(0, 1.42, -1.3); rover.add(rover.userData.rail);
       rover.userData.plate = new THREE.Object3D(); rover.userData.plate.position.set(P.x, P.y, P.z); rover.add(rover.userData.plate);
       // The tray: four open sample cups on the aft bay.
@@ -1091,7 +1098,7 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
     doors,
     fixtures: { dustCells, dust, crack, crackPts, wheel: rover.userData.wheel, hub: rover.userData.hub,
       wheels: Object.fromEntries(Object.entries(rovers).map(([id, r]) => [id, { wheel: r.userData.wheel, hub: r.userData.hub }])),
-      rail: rover.userData.rail, plate: rover.userData.plate, cups: rover.userData.cups, portMouth: port.userData.mouth },
+      rail: rover.userData.rail, grip: rover.userData.grip, plate: rover.userData.plate, cups: rover.userData.cups, portMouth: port.userData.mouth },
     // A puff of dust kicked up at a point (boots landing, a rock picked up).
     puff(p, n = 10, speed = 0.6) { for (let i = 0; i < n; i++) { const a = Math.random() * 6.28; kick(p.x, p.y + 0.05, p.z, Math.cos(a) * speed * Math.random(), 0.3 + Math.random() * speed, Math.sin(a) * speed * Math.random()); } },
     // Where a sample in a hand (or falling) is drawn: (id) => world position, or null to leave it to the server's word.

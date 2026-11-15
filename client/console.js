@@ -106,6 +106,7 @@ net.onMsg = m => { if (m.t === 'ptt' && radio) { rx = m.on; radio.rxMarker(m.on)
 setInterval(() => { $('link').textContent = net.open ? '' : 'NO LINK TO SERVER'; }, 500);
 
 // ---------- render ----------
+let testSlow = 1; // tests only (moonbase.drawEvery): redraw the instruments this many times less often
 const TOAST = { alarm: 'ALARM', solve: 'FIXED', hit: 'METEOR HIT', power: 'POWER BACK', gen: 'GENERATOR RUNNING', blackout: 'BASE DARK', found: 'SAMPLE BANKED', dud: 'DUD' };
 function render() {
   const s = state;
@@ -140,7 +141,7 @@ function render() {
   }
   lobby.update(s);
   if (s.phase === 'lobby') renderPlan(s);
-  if (view === 'run') renderRun(s);
+  if (view === 'run' && testSlow === 1) renderRun(s); // under moonbase.drawEvery the frame loop alone redraws
   if (view === 'results') renderResults(s);
 }
 
@@ -171,7 +172,7 @@ function renderRun(s) {
 let lastFrame = 0, swinging = 0; // swinging: when a needle last moved
 (function frame(t) {
   requestAnimationFrame(frame);
-  const every = performance.now() - swinging < 200 ? 33 : 100;
+  const every = (performance.now() - swinging < 200 ? 33 : 100) * testSlow;
   if (t - lastFrame < every || !state || state.phase !== 'run' || document.hidden) return;
   lastFrame = t; renderRun(state);
 })(0);
@@ -769,4 +770,7 @@ if (has('ops')) {
 }
 
 // For debugging from the browser console.
-window.moonbase = { state: () => state, radio, net, role, debrief: () => debrief, chart };
+window.moonbase = { state: () => state, radio, net, role, debrief: () => debrief, chart,
+  // Tests only: draw the rover cameras one frame in n, so a software-WebGL test machine keeps up with the mission.
+  // The instruments redraw n times less often too (the state itself still arrives and is read at once).
+  drawEvery: n => { testSlow = Math.max(1, n | 0); return import('/rovercam.js').then(m => { m.camDraw.every = testSlow; }); } };
