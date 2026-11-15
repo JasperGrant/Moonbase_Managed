@@ -37,7 +37,7 @@ const kit = (g, tool) => {
   assert.ok(g.astro.inside, 'and inside the hall');
   for (const [id, t] of Object.entries(g.tools)) {
     assert.ok(t.at === 'loose' && t.inside && t.area, `${id} lies somewhere in the hall`);
-    assert.deepEqual([t.x, t.z], [PLACES.toolSpots[PLACES.demoTools[id]].x, PLACES.toolSpots[PLACES.demoTools[id]].z], 'the demo lays the tools out the same way every time');
+    assert.deepEqual([t.x, t.y, t.z], [PLACES.toolHomes[id].x, PLACES.toolHomes[id].y, PLACES.toolHomes[id].z], 'every tool starts at its home, under its sign');
   }
   at(g, { x: 6, z: 6 });
   g.act({ take: 'brush' });
@@ -68,7 +68,35 @@ const kit = (g, tool) => {
   assert.ok(g.has('welder'));
   const free = new Game(rng); free.setMode('free'); free.start();
   const spots = Object.values(free.tools).map(t => `${t.x},${t.z}`);
-  assert.equal(new Set(spots).size, spots.length, 'free play puts every tool on its own spot');
+  assert.equal(new Set(spots).size, spots.length, 'every tool has its own spot');
+  for (const [id, t] of Object.entries(free.tools)) assert.equal(t.area, PLACES.toolHomes[id].area, `free play puts the ${id} at home too`);
+}
+
+// ---------- Mission Control's waypoint ----------
+{
+  const g = fresh();
+  assert.equal(g.view('astronaut').waypoint, null, 'no waypoint to start with');
+  g.setWaypoint({ tool: 'welder' });
+  let w = g.view('astronaut').waypoint;
+  assert.ok(w && w.tool === 'welder' && w.inside && w.x === PLACES.toolHomes.welder.x, 'a waypoint on a tool is where the tool lies');
+  assert.deepEqual(g.view('ops').waypoint, w, 'Mission Ops sees what it set');
+  inside(g); g.act({ take: 'welder' }); run(g, 0.2);
+  assert.equal(g.view('astronaut').waypoint, null, 'taking the tool puts the beacon out');
+  g.setWaypoint({ x: 40, z: -30 });
+  w = g.view('sci').waypoint;
+  assert.ok(w && !w.tool && !w.inside && w.x === 40 && w.z === -30, 'a waypoint on a spot from the chart');
+  at(g, { x: 20, z: -20 }); run(g, 0.2);
+  assert.ok(g.view('astronaut').waypoint, 'still lit while the astronaut is far off');
+  at(g, { x: 39, z: -29 }); run(g, 0.2);
+  assert.equal(g.view('astronaut').waypoint, null, 'standing at it puts it out');
+  g.setWaypoint({ x: 1e6, z: 0 }); assert.equal(g.waypoint, null, 'off the field: no waypoint');
+  g.setWaypoint({ tool: 'nonsense' }); assert.equal(g.waypoint, null);
+  g.setWaypoint({ x: 10, z: 10 }); g.setWaypoint(null); assert.equal(g.waypoint, null, 'cleared');
+  const hub = new Hub(new Game(rng)); hub.choosePlayers(4);
+  const c = { send() {}, role: null }; hub.add(c); hub.message(c, JSON.stringify({ t: 'hello', role: 'tech' }), false);
+  hub.game.setMode('demo'); hub.game.start();
+  hub.message(c, JSON.stringify({ t: 'waypoint', tool: 'brush' }), false);
+  assert.equal(hub.game.waypoint, null, 'the Technician cannot set one');
 }
 
 // ---------- a repair needs its tool, and the astronaut has to be there ----------
@@ -120,7 +148,7 @@ const kit = (g, tool) => {
   g.act({ fix: 'wheel', fit: true });
   assert.ok(!g.faults.wheel && !g.has('tire') && g.tools.tire.at === 'gone', 'the tire is used up');
   run(g, CFG.tireRestockSeconds + 1);
-  assert.ok(g.tools.tire.at === 'loose' && g.tools.tire.inside && g.tools.tire.area === 'CORRIDOR', 'a new tire turns up at the cargo end of the hall');
+  assert.ok(g.tools.tire.at === 'loose' && g.tools.tire.inside && g.tools.tire.area === 'SPARES STAND' && g.tools.tire.x === PLACES.toolHomes.tire.x, 'a new tire turns up on its stand');
 }
 
 // ---------- no switchboard: dust is the only power fault ----------
@@ -495,10 +523,20 @@ const kit = (g, tool) => {
   Object.assign(h, { x: 30, z: 30 }); at(g, { x: 30, z: 31 });
   g.act({ pick: first.id });
   assert.equal(first.at, 'hand'); assert.equal(g.tray[1], null, 'out of a cup and into a hand');
-  // Banking: only at the port.
+  // Banking: only at the port, which is in the hall.
   g.act({ bank: first.id });
-  assert.equal(first.at, 'hand', 'away from the port: refused');
-  at(g, { x: PLACES.port.x, z: PLACES.port.z + 1 });
+  assert.equal(first.at, 'hand', 'outside: refused');
+  inside(g);
+  // Let go in the hall: it lies on the hall floor, not outside the door, and can be taken up again indoors.
+  g.act({ put: first.id, x: 1.2, z: -6 });
+  assert.equal(first.at, 'ground'); assert.ok(first.inside, 'dropped indoors stays indoors');
+  assert.deepEqual([first.x, first.z], [1.2, -6]);
+  assert.ok(g.view('astronaut').scene.samples.some(x => x.id === first.id && x.inside), 'the astronaut sees it on the hall floor');
+  assert.ok(!g.view('sci').survey.samples.some(x => x.id === first.id), 'it is not on the field chart');
+  at(g, { x: 1.2, z: 2 }); g.act({ pick: first.id });
+  assert.equal(first.at, 'ground', 'a sample in the hall cannot be picked up from outside');
+  inside(g); g.act({ pick: first.id });
+  assert.equal(first.at, 'hand', 'picked up off the hall floor');
   const want = !!wanted(first.kind);
   g.act({ bank: first.id });
   assert.equal(first.at, 'banked');
@@ -506,8 +544,9 @@ const kit = (g, tool) => {
   assert.equal(g.view('sci').assay.kind, first.kind);
   assert.equal(g.view('astronaut').scene.port.banked, g.manifest.filter(m => m.got).length);
   // A lookalike is a dud.
-  Object.assign(dud, { x: PLACES.port.x, z: PLACES.port.z + 1, free: true }); g.act({ pick: dud.id }); const sc = g.score;
-  g.act({ bank: dud.id });
+  Object.assign(dud, { free: true }); // already cored
+  at(g, dud); g.act({ pick: dud.id }); const sc = g.score;
+  inside(g); g.act({ bank: dud.id });
   assert.equal(dud.at, 'banked'); assert.equal(g.score, sc, 'a dud scores nothing');
   assert.equal(g.view('sci').assay.kind, 'dud'); assert.equal(g.result, null);
 }
@@ -518,10 +557,10 @@ const kit = (g, tool) => {
   g.break('dust'); g.break('hull'); g.break('suit'); // (the test forces what the director never would)
   const only = (role, allowed) => { for (const k of Object.keys(g.view(role))) assert.ok(allowed.includes(k), `${role} sees ${k}`); };
   const common = ['t', 'n', 'phase', 'mode', 'crew', 'score', 'result', 'powered', 'ev', 'timeLeft', 'oxygen', 'o2Max', 'tally'];
-  only('astronaut', [...common, 'hands', 'tools', 'scene', 'suit', 'rovers', 'riding', 'carry']);
-  only('ops', [...common, 'hands', 'tools', 'carry', 'tray', 'drill']);
+  only('astronaut', [...common, 'hands', 'tools', 'scene', 'suit', 'rovers', 'riding', 'carry', 'waypoint']);
+  only('ops', [...common, 'hands', 'tools', 'carry', 'tray', 'waypoint', 'drill']);
   only('tech', [...common, 'rovers', 'rider', 'scene', 'astro', 'meteor', 'tools']);
-  only('sci', [...common, 'power', 'leak', 'drain', 'survey', 'manifest', 'assay']);
+  only('sci', [...common, 'power', 'leak', 'drain', 'survey', 'manifest', 'assay', 'waypoint']);
   assert.ok(!('text' in g.view('ops').ev), 'nobody is told in words what broke');
   // The leak lamp does not say where.
   assert.equal(JSON.stringify(g.view('sci').leak), 'true');
@@ -537,7 +576,7 @@ const kit = (g, tool) => {
   for (const m of g.manifest) {
     const s = g.samples.find(x => x.kind === m.kind && x.at === 'ground');
     core(g, s); g.act({ pick: s.id });
-    at(g, { x: PLACES.port.x, z: PLACES.port.z + 1 }); g.act({ bank: s.id });
+    inside(g); g.act({ bank: s.id });
   }
   inside(g);
   assert.deepEqual(g.view('sci').manifest.map(m => m.got), [true, true, true, true]);

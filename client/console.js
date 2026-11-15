@@ -69,6 +69,7 @@ $('run').innerHTML = [
     <button id="ptt">HOLD SPACE TO TALK TO THE ASTRONAUT</button>
     <h2>Hands</h2><canvas id="handsCv" class="pic" width="560" height="150"></canvas>
     <h2>Tool log</h2><canvas id="toolCv" class="pic" width="560" height="330"></canvas>
+    <p class="hint">CLICK A TOOL TO LIGHT A BEACON OVER IT FOR THE ASTRONAUT. CLICK IT AGAIN TO PUT IT OUT.</p>
     <h2>Sample log</h2><canvas id="sampleCv" class="pic" width="560" height="200"></canvas></div>`,
   has('tech') && `<div class="panel tech"><h3>Technician</h3>
     <div class="camwrap"><canvas id="cam"></canvas><canvas id="camHud"></canvas></div>
@@ -76,7 +77,8 @@ $('run').innerHTML = [
     <p class="hint" id="camHint"></p></div>`,
   has('sci') && `<div class="panel sci"><h3>Scientist</h3>
     ${tabs('sci', ['SURVEY', 'GUIDE', 'POWER', 'AIR'])}
-    <div data-pane="sci0"><canvas id="surveyCv" class="pic" width="560" height="660"></canvas></div>
+    <div data-pane="sci0"><canvas id="surveyCv" class="pic" width="560" height="660"></canvas>
+      <p class="hint">CLICK THE CHART TO STAND A BEACON THERE FOR THE ASTRONAUT. CLICK THE BEACON TO PUT IT OUT.</p></div>
     <div data-pane="sci1" hidden><canvas id="guideCv" class="pic" width="560" height="620"></canvas></div>
     <div data-pane="sci2" hidden><canvas id="powerCv" class="pic" width="560" height="560"></canvas></div>
     <div data-pane="sci3" hidden><canvas id="airCv" class="pic" width="560" height="560"></canvas></div></div>`,
@@ -104,6 +106,7 @@ net.onMsg = m => { if (m.t === 'ptt' && radio) { rx = m.on; radio.rxMarker(m.on)
 setInterval(() => { $('link').textContent = net.open ? '' : 'NO LINK TO SERVER'; }, 500);
 
 // ---------- render ----------
+let testSlow = 1; // tests only (moonbase.drawEvery): redraw the instruments this many times less often
 const TOAST = { alarm: 'ALARM', solve: 'FIXED', hit: 'METEOR HIT', power: 'POWER BACK', gen: 'GENERATOR RUNNING', blackout: 'BASE DARK', found: 'SAMPLE BANKED', dud: 'DUD' };
 function render() {
   const s = state;
@@ -138,7 +141,7 @@ function render() {
   }
   lobby.update(s);
   if (s.phase === 'lobby') renderPlan(s);
-  if (view === 'run') renderRun(s);
+  if (view === 'run' && testSlow === 1) renderRun(s); // under moonbase.drawEvery the frame loop alone redraws
   if (view === 'results') renderResults(s);
 }
 
@@ -169,7 +172,7 @@ function renderRun(s) {
 let lastFrame = 0, swinging = 0; // swinging: when a needle last moved
 (function frame(t) {
   requestAnimationFrame(frame);
-  const every = performance.now() - swinging < 200 ? 33 : 100;
+  const every = (performance.now() - swinging < 200 ? 33 : 100) * testSlow;
   if (t - lastFrame < every || !state || state.phase !== 'run' || document.hidden) return;
   lastFrame = t; renderRun(state);
 })(0);
@@ -272,6 +275,15 @@ function dial(g, x, y, r, value, max, name, { redBelow = 0, redAbove = Infinity,
 // ---------- Mission Ops: the tool log ----------
 // One row per tool: its silhouette, a jewel lamp (green in the astronaut's hand, amber lying somewhere,
 // dark used up), and where it lies, engraved. Ops knows roughly where; the astronaut has to look.
+// Click a tool's row: a waypoint on it, a beacon over it in the astronaut's world. Click again: out.
+const cvPoint = e => { const cv = e.currentTarget, b = cv.getBoundingClientRect(); return { x: (e.clientX - b.left) * cv.width / b.width, y: (e.clientY - b.top) * cv.height / b.height, cv }; };
+$('toolCv')?.addEventListener('click', e => {
+  if (!state || state.phase !== 'run') return;
+  const { y, cv } = cvPoint(e), ids = Object.keys(TOOLS), row = (cv.height - 20) / ids.length, t = ids[Math.floor((y - 10) / row)];
+  if (!t || state.tools?.[t]?.at !== 'loose') { sfx('click'); return; }
+  net.send(state.waypoint?.tool === t ? { t: 'waypoint', clear: true } : { t: 'waypoint', tool: t });
+  sfx('click');
+});
 function drawKit(s) {
   drawHands(s);
   const cv = $('toolCv'), g = cv.getContext('2d'), W = cv.width, H = cv.height;
@@ -288,6 +300,10 @@ function drawKit(s) {
     label(g, TOOLS[t].name.toUpperCase(), row + 56, y - 11, 13, C.dim, 'left');
     const hand = (s.hands || []).indexOf(t), where = at === 'hand' ? (hand === 0 ? 'LEFT HAND' : hand === 1 ? 'RIGHT HAND' : 'IN HAND') : at === 'gone' ? (t === 'tire' ? 'FITTED' : 'USED') : info.area || '';
     label(g, where, row + 56, y + 11, 17, at === 'gone' ? C.dim : C.ink, 'left');
+    // The beacon lamp: lit on the tool the waypoint is on.
+    const marked = s.waypoint?.tool === t;
+    jewel(g, W - 46, y - 6, 9, 'amber', marked);
+    label(g, 'BEACON', W - 46, y + 14, 9, marked ? C.amber : C.dim);
   });
 }
 
@@ -467,7 +483,13 @@ const KNOB = { range: { x: 80, y: 604 }, centre: { x: 210, y: 604 } };
 const chart = { range: 2, centre: 0, hex: null, seen: null, first: new Float64Array(FIELD.n * FIELD.n), known: null, bloom: new Map() };
 $('surveyCv')?.addEventListener('click', e => {
   const cv = e.currentTarget, b = cv.getBoundingClientRect(), x = (e.clientX - b.left) * cv.width / b.width, y = (e.clientY - b.top) * cv.height / b.height;
-  for (const [k, p] of Object.entries(KNOB)) if (Math.hypot(x - p.x, y - p.y) < 42) { chart[k] = (chart[k] + 1) % 3; sfx('click'); if (state) render(); }
+  for (const [k, p] of Object.entries(KNOB)) if (Math.hypot(x - p.x, y - p.y) < 42) { chart[k] = (chart[k] + 1) % 3; sfx('click'); if (state) render(); return; }
+  // On the glass: a waypoint there (the beacon the astronaut walks to), or, on the beacon itself, put it out.
+  const P = chart.proj; if (!P || !state || state.phase !== 'run' || Math.hypot(x - P.CX, y - P.CY) > P.R) return;
+  const wx = P.c.x + (x - P.CX) / P.k, wz = P.c.z + (y - P.CY) / P.k, w = state.waypoint;
+  if (w && !w.inside && Math.hypot((w.x - wx) * P.k, (w.z - wz) * P.k) < 14) net.send({ t: 'waypoint', clear: true });
+  else if (Math.hypot(wx, wz) <= CFG.bounds) net.send({ t: 'waypoint', x: +wx.toFixed(1), z: +wz.toFixed(1) });
+  sfx('click');
 });
 function knob(g, x, y, stops, at, name) { // a Bakelite rotary switch with engraved stops
   const angs = [-0.75, 0, 0.75].map(a => a - Math.PI / 2);
@@ -501,6 +523,7 @@ function drawSurvey(s) {
   const rng = RANGES[chart.range], cid = CENTRES[chart.centre].toLowerCase();
   const c = cid === 'base' ? { x: 0, z: 0 } : sv.rovers[cid] || { x: 0, z: 0 };
   const k = R / rng, X = x => CX + (x - c.x) * k, Y = z => CY + (z - c.z) * k;
+  chart.proj = { CX, CY, R, k, c: { x: c.x, z: c.z } }; // for turning a click back into metres
   const inView = (x, z, pad = 0) => Math.hypot(x - c.x, z - c.z) < rng * 1.05 + pad;
   // bezel and glass
   g.strokeStyle = PAL.bezel; g.lineWidth = 10; g.beginPath(); g.arc(CX, CY, R + 5, 0, 7); g.stroke();
@@ -568,6 +591,18 @@ function drawSurvey(s) {
     g.shadowColor = colour; g.shadowBlur = 5;
     g.beginPath(); g.moveTo(0, -9); g.lineTo(6, 7); g.lineTo(-6, 7); g.closePath(); g.fill(); g.restore();
   };
+  // The waypoint: an amber cross-hair in a ring the size of "you are there", and a line to it from the EVA mark.
+  const wp = s.waypoint, wpAt = wp && (wp.inside ? { x: 0, z: 0 } : wp);
+  if (wpAt && inView(wpAt.x, wpAt.z, 10)) {
+    const px = X(wpAt.x), py = Y(wpAt.z), rr = Math.max(7, CFG.waypoint.reach * k);
+    if (sv.astro && !sv.astro.inside) { g.strokeStyle = 'rgba(224,163,71,0.35)'; g.lineWidth = 1; g.setLineDash([4, 5]); g.beginPath(); g.moveTo(X(sv.astro.x), Y(sv.astro.z)); g.lineTo(px, py); g.stroke(); g.setLineDash([]); }
+    g.strokeStyle = C.amber; g.lineWidth = 2; g.shadowColor = C.amber; g.shadowBlur = 4;
+    g.beginPath(); g.arc(px, py, rr, 0, 7); g.stroke();
+    g.beginPath(); g.moveTo(px - rr - 6, py); g.lineTo(px - rr * 0.4, py); g.moveTo(px + rr * 0.4, py); g.lineTo(px + rr + 6, py);
+    g.moveTo(px, py - rr - 6); g.lineTo(px, py - rr * 0.4); g.moveTo(px, py + rr * 0.4); g.lineTo(px, py + rr + 6); g.stroke();
+    g.shadowBlur = 0;
+    label(g, wp.tool ? TOOLS[wp.tool].name.toUpperCase() : 'BEACON', px, py - rr - 14, 9, C.amber);
+  }
   for (const id of ['scout', 'hauler']) { const r = sv.rovers[id]; if (r) wedge(r.x, r.z, r.ry, C.amber, id === 'scout' ? 'S' : 'H'); }
   if (sv.astro && !sv.astro.inside && s.crew.includes('astronaut')) wedge(sv.astro.x, sv.astro.z, sv.astro.ry, C.blue, 'EVA');
   if (sv.fault && blinkOn()) { g.shadowColor = C.red; g.shadowBlur = 6; drawFault(g, sv.fault.type, X(sv.fault.x) + (sv.fault.type === 'wheel' || sv.fault.type === 'suit' ? 16 : 0), Y(sv.fault.z) - (sv.fault.type === 'wheel' || sv.fault.type === 'suit' ? 16 : 0), 24, C.red); g.shadowBlur = 0; }
@@ -745,4 +780,7 @@ if (has('ops')) {
 }
 
 // For debugging from the browser console.
-window.moonbase = { state: () => state, radio, net, role, debrief: () => debrief, chart };
+window.moonbase = { state: () => state, radio, net, role, debrief: () => debrief, chart,
+  // Tests only: draw the rover cameras one frame in n, so a software-WebGL test machine keeps up with the mission.
+  // The instruments redraw n times less often too (the state itself still arrives and is read at once).
+  drawEvery: n => { testSlow = Math.max(1, n | 0); return import('/rovercam.js').then(m => { m.camDraw.every = testSlow; }); } };

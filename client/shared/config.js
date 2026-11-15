@@ -33,14 +33,17 @@ export const CFG = {
   teleportRecharge: 2.5,      // seconds between hand-tracked teleport hops
   rover: { rampSeconds: 0.6 },// rovers ease up to speed and down to a stop
   ride: { snapYaw: false, mountReach: 2.5 }, // riding the Hauler: turn with it (or hold heading and snap), how near to get on
-  survey: { known: 30 },      // metres round the base that start explored on the Scientist's chart
+  survey: { known: 30 },
+  // Mission Control's waypoint: a beacon the astronaut sees, on a tool or a spot on the chart. It goes out
+  // once they are this close to it (metres), or once the tool it marks is in their hand.
+  waypoint: { reach: 2.5 },      // metres round the base that start explored on the Scientist's chart
   // Samples: what the mission is for. Four on the manifest, a tray of four cups on the Hauler.
-  sample: { manifest: 4, tray: 4, wanted: 250, extra: 100, dud: 0, drawRadius: 45, reach: 3, portReach: 2.5 },
+  sample: { manifest: 4, tray: 4, wanted: 250, extra: 100, dud: 0, drawRadius: 45, reach: 3 },
   // The core drill: a rock in the ground comes out only through it. Two hands to carry, a rack on the Hauler
   // to ride in, five seconds locked on a rock (five Nixie tubes count them down), then the core is presented.
   drill: { seconds: 5, reach: 2.5 },
   // The astronaut starts inside the hall (room coordinates, see client/interior.js), facing up it, with
-  // the tools lying round. The server sees them at door S until they go out.
+  // the tools on their racks. The server sees them at door S until they go out.
   spawn: { inside: true, x: 0, z: -1.3, door: 'S' },
   // The airlock cycle, seconds (client/airlock.js): stand in the chamber, a hatch swings shut, the air
   // hisses, the other hatch swings open.
@@ -74,7 +77,7 @@ export const covers = (held, role) => held === role || (held === 'all' && role !
 export const PLAYERS = { 2: ['astronaut', 'all'], 4: ['astronaut', 'ops', 'sci', 'tech'] };
 
 // The tools. The astronaut holds one at a time, in the hand: to take another, put the first one down.
-// They start scattered round the hall (PLACES.toolSpots) and obey physics (client/physics.js).
+// Each starts at its home in the hall, under a sign (PLACES.toolHomes), and obeys physics (client/physics.js).
 // mass is in kilograms, for the physics only.
 export const TOOLS = {
   brush:  { name: 'Brush',            mass: 0.4 },
@@ -111,29 +114,37 @@ export const PLACES = {
   },
   // The hall's window onto the Moon, and the painted window on the habitat (Segment C) it looks out of.
   window: { hall: { x: 1.9, y: 1.7, z: 0, ry: 0 }, out: { x: -1.75, y: 2.1, z: 1.84, ry: -0.76 } },
-  // Where a tool can lie at the start of a mission, in room coordinates (y is the surface it lies on), and
-  // what Mission Ops' tool log calls the place.
+  // Each tool's home in the hall, in room coordinates (y is the surface it sits on), under a sign with its
+  // name (client/interior.js draws the racks and the signs). Every mission starts with every tool at home,
+  // and a new tire turns up on its stand. `area` is what Mission Ops' tool log calls the place.
+  toolHomes: {
+    brush:  { x: -3.32, y: 1.1,  z: -5.6,   area: 'TOOL RACK' },     // the wall rack on the west wall
+    patch:  { x: -3.32, y: 1.1,  z: -6.45,  area: 'TOOL RACK' },
+    welder: { x: -0.3,  y: 0.96, z: -4.25,  area: 'BENCH' },         // on the bench, under its sign on the gantry
+    tire:   { x: -0.85, y: 0.6,  z: -11.5,  area: 'SPARES STAND' },  // the steel stand against the north wall
+    gen:    { x: 0.6,   y: 0.6,  z: -11.5,  area: 'SPARES STAND' },
+  },
+  // Named parts of the hall, for the tool log: a tool that has been moved is logged by the nearest one.
   toolSpots: [
-    { x: 0.55,  y: 0.96, z: -4.15, area: 'BENCH' },
-    { x: -0.35, y: 0.96, z: -4.2,  area: 'BENCH' },
-    { x: -1.4,  y: 0.96, z: -5.55, area: 'BENCH' },
+    { x: -3.3,  y: 1.1,  z: -6.0,  area: 'TOOL RACK' },
+    { x: -0.3,  y: 0.96, z: -4.4,  area: 'BENCH' },
+    { x: -1.5,  y: 0.96, z: -5.7,  area: 'BENCH' },
+    { x: -0.1,  y: 0.6,  z: -11.5, area: 'SPARES STAND' },
     { x: 2.45,  y: 0,    z: -2.1,  area: 'LOCKERS' },
-    { x: -2.7,  y: 0,    z: -4.3,  area: 'WEST DOOR' },
+    { x: -2.7,  y: 0,    z: -3.6,  area: 'WEST DOOR' },
     { x: 1.2,   y: 0,    z: -7.0,  area: 'HALL' },
     { x: -3.2,  y: 1.78, z: -10.75, area: 'LIFE SUPPORT' },
-    { x: -0.5,  y: 0,    z: -11.0, area: 'NORTH END' },
     { x: 2.5,   y: 0,    z: -13.4, area: 'CORRIDOR' },
     { x: 2.9,   y: 0,    z: -10.4, area: 'EAST WALL' },
   ],
-  // The demo mission always lays the tools out the same way (indexes into toolSpots); free play shuffles.
-  demoTools: { brush: 0, patch: 3, welder: 7, tire: 8, gen: 5 },
-  restock: 8, // a new tire turns up here
   panels: [{ x: 9, z: 8 }, { x: 9, z: 11 }, { x: 9, z: 14 }],
   cracks: CRACK_ANGLES.map(deg => { const a = deg * Math.PI / 180; return { a, x: Math.cos(a) * 2.52, z: Math.sin(a) * 2.52 }; }),
   rover:  { x: 4, z: 9 },                 // the Hauler's start (kept under this name for the scenery code)
   rovers: { hauler: { x: 4, z: 9 }, scout: { x: -4, z: 8 } },
-  // The sample port: a hopper on the habitat's outside wall beside door S, at waist height.
-  port:   { x: 1.6, z: 2.32, ry: Math.atan2(1.6, 2.32) },
+  // The sample port: a hopper on the hall's east wall between the cabinet and the extinguisher, across from
+  // the rack of banked canisters on the end of the workbench, at waist height.
+  // Room coordinates (client/interior.js): samples are banked once they are brought home.
+  port:   { x: 3.24, z: -4.6, ry: -Math.PI / 2 },
   // Scenery only: nothing to fix here.
   depot:  { x: -9, z: -5 },
   dish:   { x: 10, z: -6 },

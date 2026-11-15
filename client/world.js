@@ -379,7 +379,7 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
 
   // ---------- rocks ----------
   // Two shapes (jagged, rounded), each displaced by noise, instanced many times.
-  const SITES = [...Object.values(PLACES.doors).map(d => ({ x: d.x + Math.sin(d.ry) * 2, z: d.z + Math.cos(d.ry) * 2 })), ...PLACES.panels, ...Object.values(PLACES.rovers), PLACES.depot, PLACES.dish, PLACES.drill, PLACES.port];
+  const SITES = [...Object.values(PLACES.doors).map(d => ({ x: d.x + Math.sin(d.ry) * 2, z: d.z + Math.cos(d.ry) * 2 })), ...PLACES.panels, ...Object.values(PLACES.rovers), PLACES.depot, PLACES.dish, PLACES.drill];
   const SOLIDS = [...FIELD_BOULDERS.map(b => ({ x: b.x, z: b.z, r: b.r })), ...LANDMARKS];
   const keepClear = (x, z, m) => Math.hypot(x, z) > 4.5 + m && SITES.every(s => Math.hypot(x - s.x, z - s.z) > 2.8 + m) && SOLIDS.every(o => Math.hypot(x - o.x, z - o.z) > o.r + m + 0.5);
   // A rock: a sphere pushed about by noise (low-frequency lumps plus ridged creases), stretched to its
@@ -871,6 +871,13 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
       const railPath = new THREE.CatmullRomCurve3([[-0.42, 0.66, -1.24], [-0.42, 1.3, -1.3], [-0.3, 1.42, -1.3], [0.3, 1.42, -1.3], [0.42, 1.3, -1.3], [0.42, 0.66, -1.24]].map(p => new THREE.Vector3(...p)), false, 'catmullrom', 0.1);
       const rail = mesh(new THREE.TubeGeometry(railPath, 24, 0.022, 8), new THREE.MeshStandardMaterial({ color: PAL.hex.hazard, roughness: 0.55, metalness: 0.3 }), 0, 0, 0, rover);
       rail.name = 'Rail_Rider';
+      // Grip tape on the rail's top bar: where you take hold. It glows warm while the rail can be taken (the hand,
+      // client/hand.js), and sits dark the rest of the time.
+      const gripMat = new THREE.MeshStandardMaterial({ color: PAL.hex.bakelite, roughness: 0.92, metalness: 0, bumpMap: regolithBump, bumpScale: 0.02, emissive: PAL.hex.amber, emissiveIntensity: 0 });
+      const grip = mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.5, 14), gripMat, 0, 1.42, -1.3, rover);
+      grip.rotation.z = Math.PI / 2; grip.name = 'Grip_Rail';
+      grip.userData.glow = (on, t) => { gripMat.emissiveIntensity = on ? 0.55 + 0.25 * Math.sin(t * 5) : 0; };
+      rover.userData.grip = grip;
       rover.userData.rail = new THREE.Object3D(); rover.userData.rail.position.set(0, 1.42, -1.3); rover.add(rover.userData.rail);
       rover.userData.plate = new THREE.Object3D(); rover.userData.plate.position.set(P.x, P.y, P.z); rover.add(rover.userData.plate);
       // The core drill's rack on the left flank, between the wheels: a ring clamp round its barrel and a shelf
@@ -962,7 +969,7 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
     dustGeo.attributes.position.needsUpdate = true;
   }
 
-  // ---------- the sample port: a hopper on the habitat wall beside door S ----------
+  // ---------- the sample port: a hopper on the hall's east wall (the page puts it in the hall) ----------
   const port = new THREE.Group(); port.name = 'Port_Sample';
   {
     const P = PLACES.port;
@@ -985,7 +992,7 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
     const plateM = new THREE.Mesh(new THREE.PlaneGeometry(0.34, 0.13), new THREE.MeshBasicMaterial({ map: tex, toneMapped: false }));
     plateM.name = 'Counter_Port'; plateM.position.set(-0.05, 1.56, -0.135); port.add(plateM);
     port.userData = { hinge, lamp: lampP, cv, tex, mouth: new THREE.Vector3(0, 1.06, 0.02), key: '', flashUntil: 0, flash: '', lastN: 0 };
-    scene.add(port);
+    // Not added to the scene here: it stands in the hall, in room coordinates (client/astronaut.js adds it there).
   }
   function drawPort(banked, wanted) {
     const u = port.userData, key = banked + '/' + wanted;
@@ -1138,11 +1145,16 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
     'dusty-pale': new THREE.MeshStandardMaterial({ map: sampleTex(S.dusty, S.anorDust, 'grain'), roughness: 0.95, metalness: 0 }),
   };
   const SAMPLE_MAX = 16;
-  const sampleIM = {};
+  const sampleIM = {}, carriedIM = {};
+  const carried = new THREE.Group(); carried.name = 'Samples_Carried'; scene.add(carried);
   for (const look of LOOKS) {
     const im = new THREE.InstancedMesh(sampleGeo[look], sampleMat[look], SAMPLE_MAX);
     im.name = 'Samples_' + look; im.count = 0; im.castShadow = true; im.receiveShadow = true; im.frustumCulled = false;
     scene.add(im); sampleIM[look] = im;
+    // The same rock in a hand, falling, or lying on the hall floor: drawn wherever you are, inside or out.
+    const held = new THREE.InstancedMesh(sampleGeo[look], sampleMat[look], SAMPLE_MAX);
+    held.name = 'Samples_Carried_' + look; held.count = 0; held.castShadow = true; held.receiveShadow = true; held.frustumCulled = false;
+    carried.add(held); carriedIM[look] = held;
   }
   // The orange soil sits on a stained patch of ground.
   const stainTex = canvasTexture(THREE, 128, 128, (d, w, h, g) => {
@@ -1157,20 +1169,27 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
   const hashId = id => { let h = 7; for (const c of id) h = (h * 31 + c.charCodeAt(0)) % 9973; return h / 9973; };
   const sampleSize = id => 0.17 + hashId(id) * 0.12;
   const sPos = new THREE.Vector3(), sQ = new THREE.Quaternion(), sE = new THREE.Euler(), sS = new THREE.Vector3(), sM = new THREE.Matrix4(), nrm = new THREE.Vector3(), UPV = new THREE.Vector3(0, 1, 0);
-  let sampleOverride = null; // (id) => a world position for a sample in a hand or falling, or null to hide it
+  let sampleOverride = null; // (id) => a world position for a sample in a hand, falling or indoors; null: the server's word
   let lastSamples = [], nowT = 0;
   function drawSamples(list) {
     lastSamples = list || [];
     for (const id of coreDrill.userData.coreAt.keys()) if (!lastSamples.some(s => s.id === id && s.at === 'drill')) coreDrill.userData.coreAt.delete(id);
-    const counts = {}; for (const l of LOOKS) counts[l] = 0;
+    const counts = {}, held = {}; for (const l of LOOKS) counts[l] = held[l] = 0;
     let stainN = 0;
     for (const s of lastSamples) {
+      const o = sampleOverride ? sampleOverride(s.id) : null;
+      if (o) { // in a hand, falling, or on the hall floor: the batch that is drawn in both places
+        const im = carriedIM[s.look]; if (!im || held[s.look] >= SAMPLE_MAX) continue;
+        const h = hashId(s.id + 'r');
+        sE.set(h * 0.6, h * 6.28, (h - 0.5) * 0.5);
+        im.setMatrixAt(held[s.look]++, sM.compose(sPos.copy(o), sQ.setFromEuler(sE), sS.setScalar(sampleSize(s.id))));
+        continue;
+      }
+      if (s.inside) continue; // indoors, and nobody said where: not drawn on the Moon
       const im = sampleIM[s.look]; if (!im || counts[s.look] >= SAMPLE_MAX) continue;
       const size = sampleSize(s.id), h = hashId(s.id + 'r');
       let place = null;
-      const o = sampleOverride ? sampleOverride(s.id) : null;
-      if (o) place = sPos.copy(o);
-      else if (s.at === 'ground') place = sPos.set(s.x, height(s.x, s.z) + size * 0.3, s.z);
+      if (s.at === 'ground') place = sPos.set(s.x, height(s.x, s.z) + size * 0.3, s.z);
       else if (s.at === 'tray' && rover.userData.cups[s.slot]) { rover.userData.cups[s.slot].getWorldPosition(sPos); sPos.y += 0.09; place = sPos; }
       else if (s.at === 'drill') {
         // The core comes up the barrel onto the tray, in under a second.
@@ -1182,46 +1201,19 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
       }
       if (!place) continue;
       sE.set(h * 0.6, h * 6.28, (h - 0.5) * 0.5);
-      sM.compose(place, sQ.setFromEuler(sE), sS.setScalar((s.at === 'tray' || s.at === 'drill') && !o ? Math.min(size, 0.13) : size));
+      sM.compose(place, sQ.setFromEuler(sE), sS.setScalar(s.at === 'tray' || s.at === 'drill' ? Math.min(size, 0.13) : size));
       im.setMatrixAt(counts[s.look]++, sM);
-      if (s.look === 'ochre-beads' && s.at === 'ground' && !o) {
+      if (s.look === 'ochre-beads' && s.at === 'ground') {
         normalAt(s.x, s.z, nrm); sQ.setFromUnitVectors(UPV, nrm);
         sM.compose(sPos.set(s.x, height(s.x, s.z) + 0.01, s.z), sQ, sS.setScalar(1 + h));
         stains.setMatrixAt(stainN++, sM);
       }
     }
-    for (const l of LOOKS) { sampleIM[l].count = counts[l]; sampleIM[l].instanceMatrix.needsUpdate = true; }
-    stains.count = stainN; stains.instanceMatrix.needsUpdate = true;
-  }
-
-  // ---------- a lander on the horizon, with its flag ----------
-  {
-    const L = new THREE.Group(); L.position.set(-30, height(-30, -34) - 0.1, -34); L.rotation.y = 0.6;
-    mesh(new THREE.CylinderGeometry(2.3, 2.3, 1.7, 8), gold, 0, 1.9, 0, L);
-    mesh(new THREE.CylinderGeometry(2.0, 2.0, 0.3, 8), dark, 0, 2.9, 0, L);
-    mesh(new THREE.BoxGeometry(2.6, 2.1, 2.4), silverFoil, 0, 4.0, 0, L);
-    mesh(new THREE.CylinderGeometry(0.9, 1.2, 1.2, 12), grey, 0, 0.6, 0, L); // engine bell
-    for (const [x, z] of [[-0.6, 1.21], [0.6, 1.21]]) mesh(new THREE.BoxGeometry(0.4, 0.3, 0.02), dark, x, 4.3, z, L);
-    for (let i = 0; i < 4; i++) {
-      const a = (i / 4) * Math.PI * 2 + Math.PI / 4, fx = Math.cos(a) * 4.2, fz = Math.sin(a) * 4.2;
-      tube(gold, [Math.cos(a) * 2.1, 1.3, Math.sin(a) * 2.1], [fx, 0.1, fz], 0.1, L);
-      tube(steel, [Math.cos(a) * 2.1, 2.4, Math.sin(a) * 2.1], [fx * 0.75, 0.6, fz * 0.75], 0.04, L);
-      mesh(new THREE.CylinderGeometry(0.7, 0.8, 0.15, 12), gold, fx, 0.08, fz, L);
+    for (const l of LOOKS) {
+      sampleIM[l].count = counts[l]; sampleIM[l].instanceMatrix.needsUpdate = true;
+      carriedIM[l].count = held[l]; carriedIM[l].visible = held[l] > 0; carriedIM[l].instanceMatrix.needsUpdate = true; // empty: no draw call
     }
-    for (let i = 0; i < 8; i++) tube(steel, [0.9, 0.3 + i * 0.4, 2.1 + i * 0.12], [1.5, 0.3 + i * 0.4, 2.1 + i * 0.12], 0.015, L); // ladder
-    scene.add(L);
-    // The Apollo LM model replaces the hand-built one when it loads: its foil warmed toward foil gold.
-    loadPeriod(THREE, 'apollo-lm', { merge: true, receive: shadows, rough: 0.5, metal: 0.6, sat: 0.7,
-      by: { 'blinn1SG.002': { color: PAL.hex.foilGold, rough: 0.35, metal: 0.9 }, 'blinn9SG.001': { color: PAL.hex.foilGold, rough: 0.4, metal: 0.85 } } }).then(m => {
-      L.clear(); L.add(m);
-    }).catch(e => console.warn('apollo-lm', e));
-    const F = new THREE.Group(); F.position.set(-24, height(-24, -28), -28);
-    tube(steel, [0, 0, 0], [0, 2.4, 0], 0.02, F);
-    tube(steel, [0, 2.38, 0], [1.1, 2.38, 0], 0.012, F);
-    const flagTex = canvasTexture(THREE, 128, 80, (d, w, h, g) => { g.fillStyle = '#ddd6c4'; g.fillRect(0, 0, w, h); g.fillStyle = '#2f4a7a'; g.fillRect(0, 0, w, 24); g.fillRect(0, 56, w, 24); g.fillStyle = '#d9662b'; g.beginPath(); g.arc(64, 40, 12, 0, 7); g.fill(); });
-    const flag = mesh(new THREE.PlaneGeometry(1.0, 0.65), new THREE.MeshStandardMaterial({ map: flagTex, side: THREE.DoubleSide, roughness: 0.9 }), 0.55, 2.05, 0, F);
-    flag.rotation.y = -Math.PI / 2; flag.rotation.y = 0;
-    scene.add(F);
+    stains.count = stainN; stains.instanceMatrix.needsUpdate = true;
   }
 
   // ---------- astronaut figure, shown in the rover camera: it walks, crouches and reaches (client/avatar.js) ----------
@@ -1230,23 +1222,9 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
   avatar.visible = false;
   scene.add(avatar);
 
-  // ---------- scenery from the NASA set: an old Viking lander, cargo at the fuel depot ----------
+  // The Scenery group stays (the astronaut page counts it as outdoors); nothing decorative is in it now.
   const props = new THREE.Group(); props.name = 'Scenery';
-  scene.add(props); // added now, so the astronaut page counts it as outdoors and hides it inside the habitat
-  const prop = (id, parent, x, z, ry, opts = {}) => loadPeriod(THREE, id, { cast: shadows, receive: shadows, ...opts }).then(m => {
-    m.position.set(x, parent === props ? height(x, z) - 0.05 : 0, z); m.rotation.y = ry; parent.add(m); return m;
-  }).catch(e => console.warn(id, e));
-  prop('viking-lander', props, 16, -15, 2.3, { merge: true, cast: false, by: { blinn4SG: { color: PAL.hex.enamel }, blinn11SG: { color: PAL.hex.enamel } } });
-  prop('spectrograph-crate', depot, 2.5, -0.5, 0.25);
-  // Further out, landmarks to steer by: a crashed probe half sunk in a crater, and cargo dropped from a lander.
-  for (const l of LANDMARKS) if (l.model) {
-    prop(l.model, props, l.x, l.z, l.x * 0.13, { merge: true, cast: false, rough: 0.8, sat: 0.3 }).then(m => {
-      if (!m) return;
-      if (l.model === 'ladee-probe') { m.rotation.z = 0.42; m.position.y -= 0.7; } // nose down where it hit
-      else m.rotation.x = 0.08;
-    });
-  }
-  prop('support-cradle', depot, -2.6, -1.0, -0.2, { by: { spstob_fss_1: { rough: 0.7 } } });
+  scene.add(props);
 
   return {
     rover, rovers, avatar, figure, sun, height, hab, port, follow, normalAt, ground: groundAt, // ground(x, z): the height of the ground as drawn
@@ -1254,7 +1232,7 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
     doors,
     fixtures: { dustCells, dust, crack, crackPts, wheel: rover.userData.wheel, hub: rover.userData.hub,
       wheels: Object.fromEntries(Object.entries(rovers).map(([id, r]) => [id, { wheel: r.userData.wheel, hub: r.userData.hub }])),
-      rail: rover.userData.rail, plate: rover.userData.plate, cups: rover.userData.cups, portMouth: port.userData.mouth,
+      rail: rover.userData.rail, grip: rover.userData.grip, plate: rover.userData.plate, cups: rover.userData.cups, portMouth: port.userData.mouth,
       drill: coreDrill, rack: rover.userData.rack },
     // Where the drill is drawn while the astronaut has it: () => { pos, ry } | { rack: true } | null.
     set drillOverride(fn) { drillOverride = fn; },
@@ -1263,6 +1241,8 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
     puff(p, n = 10, speed = 0.6) { for (let i = 0; i < n; i++) { const a = Math.random() * 6.28; kick(p.x, p.y + 0.05, p.z, Math.cos(a) * speed * Math.random(), 0.3 + Math.random() * speed, Math.sin(a) * speed * Math.random()); } },
     // Where a sample in a hand (or falling) is drawn: (id) => world position, or null to leave it to the server's word.
     set sampleOverride(fn) { sampleOverride = fn; },
+    // The group that draws those: not part of the surface, so it is not hidden indoors.
+    carriedSamples: carried,
     redrawSamples() { drawSamples(lastSamples); },
     drawSamples,
     // Call every frame.
