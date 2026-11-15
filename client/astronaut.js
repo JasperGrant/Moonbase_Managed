@@ -538,10 +538,13 @@ function followArm() {
 // not end the game, and after it goes it only works again once the finger has come off it.
 // In the debrief its lamp blinks amber, once a second, to say "press me".
 const EXIT = { reach: 0.028, hold: 0.6 };
-let exitHeld = 0, exitTouched = false, exitGone = false;
+let exitHeld = 0, exitTouched = false, exitGone = false, exitClock = 0;
+// The hold is timed in real seconds, like the airlock and the arm: 0.6 s is 0.6 s on a slow machine too.
+const exitStep = now => { const d = exitClock ? Math.min(0.25, now - exitClock) : 0; exitClock = now; return d; };
 const exitPos = new THREE.Vector3(), tipPos = new THREE.Vector3();
 const exitInvite = now => !!debrief && Math.floor(now * 2) % 2 === 0;
-function exitButton(dt, now, session) {
+function exitButton(_dt, now, session) {
+  const dt = exitStep(now);
   let near = false, hand = -1;
   if (arm.group.visible) {
     exitPos.copy(arm.EXIT_TOP).applyMatrix4(arm.group.matrixWorld);
@@ -569,7 +572,8 @@ function exitButton(dt, now, session) {
   }
 }
 // On a laptop, hold X for the same moment.
-function deskExit(dt, now) {
+function deskExit(_dt, now) {
+  const dt = exitStep(now);
   const down = !!keys.x;
   if (exitGone) { if (!down) exitGone = false; }
   else exitHeld = down ? exitHeld + dt : 0;

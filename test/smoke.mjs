@@ -143,12 +143,14 @@ function installHelpers() {
     const p = mesh.getWorldPosition(new T.Vector3());
     const here = new T.Vector3(mb.rig.position.x, 1.65, mb.rig.position.z);
     if (clear(here, p, mesh)) { look(here, p); return true; }
-    for (const dist of [1.8, 1.3, 2.4, 2.9]) for (let k = 0; k < 16; k++) {
+    let fallback = null; // the first spot that looked clear before the game had its say
+    for (const dist of [1.8, 1.3, 2.4, 0.9, 2.9]) for (let k = 0; k < 16; k++) {
       const a = k * Math.PI / 8, eye = new T.Vector3(p.x + Math.cos(a) * dist, 1.65, p.z + Math.sin(a) * dist);
       // Somewhere a head can be: outside the dome, or indoors on the floor of the hall, with nothing in the way.
       const l = mb.interior.toLocal(eye.x, eye.z);
       if (mb.where() === 'in' ? !mb.interior.walkable(l.x, l.z) : Math.hypot(eye.x, eye.z) < 3.0) continue;
       if (!clear(eye, p, mesh)) continue;
+      fallback ??= eye;
       mb.rig.position.set(eye.x, 0, eye.z);
       look(eye, p);
       mb.sendPose(); // the page reports where it is ten times a second; frames are slow here, so do not wait for one
@@ -161,6 +163,8 @@ function installHelpers() {
       look(head, p);
       return true;
     }
+    // Nowhere stayed clear after the nudge (a cramped corridor): stand at the first clear spot and trust it.
+    if (fallback) { mb.rig.position.set(fallback.x, 0, fallback.z); look(fallback, p); mb.sendPose(); await sleep(150); return true; }
     return false;
   }
   // Click every enabled target that `pick` accepts, until none are left or time runs out.
