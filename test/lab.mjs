@@ -89,6 +89,15 @@ try {
         return 'ok';
       },
       view: exp => mb.state().lab[exp], board: () => mb.state().lab.board,
+      // For the pictures: step back a little and look down at the instrument, its display and its keys.
+      frame(exp) {
+        const [x, z, yaw] = LAB[exp], back = Math.sign(x) * 0.35, root = mb.lab.group.getObjectByName('Root_' + exp);
+        mb.standAt('in', x - back, z, yaw); mb.sendPose();
+        const p = root.getWorldPosition(new T.Vector3()); p.y += exp === 'E1' || exp === 'E3' ? 0.3 : 1.0; // the bench instruments' roots are on the bench top already
+        mb.rig.updateMatrixWorld(true);
+        const eye = mb.camera.getWorldPosition(new T.Vector3()), d = p.clone().sub(eye);
+        mb.camera.rotation.x = Math.atan2(d.y, Math.hypot(d.x, d.z)); mb.camera.updateMatrixWorld(true);
+      },
     };
   });
   const key = async (exp, op, n = 0, times = 1) => { for (let i = 0; i < times; i++) { const r = await astro.evaluate(([e, o, k]) => window.lab.key(e, o, k), [exp, op, n]); if (r !== 'ok') { problems.push(`astronaut: ${exp} ${r}`); return false; } await astro.waitForTimeout(60); } return true; };
@@ -107,6 +116,7 @@ try {
   await key('E1', 'focus', 1, 18); await key('E1', 'pol');
   for (let g = 0; g < 3; g++) { await key('E1', 'stage', 1, 12); if (g < 2) await key('E1', 'next'); }
   await astro.waitForTimeout(500);
+  await astro.evaluate(() => window.lab.frame('E1')); await astro.waitForTimeout(1200);
   await snap('astronaut-e1-microscope');
   await shot(sci, 'scientist-lab-e1');
   for (let g = 0; g < 3; g++) await call('E1', { grain: g, mineral: 'plag' });
@@ -119,10 +129,17 @@ try {
   await key('E2', 'pump');
   await until('E2: the vacuum never came good', async () => (await view('E2')).vac >= 0.9, 20000);
   await key('E2', 'beam');
+  // The beam must be on to latch. If the filament burned (beam on before the vacuum was good), wait it out and try again.
+  await until('E2: the beam never came on: ' + JSON.stringify(await view('E2')), async () => {
+    const v = await view('E2'); if (v.beam) return true;
+    if (!v.burnt && v.vac >= 0.9) await key('E2', 'beam');
+    return false;
+  }, 60000);
   for (const m of [39, 40]) { const v = await view('E2'); await key('E2', 'mass', 1, Math.round((m - v.mass) / 0.05)); await astro.waitForTimeout(300); await key('E2', 'latch'); }
   await astro.waitForTimeout(500);
   const e2 = await sci.evaluate(() => window.moonbase.state().lab.E2);
-  check(e2.latched.length === 2, 'E2: two peaks should be latched: ' + JSON.stringify(e2.latched));
+  check(e2.latched.length === 2, 'E2: two peaks should be latched: ' + JSON.stringify(e2));
+  await astro.evaluate(() => window.lab.frame('E2')); await astro.waitForTimeout(1200);
   await snap('astronaut-e2-mass-spec');
   await shot(sci, 'scientist-lab-e2');
   const age = e2.latched.length === 2 ? Math.log(1 + (e2.latched[1].counts / e2.latched[0].counts) / 10) / 0.554 : 3.5;
@@ -138,8 +155,14 @@ try {
     const v = await view('E3');
     await key('E3', 'set', target > v.set ? 1 : 0, Math.round(Math.abs(target - v.set) / 25));
     const want = [450, 750, 1050].indexOf(target) + 1;
-    await until(`E3: step ${want} was not held`, async () => (await view('E3')).step >= want, 60000);
+    // Hold it as a player does: the furnace drifts, so watch the needle and nudge the dial back toward the middle.
+    await until(`E3: step ${want} was not held`, async () => {
+      const e = await view('E3'); if (e.step >= want) return true;
+      if (e.temp < target - 25) await key('E3', 'set', 1); else if (e.temp > target + 25) await key('E3', 'set', 0);
+      return false;
+    }, 90000);
   }
+  await astro.evaluate(() => window.lab.frame('E3')); await astro.waitForTimeout(1200);
   await snap('astronaut-e3-furnace');
   await shot(sci, 'scientist-lab-e3');
   await call('E3', 'med');
@@ -158,6 +181,7 @@ try {
   await until('E4: the second weighing did not register', async () => (await view('E4')).w2 !== null, 5000);
   await key('E4', 'reader');
   await until('E4: the reader did not read', async () => (await view('E4')).reader !== null, 5000);
+  await astro.evaluate(() => window.lab.frame('E4')); await astro.waitForTimeout(1200);
   await snap('astronaut-e4-cold-box');
   await shot(sci, 'scientist-lab-e4');
   await shot(ops, 'ops-lab-board');

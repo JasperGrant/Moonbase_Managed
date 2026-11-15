@@ -190,7 +190,8 @@ export function buildLab(THREE, { interior, sfx = () => {}, send = () => {} }) {
       const usable = op === 'load' ? ready : on;
       g.fillStyle = PAL.bakelite; g.beginPath(); g.roundRect(x - kw * 0.42, 14, kw * 0.84, s.H - 26, 6); g.fill();
       g.fillStyle = pressed ? PAL.dial : usable ? PAL.keycap : '#33322d'; g.beginPath(); g.roundRect(x - kw * 0.4, 12 + (pressed ? 3 : 0), kw * 0.8, s.H - 30, 6); g.fill();
-      g.font = `${word.length > 7 ? 11 : 13}px ${FONT.label}`; g.textAlign = 'center'; g.textBaseline = 'middle';
+      let fs = 13; g.font = `${fs}px ${FONT.label}`; while (g.measureText(word).width > kw * 0.74 && fs > 8) g.font = `${--fs}px ${FONT.label}`; // fit the key
+      g.textAlign = 'center'; g.textBaseline = 'middle';
       g.fillStyle = pressed ? PAL.inkDial : usable ? PAL.ink : PAL.inkDim; g.fillText(word, x, s.H / 2 + (pressed ? 2 : 0));
       if (lit) jewel(g, x, 10, 5, 'amber', !!(v && lit(v)));
       if (op === 'load') jewel(g, x, 10, 5, 'amber', ready && blinkOn());
