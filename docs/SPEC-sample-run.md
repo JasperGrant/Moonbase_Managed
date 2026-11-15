@@ -4,6 +4,10 @@ Status: written, not started. Audited against `main` at `60bbbc1` (the physical 
 
 Read [CLAUDE.md](../CLAUDE.md), [DESIGN.md](DESIGN.md), [ASSETS.md](ASSETS.md) and [SPEC-v2.md](SPEC-v2.md) first. This spec changes rules, so where it disagrees with SPEC-v2, this one wins; "What changes in the v2 rules" below lists every place.
 
+## How this pass is checked
+
+Do not write, update or run tests, screenshot runs or frame-time measurements in this pass: no `npm test`, `npm run smoke`, `npm run vr`, `npm run assets` or the `:shots` variants, and leave `test/` alone even where it stops matching the new rules. The bar for each phase is that it runs: `npm start` boots, and the pages load and play without errors in the browser console. The crew playtests it. This replaces the "look before you say done" loop in CLAUDE.md section 4 for this pass.
+
 ## Goal
 
 Make the game more fun and more interactive by giving the crew something to go and get. Today the mission is "survive the shift": things break, the astronaut fixes them, and everything is within 22 m of the door. After this pass:
@@ -14,6 +18,8 @@ Make the game more fun and more interactive by giving the crew something to go a
 4. **The Scientist has the survey chart:** a coarse heat map of where samples might be, which sharpens into a real top-down chart wherever a rover has driven. Samples, landmarks and faults show on it in explored ground only.
 5. **Every fault has its own symbol** on that chart.
 6. **Only the Scientist knows what a wanted sample looks like.** The Technician sees rocks through a camera and the astronaut sees rocks through a visor; neither is told which ones matter.
+7. **One thing goes wrong at a time.** Faults stay, but never two at once, so the crew always knows what the next job is and never has to pick between two urgent ones.
+8. **Comms always work.** No blackout cuts the radio or the consoles.
 
 ## The loop
 
@@ -32,7 +38,7 @@ This is the minute-to-minute game, and the reason each seat has to talk.
 | 9 | Technician | Drives home | |
 | 10 | Astronaut | Feeds the sample into the port on the habitat. The Scientist's assay lamp says FOUND or DUD | |
 
-While that is going on, panels get dusty, the hull cracks, a wheel breaks 90 m from home, and a meteor shower arrives with the astronaut in the open. The team has to decide what to drop.
+Every so often one thing breaks: the panels get dusty, the hull cracks, a wheel breaks 90 m from home. It is the only thing broken, so it is the job: the crew stops the sample run, fixes it, and picks the run back up. A meteor shower is the same: it comes alone, with a warning, and the only question is where to take cover.
 
 ## What is there now (the audit)
 
@@ -50,24 +56,27 @@ While that is going on, panels get dusty, the hull cracks, a wheel breaks 90 m f
 | Mission Ops | `console.js` 66-68, 272-288 | The talk key and the TOOL LOG. |
 | The mission | `config.js` 5-14, 139-151, `game.js` 155-157 | 3:00. Oxygen drains at 0.28 a second (a full tank lasts 357 s with no leak) and never refills. Win by being alive at 0:00. Score is 100 a fix plus an oxygen bonus. |
 | Fault symbols | `client/shared/icons.js` | There are none. The file draws the five tools and the four socket shapes. |
+| The director | `config.js` 41-44 and 139-151, `game.js` 96-123 | Several faults can be active at once (free play allows 3, and the demo script lays dust, a wheel, a hull breach and a board fault inside two minutes). A meteor shower can arrive on top of them and leaves dust, a crack and a tripped board behind it. |
+| Blackout | `game.js` 135-146, `hub.js` 138, 156-157, 222, `console.js` 104-136 and 420-429 | An empty battery cuts the radio both ways, drops every command from Earth, and turns every console to static. |
 
-Three things the audit turned up that the plan has to deal with:
+Two things the audit turned up that the plan has to deal with:
 
 - **The ground is only fit to stand on inside the pad.** Measured from the code: the terrain mesh has a vertex every 2.2 m at 22 m out but only every 5.2 m at 120 m, while `height()` puts 3 m craters there. So past the pad the drawn ground and the computed ground disagree by up to half a metre, and anything placed with `height()` would float or sink. The real relief inside 120 m is 8 m (7.0 m down, 1.1 m up) with slopes up to about 10 degrees, so "everything is at y = 0" stops working the moment the bounds grow. Phase 0 fixes this first.
-- **A rover with a key held keeps driving through a blackout.** The hub drops every command from Earth while the base is dark (`hub.js` 222), including the key release, so the last throttle stays set. In a 22 m circle that is harmless. In a 120 m field with the astronaut aboard it is a runaway. Phase 0 stops both rovers when the power goes.
 - **A hand-tracked astronaut can out-run the rover.** Teleport hops are 8 m with no pause (`astronaut.js` 339). Phase 1 gives the hop a short recharge.
 
 ## Ground rules
 
 1. **The server still decides, and still hides.** Samples, the survey grid and the rovers live in `server/game.js`. `view(role)` stays the place where the missing-information game lives: the Technician and the astronaut are never sent which rock is a real sample, and the Scientist is never sent a sample that is in unexplored ground.
-2. **The Quest is the budget.** The bigger field must not cost draw calls or triangles the headset does not have. Every phase prints the frame time, draw calls and triangle count in `npm run vr`, before and after.
-3. **Nothing floats.** Astronaut, rovers, samples, boulders and scenery all sit on the same `world.height(x, z)`, and that function agrees with the drawn mesh to within 5 cm everywhere in the field. There is a test for it.
+2. **The Quest is the budget.** The bigger field must not cost draw calls or triangles the headset does not have. Build it the cheap way: instanced meshes, merged statics, fewer ground triangles than today.
+3. **Nothing floats.** Astronaut, rovers, samples, boulders and scenery all sit on the same `world.height(x, z)`, and that function agrees with the drawn mesh to within 5 cm everywhere in the field, by construction (see phase 0).
 4. **Mission Control reads pictures.** The chart, the field guide and the sample log are instruments in the DESIGN.md look: a phosphor scope, cream cards, jewel lamps, Nixie counters, engraved one-word labels. No rainbow heat map, no web dashboard.
 5. **The astronaut gets no map and no markers.** No highlight on a real sample, no waypoint, nothing on the visor. They find the rock by being told what it looks like.
-6. **No dead ends** (SPEC-v2 rule 4 stands). A sample in unexplored ground can still be picked up by an astronaut who finds it by eye. The field can be crossed on foot. A blackout strands nobody for good.
-7. **Every new action has juice:** a positioned sound from `client/ambience.js` or one beside it, a visual response, and a haptic tick on the hand involved.
+6. **No dead ends** (SPEC-v2 rule 4 stands). A sample in unexplored ground can still be picked up by an astronaut who finds it by eye. The field can be crossed on foot. Comms never fail.
+7. **Every new action gives feedback.** (CLAUDE.md calls this "juice"; it just means the game answers what the player does.) Three answers: a sound that comes from the place it happened (`client/ambience.js`, or a new one beside it), something you can see (a puff of dust, a lamp lighting, a needle kicking), and a short buzz in the hand that did it. Picking up a rock, for example: a scrape, a puff of dust, a tick in your fingers.
 8. **The lobby keeps its look.** Briefing copy changes; `client/lobby.js`, `client/lobby/*.svg` and the lobby section of `style.css` do not. (The Technician's lobby scene already shows the VIPER rover, which is what the Scout is modelled on.)
 9. **The base stays where it is.** The habitat, solar panels, dish, depot and drill do not move in this pass. The field is new ground around them.
+10. **One thing at a time.** At most one fault is active at any moment. A new fault or a meteor shower starts only when nothing is broken and no shower is under way, and after each fix there is a short gap before the next. A shower breaks nothing on its own; if it catches the astronaut in the open it starts a suit leak, and that leak is then the one fault.
+11. **Comms always work.** The radio and every console work at all times, including when the battery is flat.
 
 ## What changes in the v2 rules
 
@@ -77,10 +86,13 @@ Three things the audit turned up that the plan has to deal with:
 | Oxygen only goes down | It refills while the astronaut is inside the base. Home is safe, the rocks are not at home. |
 | Rule 5: Scientist knows *what*, Technician knows *where and when*, Ops knows the kit | **Scientist: the chart and the field guide** (what is wrong, where things are, what a sample looks like). **Technician: the eyes and the wheels** (two cameras, two rovers, and still *when*: the meteor warning). **Ops: the voice, the kit and the tally.** **Astronaut: the hands.** |
 | The Technician has the radar map | The map becomes the Scientist's survey chart. The Technician navigates by camera, a compass tape and a homing needle. |
-| The Scientist works out which fault from the gauges, and the LEAK lamp "does not say where" | Each active fault is a named symbol on the chart at its place. The gauges stay as the measure of how bad it is and how the fix is going. See decision 7. |
-| A broken wheel turns the map to static | A broken wheel stops that rover. On the Hauler it also kills the meteor warning (the radar dish is on the Hauler). The chart keeps what it has. |
+| The Scientist works out which fault from the gauges, and the LEAK lamp "does not say where" | The one active fault is a named symbol on the chart at its place. The gauges stay as the measure of how bad it is and how the fix is going. See decision 7. |
+| A broken wheel turns the map to static | A broken wheel stops that rover. The chart keeps what it has. The meteor warning is not affected. |
 | One rover | Two. Meteor cover is "inside, or crouched beside (or on) the Hauler". The Scout is too small to hide behind. |
 | A round is 3:00 | 6:00. See decision 9. |
+| Several faults can be active at once, and a shower leaves damage behind it | One fault at a time (ground rule 10). The shower leaves nothing broken behind it. |
+| A blackout cuts the radio both ways and turns every console to static | Comms never fail (ground rule 11). A flat battery still darkens the base and stops oxygen refilling at home; see decision 11. |
+| Cascades: no radar, then no meteor warning, then caught in the open | Gone: the warning always works. What is left: a power fault empties the battery, and a leak drains oxygen three times faster. |
 
 ## The numbers
 
@@ -100,6 +112,7 @@ All in `client/shared/config.js`, all expected to be tuned by playing.
 | `FIELD.cell` / `FIELD.block` | 5 m / 30 m | The explored grid is 48 × 48 cells; the heat map is 8 × 8 blocks. |
 | `CFG.survey.known` | 30 m | Ground round the base that starts explored. |
 | `CFG.sample` | manifest 4, tray 4 cups, 250 points on the manifest, 100 for any other real sample, 0 for a dud, draw radius 45 m | |
+| `CFG.freeMaxFaults` / `CFG.faultGapSeconds` | 1 / 20 s | One fault at a time, and a breather this long after each fix before the next thing goes wrong |
 
 Travel, for a sense of scale: the edge of the field to the door is 50 s on foot, 27 s on the Hauler, 20 s for the Scout. With a suit leak (three times the drain) a full tank lasts 95 s.
 
@@ -113,25 +126,24 @@ Travel, for a sense of scale: the edge of the field to the door is 50 s on foot,
 | Where samples might be | | | The heat map, everywhere | |
 | Where samples are | What they can see | What a camera can see | On the chart, in explored ground | |
 | What a wanted sample looks like | **Not told** | **Not told** | The field guide | |
-| What is broken | Warning triangles on the cuff (not which) | WHEEL lamps | A symbol for each fault on the chart, plus POWER and AIR | |
+| What is broken | Warning triangle on the cuff (not which) | WHEEL lamps | The one fault's symbol on the chart, plus POWER and AIR | |
 | What is carried and banked | Hands, the tray, a tally on the cuff | | The assay lamp: FOUND or DUD | The TOOL LOG and the SAMPLE LOG |
-| Meteor warning | | A lamp and a countdown (Hauler's radar) | | |
+| Meteor warning | | A lamp and a countdown | | |
 | The radio | Talks to Ops | | | The only voice |
 
-In a 2-player game the Mission Operator (the `all` seat) has every Earth-side column at once. That seat must fit the chart and both cameras on one screen without scrolling at 1366 × 768; check it in `npm run smoke:shots`.
+In a 2-player game the Mission Operator (the `all` seat) has every Earth-side column at once. That seat must fit the chart and both cameras on one screen without scrolling at 1366 × 768.
 
 ---
 
 ## Phases
 
-Each phase is a mergeable PR that leaves the game playable. Order: 0, 1, 2, 3, 4, 5. Phase 1 needs 0. Phases 2 and 3 need 0. Phase 4 needs 2 and 3. The first build that shows the whole idea is the end of phase 4.
+Each phase is a mergeable PR that leaves the game playable. Order: 0, 1, 2, 3, 4. Phase 1 needs 0. Phases 2 and 3 need 0. Phase 4 needs 2 and 3. The first build that shows the whole idea is the end of phase 4.
 
-0. **A bigger Moon:** the field, ground that everything stands on, a longer mission, oxygen that refills at home.
+0. **A bigger Moon:** the field, ground that everything stands on, a longer mission, oxygen that refills at home, one fault at a time, and comms that never fail.
 1. **Ride the Hauler.**
 2. **Two rovers and the Technician's console.**
 3. **The survey chart, and fault symbols.**
 4. **Samples:** find, carry, bank, score.
-5. **The demo script, tuning, polish, docs.**
 
 ---
 
@@ -166,21 +178,23 @@ Pure data and functions, no three.js, imported by the server, `world.js` and `co
 
 | File | Change |
 | --- | --- |
-| `client/shared/config.js` | `bounds: 120`, `pad: 22`, `roundSeconds: 360`, `o2DrainPerSec: 0.35`, `o2RefillPerSec: 3`, `teleportRecharge`, `rover.rampSeconds`. |
+| `client/shared/config.js` | `bounds: 120`, `pad: 22`, `roundSeconds: 360`, `o2DrainPerSec: 0.35`, `o2RefillPerSec: 3`, `teleportRecharge`, `rover.rampSeconds`, `freeMaxFaults: 1`, `faultGapSeconds`. |
 | `server/game.js` 125-133 | Throttle eases over `rampSeconds`. Boulders and landmarks push the rover out (circle against circle, from `field.js`). |
-| `server/game.js` 155 | Oxygen: `+o2RefillPerSec` while `astro.inside`, capped at `o2Max`, less the drain. |
-| `server/game.js` 139-142 | When the blackout starts, set `throttle` and `steer` to 0. No carrier, the rover stops. |
+| `server/game.js` 155 | Oxygen: `+o2RefillPerSec` while `astro.inside` and the base has power, capped at `o2Max`, less the drain. |
+| `server/game.js` 96-123 (the director), `client/shared/config.js` | One fault at a time. A new fault or a shower fires only when `faults` is empty and no shower is under way, then waits `faultGapSeconds` after the fix. A scripted event that comes due while something is broken waits for the fix. A shower's `after` list goes: it leaves no dust, crack or board behind. `SCRIPTS.demo` becomes a plain order (dust, wheel, shower, hull, suit, board) with the gap between each, instead of clock times, so judges see the same things in the same order. |
+| `server/game.js` 66-68 and 135-146, `server/hub.js` 138, 156-157 and 222, `client/console.js` 104-136 and 420-429, `client/arm.js`, `client/astronaut.js` | Comms never fail. `powered` no longer gates the radio, the commands from Earth, the consoles or the cuff: `hub.silent()` goes, the static screen and dead-battery icon go, and the cuff's barred microphone goes. A flat battery still darkens the base (the lighting sequence in `interior.js` is unchanged) and stops oxygen refilling at home; the backup generator gives both back for `generatorSeconds`. |
 | `client/shared/rules.js` `areaName` | Loose tools outside are named by the nearest landmark from `LANDMARKS`. |
 
 ### The radar, for now
 
 `drawMap` (`console.js` 297-372) gets a three-position **RANGE** switch: 30, 60, 120 m, drawn as a rotary selector with an engraved plate, clicked to step. At 120 m the whole field is 1.9 pixels a metre, which is enough for blips and too small for the base, so the switch is needed anyway. Boulders and landmarks are drawn on it. This is not throwaway work: phase 3 moves this scope, switch and all, to the Scientist.
 
-### Checks
+### It runs when
 
-- `npm test`: the rover stops at a boulder; both stop in a blackout; oxygen climbs inside and never passes `o2Max`; a mission at the new length still plays to the end in the full-shift test.
-- `npm run vr`: at 200 random points in the field, a ray cast down onto the ground mesh lands within 5 cm of `world.height`. The astronaut walks from the door to (90, 0) and their feet stay on the ground. Print frame time, draw calls and triangles standing at the door and standing at (90, 0), before and after this phase.
-- `npm run vr:shots`: one shot from 80 m out looking back at the base. Check the shadow under the astronaut's own feet is there.
+- `npm start` boots, and the astronaut page and the console pages load and play without errors in the browser console.
+- The astronaut can walk from the door to the edge of the field and stand on the ground the whole way; both rovers drive over it and stop at a boulder.
+- Oxygen climbs while the astronaut is inside and the base has power, and never passes the tank size.
+- The radio and every console keep working when the battery is flat, and only one fault is ever active.
 
 ---
 
@@ -214,21 +228,22 @@ A passenger driven by someone else is the classic way to make a headset player i
 - The rail and the chassis fill the lower view and move with the player: a fixed frame to look at.
 - The rig turns with the Hauler by default. `CFG.ride.snapYaw: true` is the fallback: the rig holds its heading and catches up in 30 degree steps.
 
-Someone who gets motion sick has to try this on the Quest before the phase merges. If smooth turning is bad, ship the snap.
+The crew should try this on the Quest early. If smooth turning is bad, ship the snap.
 
-### Juice
+### Feedback: sound, sight and feel
 
 - On: a rail clank at the hand, a strong pulse in that hand, the RIDER lamp.
 - Riding: a motor hum and a regolith crunch that rise with speed (through the suit: low and dull), a faint steady buzz in a hand that is on the rail.
 - **Rooster tails:** each wheel throws a slow fan of dust (`Points`, as `damage.js` does its puffs) that hangs and falls at lunar gravity. Seen by the rider and by both rover cameras. Both rovers get it.
 - Off: boots hitting regolith, a small dust puff at the feet.
 
-### Server and checks
+### Server
 
 - `game.astro.riding` (`'hauler'` or null). While set, the server writes the astronaut's x and z from the Hauler each tick, so reach and cover checks use where they really are. Crouching on the footplate is cover (the distance is zero). `view('tech')` and `view('all')` gain `rider`.
-- `npm test`: cannot mount a moving Hauler, or from 10 m away; riding moves the astronaut; cannot dismount while moving; a blackout stops the Hauler so the rider can get off.
-- `npm run vr`: grab the rail, check the rig is on the footplate; drive the Hauler 20 m and check the head went with it and the horizon stayed level; stop, step off, check the feet are on the ground beside it.
-- `npm run vr:shots`: the view from the footplate, moving, with dust behind.
+
+### It runs when
+
+- The astronaut can grab the rail, ride while the Technician drives, and step off when the Hauler stops, with their feet on the ground beside it.
 
 ---
 
@@ -246,8 +261,8 @@ Small, quick, and plainly a robot: a prospecting rover in the VIPER mould, drawn
 
 - `this.rover` becomes `this.rovers = { scout, hauler }`, each `{ x, z, ry, v, throttle, steer }`, integrated with its own `ROVERS[id]` numbers. They push each other apart. Start places: `PLACES.rovers = { hauler: { x: 4, z: 9 }, scout: { x: -4, z: 8 } }`.
 - `{ t: 'rover', id, throttle, steer }` from `tech` or `all` (`hub.js` 223-227). An `id` that is not a rover is dropped.
-- The wheel fault carries `which`. The demo script names it; free play picks the Scout six times in ten. Still one wheel fault at a time. `scene.wheel` becomes `scene.wheels = { scout, hauler }` (0 fine, 1 broken, 2 pulled off). The fix needs the astronaut near *that* rover. One space tire fits either.
-- The radar dish is on the Hauler: no meteor warning while the Hauler's wheel is broken. `sheltered(pose, rovers.hauler)`.
+- The wheel fault carries `which`. The demo order names it; free play picks the Scout six times in ten. Still one wheel fault at a time. `scene.wheel` becomes `scene.wheels = { scout, hauler }` (0 fine, 1 broken, 2 pulled off). The fix needs the astronaut near *that* rover. One space tire fits either.
+- Cover from a shower is the Hauler: `sheltered(pose, rovers.hauler)`.
 - Views send `rovers` in place of `rover`.
 
 ### The Technician's console (`client/console.js` 69-72, 432-447, `client/rovercam.js`)
@@ -268,16 +283,15 @@ No tabs. Both cameras are up all the time, side by side, because driving two rov
 - **Two screens from one scene.** `rovercam.js` keeps one renderer and one copy of the world and draws it twice, once from each rover's camera, into the two halves of one canvas (viewport and scissor). Cap it at 30 frames a second and a pixel ratio of 1: the 2-player seat runs this beside everything else.
 - **On each screen**, in `phosphor`: a compass tape across the top (N, E, S, W and a tick every 15 degrees) and a centre reticle with clock marks, so "rock at two o'clock" means something.
 - **Under each screen:** a **HOME** dial (a cream face; the needle points to the base relative to the rover's nose) with the range in metres on a Nixie counter, and a red **WHEEL** jewel that blinks when that rover is stuck. The Hauler also has the **RIDER** lamp.
-- **Between them:** the **METEOR** lamp and its Nixie countdown, lit by the Hauler's radar.
-- **Keys:** W A S D drive the Scout, the arrows drive the Hauler, both at once. Engrave the keys on a plate under each screen. (Some laptop keyboards drop a key when four are held. Test the worst case, W + A + Up + Left, on the laptops that will be used.)
+- **Between them:** the **METEOR** lamp and its Nixie countdown, lit by the shower warning.
+- **Keys:** W A S D drive the Scout, the arrows drive the Hauler, both at once. Engrave the keys on a plate under each screen. (Some laptop keyboards drop a key when four are held. Worth trying the worst case, W + A + Up + Left, on the laptops that will be used.)
 - The radar scope stays on the Technician's panel, under the two cameras, until phase 3 moves it to the Scientist.
 - The brief (`console.js` 27): "You have the EYES and the WHEELS. Two rovers, two cameras. You have no map: the Scientist does."
 
-### Checks
+### It runs when
 
-- `npm test`: each rover answers only to its own `id`; they collide; a broken Scout wheel stops the Scout and leaves the Hauler and the meteor warning working; a broken Hauler wheel kills the warning; the tire fixes whichever is broken.
-- `npm run smoke`: the console page holds W and Up together and both rovers move.
-- `npm run smoke:shots`: the Technician's console with both cameras, and the Scout as the astronaut sees it. Check the Scout against DESIGN.md: palette, bevels, sitting on the ground.
+- Both rovers drive at the same time, W A S D for the Scout and the arrows for the Hauler, and both cameras draw.
+- A broken Scout wheel stops the Scout and leaves the Hauler driving; the space tire fixes whichever rover is broken.
 
 ---
 
@@ -287,10 +301,10 @@ This phase is the server's picture of the field and the Scientist's console. The
 
 ### The server (`server/game.js`)
 
-- **The layout.** `laySamples()`, called from `start()`: every sample and every lookalike, `{ id, kind, look, x, z }` (`kind` is a sample type or `'dud'`; see phase 4 for the types). The demo uses a fixed list in `PLACES.demoSamples`. Free play picks three to five hot spots between 40 and 110 m out and clusters samples round them, with lookalikes both in the clusters and alone, nothing within 30 m of the habitat, inside a boulder or on a landmark.
+- **The layout.** `laySamples()`, called from `start()`: every sample and every lookalike, `{ id, kind, look, x, z }` (`kind` is a sample type or `'dud'`; see phase 4 for the types). The demo uses a fixed list in `PLACES.demoSamples`, with the first wanted sample about 45 m north-east in the brightest block, so the first run is short. Free play picks three to five hot spots between 40 and 110 m out and clusters samples round them, with lookalikes both in the clusters and alone, nothing within 30 m of the habitat, inside a boulder or on a landmark.
 - **The heat map.** `field.heat`: one level, 0 to 3, for each 30 m block, worked out once at the start: the real samples in the block, plus 0.6 for each lookalike, plus a little noise, quantised. The orbital survey cannot tell a sample from a lookalike, so some hot blocks are empty. That is on purpose.
 - **Explored ground.** `field.seen`: one bit per 5 m cell. At the start, every cell within `CFG.survey.known` of the base. Each tick, every cell within `ROVERS[id].reveal` of each rover. The astronaut on foot reveals nothing: that is what the rovers are for. Seen is for ever.
-- **`view('sci')`** (and `all`) gains `survey`: `heat` (64 digits), `seen` (the bit grid as base64, about 400 characters), `pct` explored, `rovers` (always), `astro` (only while on a seen cell, or riding), `samples` (only those still on the ground in seen cells, with their true `kind`; lookalikes are never listed), `tools` lying outside in seen cells, and `faults`: one `{ type, x, z }` for each active fault whose place is seen.
+- **`view('sci')`** (and `all`) gains `survey`: `heat` (64 digits), `seen` (the bit grid as base64, about 400 characters), `pct` explored, `rovers` (always), `astro` (only while on a seen cell, or riding), `samples` (only those still on the ground in seen cells, with their true `kind`; lookalikes are never listed), `tools` lying outside in seen cells, and `fault`: the one active fault as `{ type, x, z }`, if its place is seen.
 - **Where a fault's symbol goes:** dust at the solar panels; the switchboard and the hull at the habitat (the hull symbol does not say which of the six cracks: finding it is still done by ear); the wheel on that rover; the suit leak on the astronaut. The base starts explored and a rover always sees its own ground, so in practice the rule hides one thing: an astronaut who has walked off the chart, and their suit leak with them. The LEAK lamp on AIR still lights.
 - `view('tech')` loses `radar` and the map data. It keeps `rovers`, `scene`, `rider` and the meteor warning.
 
@@ -302,9 +316,9 @@ The same round phosphor scope the radar was, with two rotary switches beside it:
 - **Explored ground** clears to dark glass and is drawn fine: crater rims as thin rings (from `CRATERS`, 6 m and up), boulders as small ticks, landmarks with their engraved names, and a soft glow on each 5 m cell that holds a sample. A cell with nothing in it is dark: known empty. A faint line marks the edge of what has been seen.
 - **Samples:** an amber glyph for each, a different shape for each type (see `drawSample` in phase 4), so the chart reads without colour.
 - **Rovers:** amber wedges, lettered S and H. **The astronaut:** the `lamp-blue` wedge. **Loose tools:** amber dots, as the radar had.
-- **Faults:** the fault's symbol in `lamp-red`, blinking at 1.5 Hz, at its place.
+- **The fault:** its symbol in `lamp-red`, blinking at 1.5 Hz, at its place.
 - A Nixie counter: **SURVEYED** and the percentage.
-- **Juice:** newly seen cells wipe in over about a third of a second, as if the tube were being written. When a new cell turns out to hold a sample, the glyph blooms and the console pings (`radio.sfx('ping')`, new).
+- **Feedback:** newly seen cells wipe in over about a third of a second, as if the tube were being written. When a new cell turns out to hold a sample, the glyph blooms and the console pings (`radio.sfx('ping')`, new).
 
 ### Fault symbols (`client/shared/icons.js`: `drawFault(g, type, x, y, size, colour)`)
 
@@ -321,10 +335,11 @@ One glyph per fault, drawn in the same hand as `drawTool`. Every fault's symbol 
 
 A legend strip under the chart shows the five glyphs with one-word plates: SOLAR, BOARD, WHEEL, HULL, SUIT. The results log uses the same glyphs beside each line.
 
-### Checks
+### It runs when
 
-- `npm test`: a rover driving through unseen ground marks it seen and it stays seen; the astronaut on foot marks nothing; `view('sci')` lists a sample only once its cell is seen and never lists a lookalike; a block full of lookalikes is hot; `view('tech')` and `view('astronaut')` contain no `survey`; a fault in a seen place is listed with its type; the suit-leak symbol is missing while the astronaut is on unseen ground.
-- `npm run smoke:shots`: the chart at the start (base explored, heat everywhere else), and again after the Scout has driven a lane through a hot block. Check it against DESIGN.md: one phosphor hue for heat, amber and oxide red for marks, nothing neon, nothing blown out, readable at 120 m range.
+- Driving a rover through unexplored ground develops the chart there, and the ground stays developed.
+- The Scientist's page lists a sample only in explored ground, and the Technician's and astronaut's pages carry no chart data at all.
+- The active fault's symbol shows at its place.
 
 ---
 
@@ -371,77 +386,44 @@ Four types, each a real thing Apollo or the polar missions went looking for, eac
 - **The astronaut's cuff** (`client/arm.js`): a rock icon with one pip per sample wanted, filled as they are banked. Icons only, as the rest of the cuff.
 - Briefs (`console.js` 25-29) rewritten for all three seats. Scientist: "You have the CHART and the FIELD GUIDE. Only you know what a sample looks like."
 
-### Juice
+### Feedback: sound, sight and feel
 
 - Pick up: a soft scrape, a dust puff where it lay, a tick in the hand.
 - Into a cup: a hollow clink.
 - Into the port: the lid's clunk, the lamp, the Nixie tubes rolling over, and on every console a rising two-tone for FOUND or a flat buzz for DUD. When the last one on the manifest goes in, the "go" tones from the status board, and a pulse in both hands.
 
-### Checks
+### It runs when
 
-- `npm test`: pick refused out of reach, with a full hand, and for a second tool; a sample rides in a cup with the Hauler; bank refused away from the port; a manifest sample scores 250, an extra 100, a dud 0; the mission is complete at 0:00 with the manifest banked and failed without; `view('astronaut')` and `view('tech')` carry `look` and never `kind`; samples further than the draw radius are not sent.
-- `npm run vr`: pick a sample off the ground, drop it in a cup, ride 20 m, take it out, put it in the port; check the tally. Print the frame time and draw calls with a dozen samples in view.
-- `npm run smoke`: plays a mission to a win. The test drives the rovers from the console page and rides the Hauler from the astronaut page with `E`.
-- `npm run vr:shots` and `npm run smoke:shots`: each sample beside its lookalike on the regolith (can you tell them apart at 2 m, and through the rover camera at 8 m?), the tray, the port, the GUIDE tab, the SAMPLE LOG. Look at them against DESIGN.md.
-
----
-
-## Phase 5: the demo script, tuning, polish, docs
-
-### The demo mission (`SCRIPTS.demo`, 6:00, the same every time)
-
-A first draft, to be moved about by playing. The demo's sample layout puts the first wanted sample 45 m north-east, in the brightest block, so the first run is short.
-
-| Time | Event | What it teaches |
-| --- | --- | --- |
-| 0:00 | Start. The astronaut is in the hall, both rovers are at the base | The Scientist reads the heat map and sends the Scout out; the astronaut finds a tool |
-| 0:30 | Dusty solar panels | A fault symbol on the chart; the brush; the Scout keeps surveying meanwhile |
-| 1:30 | (nothing scripted) | The first sample run: ride out, pick, ride back, bank |
-| 2:30 | The Scout's wheel breaks, wherever it is | A repair far from home: the tire goes out on the Hauler |
-| 3:40 | Meteor shower | Cover in the field: crouch on the Hauler. Why the Hauler's radar matters |
-| 3:50 | Aftermath: dusty panels and a hull breach | Triage: fix the base or fetch the last rock |
-| 5:00 | Suit leak | Range: how far from the door are you, and how much is in the tank |
-
-Free play: as now, with the new wheel rule, and never a Hauler wheel fault while the astronaut is riding more than 60 m out in the first two minutes (a new crew should not be stranded before they know the game).
-
-### Polish
-
-- **Prospecting counter (stretch):** the Scout carries a counter that clicks faster the nearer it is to a real sample, heard on the Technician's console, with a small needle. The Technician does not know what a sample looks like, but the counter knows one is close. Only add it if finding samples by chart and camera turns out too slow.
-- **A tool clip on the tray (stretch, from SPEC-v2's stretch list):** one clip that holds one tool, so the tire can ride out with the astronaut hands-free.
-- Tune the numbers table by playing with four people. The ones most likely to be wrong: rover speeds, `reveal` radii, the manifest size, the oxygen drain and refill.
-
-### Docs
-
-- `README.md`: the pitch, the seats, the controls, "What breaks", and a new section on samples. While there: the README still describes the tool belt, the locker and the airlock canopy, which the physical-base pass removed.
-- `docs/SPEC-v2.md`: a note at the top pointing here for the rules this spec replaces.
-- `docs/DESIGN.md`: the Samples palette table. `docs/ASSETS.md`: `sample-canister`, `ladee-probe` and `grace-satellite` move to "placed"; the Scout is listed as hand-built.
-- New and refreshed pictures in `docs/`: `mission-control.png`, the chart, the field guide, the Technician's two cameras, the Hauler with a rider, the sample port.
+- A sample can be picked up, carried in a hand or a tray cup, put in the port, and counted.
+- A lookalike in the port reads DUD; a manifest sample reads FOUND.
+- The mission ends complete at 0:00 with the manifest banked, and failed without it.
+- The astronaut's and Technician's pages are sent each rock's look and never its kind.
 
 ---
 
 ## Done means
 
-- The astronaut can walk or ride 120 m from the base in any direction, with their feet, both rovers and every rock on the ground, and `npm run vr` shows the frame time at the edge of the field is no worse than at the door today.
+- The astronaut can walk or ride 120 m from the base in any direction, with their feet, both rovers and every rock on the ground.
 - The Technician drives the Scout with W A S D and the Hauler with the arrows at the same time and sees both cameras at once. They have no map.
-- The astronaut gets on the Hauler by grabbing its rail, is carried by the Technician's driving, and gets off when it stops. Someone has ridden it in a Quest without feeling ill.
-- The Scientist's chart starts as a coarse heat map with the base explored, and sharpens wherever either rover drives. Samples, landmarks, loose tools, the astronaut and faults show on it only in explored ground. Each fault has its own symbol.
-- The Technician's and astronaut's pages are never sent which rock is a real sample. The Scientist's page is never sent a sample in unexplored ground. The tests say so.
+- The astronaut gets on the Hauler by grabbing its rail, is carried by the Technician's driving, and gets off when it stops.
+- The Scientist's chart starts as a coarse heat map with the base explored, and sharpens wherever either rover drives. Samples, landmarks, loose tools, the astronaut and the fault show on it only in explored ground. Each fault has its own symbol.
+- The Technician's and astronaut's pages are never sent which rock is a real sample. The Scientist's page is never sent a sample in unexplored ground.
 - A sample can be picked up, carried in a hand or a tray cup, and banked at the port, with a sound, a lamp and a tick in the hand at each step. A lookalike banked is a DUD.
 - The mission is complete when the manifest is banked at 0:00, and failed if oxygen runs out or the crew comes home short.
-- A blackout stops both rovers.
-- `npm test`, `npm run smoke`, `npm run vr` and `npm run assets` pass. The `smoke:shots` and `vr:shots` pictures have been looked at against DESIGN.md and the ones in `docs/` refreshed.
-- Four people who have been told only their one-line brief can bank a sample in their first mission.
+- Only one fault is ever active. A shower never starts on top of one and breaks nothing itself; caught in the open, it starts a suit leak.
+- The radio and every console work at all times, including with a flat battery.
+- `npm start` boots and every page loads and plays without errors in the browser console. No tests, screenshots or measurements are part of this pass; the crew playtests it, and four people told only their one-line brief should be able to bank a sample in their first mission.
 
 ## Risks
 
 | Risk | What to do about it |
 | --- | --- |
-| Riding makes the astronaut ill | Phase 1's comfort list, the snap-turn fallback, and a real test on the device before merging. If it cannot be made comfortable, the Hauler carries samples and tools only and the astronaut walks beside it: the field shrinks to 80 m. |
-| The bigger field costs frames on the Quest | Phase 0 lowers the ground's triangle count rather than raising it, samples and boulders are instanced, and every phase prints its numbers. |
+| Riding makes the astronaut ill | Phase 1's comfort list, the snap-turn fallback, and the crew trying it on the Quest early. If it cannot be made comfortable, the Hauler carries samples and tools only and the astronaut walks beside it: the field shrinks to 80 m. |
+| The bigger field costs frames on the Quest | Phase 0 lowers the ground's triangle count rather than raising it, samples and boulders are instanced. |
 | Two cameras plus everything else on one laptop (the 2-player seat) | One renderer and one world for both cameras, 30 frames a second, pixel ratio 1. If it still drags, the 2-player seat shows one camera at a time with a switch. |
 | Driving two rovers at once is too much | It is meant to be a stretch, and a rover with no key held stops by itself. If it is simply not fun, let the Scout hold its last heading at half speed with a HOLD switch. |
 | Six minutes is long for a judge | Decision 9. |
-| A lookalike is impossible to tell from the real thing in a headset, or trivially easy | The side-by-side shots in phase 4, then a blind test: someone who has not seen the field guide is talked onto the right rock. |
+| A lookalike is impossible to tell from the real thing in a headset, or trivially easy | A blind playtest: someone who has not seen the field guide is talked onto the right rock. If they cannot, or can at once, change the looks. |
 | The Technician feels lost without a map | The HOME needle and range, the compass tape, named landmarks and boulders, and the Scientist's chart showing both rovers. Being a little lost is the game; being stuck is not. |
 
 ## Decisions to confirm
@@ -458,3 +440,4 @@ Each has a recommendation, and the spec above is written to it. None of them blo
 8. **How the astronaut rides.** Standing on a rear footplate holding a rail, turning with the Hauler (recommended), with snap turning as the fallback.
 9. **Mission length.** 6:00 for both modes (recommended). If judges need 3:00, keep a short demo with a manifest of two and a field of 60 m, and make 6:00 the free-play length.
 10. **The base does not spread out.** The solar panels, dish and depot stay inside the pad (recommended for this pass). Moving the solar array out into the field would make dust a ride-out job; that is a good second pass once riding is proven.
+11. **What a flat battery does now that it cannot cut comms.** The base goes dark and oxygen stops refilling at home until the power fault is fixed; the backup generator brings both back for 25 s (recommended: it keeps a power fault worth fixing without taking anything away from the crew). Or: it only darkens the base and nothing else.
