@@ -2,13 +2,13 @@
 // see the same place. Everything is procedural: terrain, rocks, textures, Earth, stars. Nothing
 // is downloaded, so the page works offline and on Cloudflare as is. Swap in real models here
 // later without touching the game logic.
-import { CFG, PLACES, CABLE_COLORS, SOCKET_SHAPES, DUST_COLS, DUST_ROWS, CRACK_POINTS, HAULER, LOOKS } from '/shared/config.js';
+import { CFG, PLACES, DUST_COLS, DUST_ROWS, CRACK_POINTS, HAULER, LOOKS } from '/shared/config.js';
 import { CRATERS, BOULDERS as FIELD_BOULDERS, LANDMARKS } from '/shared/field.js';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { drawShape } from '/shared/icons.js';
 import { HORIZON, TERRAIN, SUN_AZ_DEG } from '/shared/horizon.js';
-import { PAL, CABLE_HEX, SAMPLE_COL, FONT, nixie } from '/shared/palette.js';
+import { PAL, SAMPLE_COL, FONT, nixie } from '/shared/palette.js';
+import { buildDust } from '/dust.js';
 import { loadPeriod, loadModel } from '/shared/assets.js';
 import { buildAvatar } from '/avatar.js';
 import { buildAirlock, CHAMBER } from '/airlock.js';
@@ -155,11 +155,15 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
       const i = (y * w + x) * 4; d[i] = d[i + 1] = d[i + 2] = v; d[i + 3] = 255;
     }
   }, { repeat: 3, srgb: false });
-  const solarTex = canvasTexture(THREE, 256, 256, (d, w, h) => { // photovoltaic cells behind a silver grid
+  const solarTex = canvasTexture(THREE, 256, 256, (d, w, h) => { // photovoltaic cells: dark blue-grey, a bezel-metal grid
     for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
       const cx = x % 32, cy = y % 32, i = (y * w + x) * 4;
-      if (cx < 2 || cy < 2) { d[i] = d[i + 1] = d[i + 2] = 190; }
-      else { const t = (cx + cy) / 64; d[i] = 14 + t * 20; d[i + 1] = 26 + t * 30; d[i + 2] = 92 + t * 70; if (cx % 8 === 5) { d[i] += 30; d[i + 1] += 30; d[i + 2] += 30; } }
+      if (cx < 2 || cy < 2) { d[i] = 139; d[i + 1] = 136; d[i + 2] = 125; } // PAL.bezel
+      else {
+        const t = (cx + cy) / 64, wob = ((x * 7 + y * 13) % 17) / 17 * 4; // a slight unevenness from cell to cell
+        d[i] = 30 + t * 12 + wob; d[i + 1] = 37 + t * 14 + wob; d[i + 2] = 50 + t * 20 + wob;
+        if (cx % 8 === 5) { d[i] += 16; d[i + 1] += 16; d[i + 2] += 14; } // the fine collector fingers
+      }
       d[i + 3] = 255;
     }
   }, { repeat: 1 });
@@ -633,8 +637,7 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
 
   // ---------- solar array, angled to the sun. The three near panels are the ones that get dusty. ----------
   const sunFlat = new THREE.Vector3(sunDir.x, 0.16, sunDir.z).normalize();
-  const dustMat = new THREE.MeshStandardMaterial({ map: regolith, color: 0xb3aca0, roughness: 1, transparent: true, opacity: 0.94 });
-  const dustCells = [];
+  const dustPanels = [];
   for (const p of PLACES.panels) {
     mesh(new THREE.CylinderGeometry(0.4, 0.5, 0.2, 10), dark, p.x, 0.1, p.z).receiveShadow = true;
     tube(steel, [p.x, 0.2, p.z], [p.x, 1.3, p.z], 0.06);
@@ -642,15 +645,15 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
     mesh(new THREE.BoxGeometry(2.2, 1.3, 0.06), solar, 0, 0, 0, panel);
     mesh(new THREE.BoxGeometry(2.3, 1.4, 0.03), steel, 0, 0, -0.03, panel);
     panel.lookAt(panel.position.clone().add(sunFlat)); // local +z is the face you brush
+    panel.name = 'Panel_Solar';
     scene.add(panel);
-    for (let r = 0; r < DUST_ROWS; r++) for (let c = 0; c < DUST_COLS; c++) {
-      const cell = new THREE.Mesh(new THREE.PlaneGeometry(2.16 / DUST_COLS, 1.26 / DUST_ROWS), dustMat);
-      cell.position.set((c - (DUST_COLS - 1) / 2) * 2.16 / DUST_COLS, ((DUST_ROWS - 1) / 2 - r) * 1.26 / DUST_ROWS, 0.036);
-      cell.visible = false;
-      panel.add(cell);
-      dustCells.push(cell);
-    }
+    panel.updateMatrixWorld();
+    dustPanels.push(panel);
   }
+  // The dust on them, and the brush that takes it off: client/dust.js.
+  const dustGrain = regolith.clone(); dustGrain.repeat.set(2.2, 1.3); dustGrain.needsUpdate = true;
+  const dust = buildDust(THREE, { scene, panels: dustPanels, grainMap: dustGrain, ground: (x, z) => groundAt(x, z) });
+  const dustCells = dust.cells;
   for (const p of PLACES.panels) { // a second row behind, scenery only
     const x = p.x + 3.6;
     mesh(new THREE.CylinderGeometry(0.5, 0.6, 0.2, 10), dark, x, 0.1, p.z).receiveShadow = true;
@@ -661,14 +664,6 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
     panel.lookAt(panel.position.clone().add(sunFlat));
     scene.add(panel);
   }
-
-  const puffs = Array.from({ length: 8 }, () => {
-    const p = new THREE.Mesh(new THREE.SphereGeometry(1, 8, 6), new THREE.MeshBasicMaterial({ color: 0xb8b1a4, transparent: true, opacity: 0, depthWrite: false }));
-    p.visible = false; p.userData = { dir: new THREE.Vector3(), born: 0 };
-    scene.add(p);
-    return p;
-  });
-  let puffNext = 0;
 
   // ---------- scenery: fuel depot, comms dish, drill rig. Nothing to fix here. ----------
   const site = p => {
@@ -733,49 +728,6 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
     const pile = mesh(new THREE.ConeGeometry(0.9, 0.45, 14), rockMat, 0.9, 0.2, -2.4, st); pile.scale.z = 0.7;
     mesh(new THREE.BoxGeometry(0.9, 0.6, 0.5), grey, -1.3, 0.3, -1.0, st);
     tube(dark, [-1.3, 0.6, -1.0], [0, 4.0, -1.8], 0.015, st);
-  }
-
-  // A group at a place from the config. Local +z is the side the astronaut stands on.
-  const fixture = p => { const g = new THREE.Group(); g.position.set(p.x, 0, p.z); g.rotation.y = p.ry; scene.add(g); return g; };
-
-  // ---------- switchboard: four sockets marked with shapes, four coloured cables ----------
-  // CABLE_HEX: the four muted cable colours from client/shared/palette.js
-  // It hangs on a wall inside the habitat: the astronaut's page adds this group to the mount that
-  // interior.js provides. It is in no scene until then, so the rover camera never draws it.
-  const board = new THREE.Group();
-  const sockets = [], plugs = [], plugRest = [];
-  {
-    // Lambert, like everything else indoors: the hall is lit by its own three lights.
-    const box = new THREE.Mesh(new THREE.BoxGeometry(1.1, 0.8, 0.16), new THREE.MeshLambertMaterial({ color: PAL.hex.console }));
-    box.position.set(0, 1.4, 0); board.add(box);
-    const signTex = canvasTexture(THREE, 512, 128, (d, w, h, g) => {
-      g.fillStyle = PAL.consoleDeep; g.fillRect(0, 0, w, h);
-      SOCKET_SHAPES.forEach((s, i) => drawShape(g, s, 64 + i * 128, 64, 78, PAL.dial));
-    });
-    const sign = new THREE.Mesh(new THREE.PlaneGeometry(1.0, 0.25), new THREE.MeshBasicMaterial({ map: signTex, toneMapped: false }));
-    sign.position.set(0, 1.62, 0.082); board.add(sign);
-    CABLE_COLORS.forEach((color, i) => {
-      const x = (i - 1.5) * 0.25;
-      const hole = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.03, 16), new THREE.MeshBasicMaterial({ color: PAL.hex.bakelite }));
-      hole.position.set(x, 1.38, 0.082); hole.rotation.x = Math.PI / 2; board.add(hole);
-      sockets.push(new THREE.Vector3(x, 1.38, 0.14));
-      plugRest.push(new THREE.Vector3(x, 1.1, 0.24)); // a loose plug hangs in front of the box, at waist height
-      const plug = new THREE.Group();
-      // Unlit, so the colours read the same on white light, on red backup light, and in the dark.
-      const body = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 0.14, 12), new THREE.MeshBasicMaterial({ color: CABLE_HEX[color], toneMapped: false }));
-      body.rotation.x = Math.PI / 2; plug.add(body);
-      plug.position.copy(sockets[i]);
-      plug.userData = { color, index: i, held: false };
-      board.add(plug);
-      const cord = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(x, 1.02, 0.06), new THREE.Vector3()]), new THREE.LineBasicMaterial({ color: CABLE_HEX[color] }));
-      cord.frustumCulled = false;
-      board.add(cord);
-      plug.userData.cord = cord;
-      plugs.push(plug);
-    });
-    const lamp = new THREE.Mesh(new THREE.SphereGeometry(0.06, 12, 8), new THREE.MeshBasicMaterial({ color: PAL.hex.green, toneMapped: false }));
-    lamp.position.set(0.45, 1.88, 0.06); board.add(lamp);
-    board.userData.lamp = lamp;
   }
 
   // ---------- hull crack: one crack, moved to whichever of the six spots is breached ----------
@@ -1181,7 +1133,7 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
     rover, rovers, avatar, figure, sun, height, hab, port, follow, normalAt, ground: groundAt, // ground(x, z): the height of the ground as drawn
     // Handles for the astronaut's hands (stations.js). Vectors are local to their fixture group.
     doors,
-    fixtures: { board, sockets, plugs, plugRest, dustCells, crack, crackPts, wheel: rover.userData.wheel, hub: rover.userData.hub,
+    fixtures: { dustCells, dust, crack, crackPts, wheel: rover.userData.wheel, hub: rover.userData.hub,
       wheels: Object.fromEntries(Object.entries(rovers).map(([id, r]) => [id, { wheel: r.userData.wheel, hub: r.userData.hub }])),
       rail: rover.userData.rail, plate: rover.userData.plate, cups: rover.userData.cups, portMouth: port.userData.mouth },
     // A puff of dust kicked up at a point (boots landing, a rock picked up).
@@ -1194,6 +1146,7 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
     update(time) {
       const dt = Math.min(0.1, Math.max(0, time - dustT)); dustT = time;
       stepDust(dt);
+      dust.update(dt, time);
       // The port's lid drops shut on each banked sample, and opens again; its lamp says FOUND or DUD.
       { const u = port.userData, closed = time < u.flashUntil - 1.6; u.hinge.rotation.x += ((closed ? 0 : -1.25) - u.hinge.rotation.x) * Math.min(1, dt * 14);
         u.lamp.material.color.setHex(time < u.flashUntil ? (u.flash === 'dud' ? PAL.hex.amber : PAL.hex.green) : PAL.hex.greenOff); }
@@ -1205,39 +1158,13 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
     apply(s, time) {
       const blink = Math.floor(time * 4) % 2 === 0;
 
-      // The habitat's own power shows from outside: with the switchboard tripped it is on red backup
-      // lights, and in a blackout there is nothing at all. The floodlight is off in both.
-      const backup = !!s.board && !s.dark;
-      floods.forEach(f => { f.intensity = s.dark || s.board ? 0 : 25; });
-      warmGlow.color.setHex(s.dark ? 0x120d05 : backup ? 0x3d1a14 : 0xe8b872);
-      windowGlow.color.setHex(s.dark ? 0x120d05 : backup ? 0x5a2418 : 0xe8b872);
+      // The habitat's own power shows from outside: in a blackout the floodlight is off and the windows are dark.
+      floods.forEach(f => { f.intensity = s.dark ? 0 : 25; });
+      warmGlow.color.setHex(s.dark ? 0x120d05 : 0xe8b872);
+      windowGlow.color.setHex(s.dark ? 0x120d05 : 0xe8b872);
 
-      // Dust: a cell that was dusty a moment ago and is not now puffs away.
-      dustCells.forEach((c, i) => {
-        const on = !!s.dust && s.dust[i];
-        if (c.visible && !on) {
-          const p = puffs[puffNext++ % puffs.length];
-          c.getWorldPosition(p.position); c.getWorldDirection(p.userData.dir); p.userData.born = time; p.visible = true;
-        }
-        c.visible = on;
-      });
-      for (const p of puffs) {
-        if (!p.visible) continue;
-        const u = (time - p.userData.born) / 0.7;
-        if (u >= 1) { p.visible = false; continue; }
-        p.position.addScaledVector(p.userData.dir, 0.012); p.position.y -= 0.004 * u; // off the face of the panel, then sinking: there is no air to hold it up
-        p.scale.setScalar(0.05 + u * 0.1); p.material.opacity = 0.5 * (1 - u);
-      }
-
-      // Switchboard: seated plugs sit in their socket, loose ones hang underneath.
-      board.userData.lamp.material.color.setHex(s.board ? (blink ? PAL.hex.red : PAL.hex.redOff) : s.dark ? PAL.hex.greenOff : PAL.hex.green);
-      plugs.forEach((p, i) => {
-        const c = s.board ? s.board[i] : { seated: true, socket: i };
-        p.userData.seated = c.seated;
-        if (!p.userData.held) { p.position.copy(c.seated ? sockets[c.socket] : plugRest[i]); p.rotation.set(c.seated ? 0 : Math.PI / 2, 0, 0); }
-        p.userData.cord.geometry.attributes.position.setXYZ(1, p.position.x, p.position.y, p.position.z);
-        p.userData.cord.geometry.attributes.position.needsUpdate = true;
-      });
+      // Dust: the brushed cells' leftovers slump off the panel (client/dust.js).
+      dust.apply(s.dust);
 
       // Rover wheels: 0 fine, 1 broken and hanging off, 2 pulled off and lying beside the rover.
       for (const [id, r] of Object.entries(rovers)) {

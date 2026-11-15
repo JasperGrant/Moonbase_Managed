@@ -63,7 +63,6 @@ const outdoors = scene.children.filter(o => !sceneBefore.has(o)); // everything 
 // The inside of the habitat. Only one of the two places is drawn at a time.
 const interior = buildInterior(THREE, scene, { sfx: k => radio.sfx(k) });
 interior.group.visible = false;
-interior.mount.add(world.fixtures.board); // the switchboard hangs on the interior wall
 let where = 'out';                        // 'out' on the surface, 'in' inside the habitat
 let door = CFG.spawn.door;                // the airlock last come through: indoors, the map shows you there
 
@@ -123,7 +122,7 @@ const radioState = () => talking ? 'tx' : rx ? 'rx' : keyed && !radio.micOk ? 'n
 function alarms() {
   if (!running()) return 0;
   const sc = state.scene;
-  return (sc.dust ? 1 : 0) + (sc.board ? 1 : 0) + (Object.values(sc.wheels || {}).some(Boolean) ? 1 : 0) + (sc.hull ? 1 : 0) + (state.suit ? 1 : 0);
+  return (sc.dust ? 1 : 0) + (Object.values(sc.wheels || {}).some(Boolean) ? 1 : 0) + (sc.hull ? 1 : 0) + (state.suit ? 1 : 0);
 }
 function drawGauges(now) {
   arm.draw({ state, status: status(now), debrief: !!debrief, zoom: scopeOn() ? zoom : 1, total: CFG.roundSeconds, radio: radioState(),
@@ -282,10 +281,15 @@ addEventListener('keydown', e => {
   if (e.key.toLowerCase() === 'l' && mode === 'desk' && !e.repeat) debugOutage = !debugOutage;
   if (e.key.toLowerCase() === 'k' && mode === 'desk' && !e.repeat) debugDamage = !debugDamage;
   if (e.key.toLowerCase() === 'q' && mode === 'desk' && !e.repeat) { if (!fx.dropHeld()) fx.dropSample(); }
-  if (e.key.toLowerCase() === 'e' && mode === 'desk' && !e.repeat) { if (riding) dismount(-1); else mount(2); } // on and off the Hauler
+  // E: with a loose tool or a sample in view and in reach, take it and keep it while E is held (let go of E to
+  // let go of it). Otherwise it goes on and off the Hauler, as before.
+  if (e.key.toLowerCase() === 'e' && mode === 'desk' && !e.repeat) {
+    if (!riding && running() && fx.grabKey(targetInReach(null))) { /* held until E comes up */ }
+    else if (riding) dismount(-1); else mount(2);
+  }
 });
-addEventListener('keyup', e => { keys[e.key.toLowerCase()] = false; });
-addEventListener('blur', () => { for (const k in keys) keys[k] = false; });
+addEventListener('keyup', e => { keys[e.key.toLowerCase()] = false; if (e.key.toLowerCase() === 'e') fx.releaseKey(); });
+addEventListener('blur', () => { for (const k in keys) keys[k] = false; fx.releaseKey(); }); // losing focus lets go of what E is holding
 // Chrome reports one huge movementX/Y on the first event after the pointer locks (the cursor
 // snapping to the centre), which used to leave the camera staring at the sky. Clamp it away.
 let lockedAt = 0, skipNext = false;
@@ -328,20 +332,20 @@ function targetInReach(controller) {
   raycaster.far = controller ? REACH_VR : REACH;
   return raycaster.intersectObjects(fx.targets(), false)[0] || null;
 }
-// Use whatever tool, plug or broken thing is being pointed at. Returns true if there was something.
+// Use whatever tool or broken thing is being pointed at. Returns true if there was something.
 // With `holding`, only things that work while held down (brushing dust, welding) are used again.
 function use(controller, holding = false) {
   const hit = targetInReach(controller);
   if (!hit || (holding && !hit.object.userData.hold)) return !!hit && !holding;
-  fx.click(hit.object);
+  fx.click(hit.object, hit.point);
   return true;
 }
-// Use whatever is being pointed at: a loose tool, a plug, something to fix. (The airlocks are walked into.)
+// Use whatever is being pointed at: a loose tool, something to fix. (The airlocks are walked into.)
 const useAny = controller => use(controller);
 
 // ---------- hands and controllers ----------
 // Controllers: hold the trigger (or the grip) on something to take it in that hand (a loose tool, one in
-// each hand; plugs, the wheel, the generator cord) and let go to drop or throw it. With nothing in reach
+// each hand; the wheel, the generator cord) and let go to drop or throw it. With nothing in reach
 // the right trigger points at things within arm's reach and the left trigger talks. Sticks walk and turn, A hops.
 // Hand tracking (put the controllers down): pinch on something to grab it, point the right hand and
 // pinch to use the hatch or the READY board, pinch at the ground to teleport there, pinch the left
@@ -471,7 +475,7 @@ for (const i of [0, 1]) {
     if (c.userData.hand === 'left') { leftDrag = null; return; }
     // A bare right hand uses the board, hatch or panel, or teleports, on release, not on pinch, so that the first
     // hand of a two-handed zoom does not fire on its way in. The ring shows where you will land.
-    if (c.userData.isHand && act && !useAny(c) && groundTarget(c, hitPoint)) teleport(hitPoint);
+    if (c.userData.isHand && act && !c.userData.exitAim && !useAny(c) && groundTarget(c, hitPoint)) teleport(hitPoint);
   });
   // The grip button does the same as the trigger. Whichever closed the hand is the one that opens it.
   c.addEventListener('squeezestart', () => { if (!c.userData.grabbed && running() && fx.grab(i, handPoint(i, new THREE.Vector3()))) c.userData.grabbed = 'squeeze'; });
@@ -514,7 +518,7 @@ function handControls(ptt) {
         if (Math.abs(dx) > TURN_STEP) { turnRig(-Math.sign(dx) * Math.PI / 6); leftDrag.x = x; }
       }
     } else {
-      const p = !zoomGrab && !c.userData.grabbed && !targetInReach(c) && groundTarget(c, hitPoint);
+      const p = !zoomGrab && !c.userData.grabbed && !c.userData.exitAim && !targetInReach(c) && groundTarget(c, hitPoint);
       marker.visible = !!p;
       if (p) {
         marker.position.set(p.x, p.y + 0.03, p.z);
@@ -548,12 +552,17 @@ const READ = {
 const SHOULDER = { side: 0.19, down: 0.26 }; // where the left shoulder is from the eyes, metres
 let reading = false, readFor = 0;
 const cuffPos = new THREE.Vector3(), cuffOut = new THREE.Vector3(), gaze = new THREE.Vector3(), shoulder = new THREE.Vector3();
+// The Quest loses a tracked hand for a moment when the other hand covers it, which is exactly what
+// pressing a button on your own wrist does. The cuff stays where it was for this long before it goes.
+const TRACK_GRACE = 0.4;
+let armLost = 0;
 // Put the arm on the left hand or controller. Returns true if there is one to put it on.
-function followArm() {
+function followArm(dt = 0) {
   const i = controllers.findIndex(c => c.userData.hand === 'left');
   const c = controllers[i], joint = c && c.userData.isHand ? hands[i].joints?.wrist : null;
-  if (joint && joint.visible) arm.follow(joint.matrix, 'hand');
-  else if (c && !c.userData.isHand && c.visible) arm.follow(c.matrix, 'controller');
+  if (joint && joint.visible) { arm.follow(joint.matrix, 'hand'); armLost = 0; }
+  else if (c && !c.userData.isHand && c.visible) { arm.follow(c.matrix, 'controller'); armLost = 0; }
+  else if (arm.group.visible && (armLost += dt) < TRACK_GRACE) { /* keep the last pose */ }
   else arm.follow(null);
   if (!arm.group.visible) return false;
   arm.group.updateWorldMatrix(true, false);
@@ -563,38 +572,58 @@ function followArm() {
   return true;
 }
 // The EXIT button on the cuff. In the debrief it takes the astronaut back to the READY board, still
-// in the headset; otherwise it ends the headset session, back to the lobby. Hold the right index
-// fingertip, or the fingers of the right controller's glove, on the cap: it sinks, its lamp warms up,
-// a click on touch and a relay clunk when it goes. Holding for a moment means a brushing hand does
-// not end the game, and after it goes it only works again once the finger has come off it.
-// In the debrief its lamp blinks amber, once a second, to say "press me".
-const EXIT = { reach: 0.028, hold: 0.6 };
-let exitHeld = 0, exitTouched = false, exitGone = false, exitClock = 0;
+// in the headset; otherwise it ends the headset session, back to the lobby. Two ways to press it, both
+// held for a moment so a brushing hand does not end the game:
+//   touch: the right index fingertip, or the fingertip of the right controller's glove, on the cap;
+//   point: aim the right controller (or the right hand's pinch ray) at the cap and hold the trigger or pinch.
+// The cap sinks, its lamp warms up, a click on touch and a relay clunk when it goes. After it goes it
+// only works again once the finger has come off it and the trigger or pinch has been let go.
+// Aimed at, its lamp glows amber; in the debrief it blinks amber, once a second, to say "press me".
+const EXIT = { reach: 0.045, hold: 0.6, aim: 0.03, aimFar: 1.2 };
+let exitHeld = 0, exitTouched = false, exitGone = false, tipLost = 0, exitClock = 0;
 // The hold is timed in real seconds, like the airlock and the arm: 0.6 s is 0.6 s on a slow machine too.
 const exitStep = now => { const d = exitClock ? Math.min(0.25, now - exitClock) : 0; exitClock = now; return d; };
-const exitPos = new THREE.Vector3(), tipPos = new THREE.Vector3();
+const exitPos = new THREE.Vector3(), tipPos = new THREE.Vector3(), aimV = new THREE.Vector3(), exitRay = new THREE.Ray();
 const exitInvite = now => !!debrief && Math.floor(now * 2) % 2 === 0;
+// Is controller c's pointing ray on the cap?
+function aimsAtExit(c) {
+  if (!c || !c.visible) return false;
+  exitRay.origin.setFromMatrixPosition(c.matrixWorld);
+  const e = c.matrixWorld.elements; // the controller points down its own -z
+  exitRay.direction.set(-e[8], -e[9], -e[10]).normalize();
+  const along = aimV.copy(exitPos).sub(exitRay.origin).dot(exitRay.direction);
+  return along > 0.02 && along < EXIT.aimFar && exitRay.distanceToPoint(exitPos) < EXIT.aim;
+}
 function exitButton(_dt, now, session) {
   const dt = exitStep(now);
-  let near = false, hand = -1;
+  let near = false, hand = -1, have = false, aimed = false, pointing = false;
+  for (const c of controllers) c.userData.exitAim = false;
   if (arm.group.visible) {
     exitPos.copy(arm.EXIT_TOP).applyMatrix4(arm.group.matrixWorld);
     hand = controllers.findIndex(c => c.userData.hand === 'right');
     const c = controllers[hand];
     if (c) {
+      aimed = aimsAtExit(c);
+      pointing = aimed && c.userData.pinched && !c.userData.zoomed && !c.userData.grabbed;
       const tip = c.userData.isHand ? hands[hand].joints?.['index-finger-tip'] : null, glove = fx.gloves[hand];
-      let have = true;
+      const gloveTip = glove?.visible ? glove.userData.right?.userData.tip : null;
+      have = true;
       if (tip && tip.visible) tip.getWorldPosition(tipPos);
-      else if (!c.userData.isHand && glove?.visible) tipPos.set(0, 0, -0.075).applyMatrix4(glove.matrixWorld); // the glove's fingers
+      else if (!c.userData.isHand && gloveTip) gloveTip.getWorldPosition(tipPos); // the glove's fingertip
+      else if (!c.userData.isHand && glove?.visible) tipPos.set(0, 0, -0.075).applyMatrix4(glove.matrixWorld); // before the glove model has loaded
       else have = false;
-      near = have && tipPos.distanceTo(exitPos) < EXIT.reach;
+      near = (have && tipPos.distanceTo(exitPos) < EXIT.reach) || pointing;
+      c.userData.exitAim = aimed;
     }
   }
   if (exitGone) { if (!near) exitGone = false; near = false; } // re-arms once the finger is off it
   if (near && !exitTouched) { radio.sfx('click'); pulse(hand, 0.3, 25); }
   exitTouched = near;
-  exitHeld = near ? exitHeld + dt : Math.max(0, exitHeld - dt * 3);
-  arm.pressExit(exitHeld / EXIT.hold, exitInvite(now));
+  // A fingertip the headset has lost for a moment keeps what it had pressed so far.
+  tipLost = have || !arm.group.visible ? 0 : tipLost + dt;
+  if (near) exitHeld += dt;
+  else if (!(exitHeld > 0 && tipLost > 0 && tipLost < TRACK_GRACE)) exitHeld = Math.max(0, exitHeld - dt * 3);
+  arm.pressExit(exitHeld / EXIT.hold, exitInvite(now) || (aimed && !exitGone));
   if (exitHeld >= EXIT.hold && !exitGone) {
     exitGone = true; exitHeld = 0;
     radio.sfx('relay'); pulse(hand, 1, 90);
@@ -1129,7 +1158,7 @@ function control(dt, now) {
   camera.getWorldDirection(fwd); fwd.y = 0; fwd.normalize();
   if (session) {
     ptt = handControls(ptt);
-    if (followArm() && gaugesReadable(dt)) ptt = true;
+    if (followArm(dt) && gaugesReadable(dt)) ptt = true;
     exitButton(dt, now, session);
     for (const src of session.inputSources) {
       const gp = src.gamepad;
@@ -1240,14 +1269,13 @@ renderer.setAnimationLoop(() => {
       lastEv = s.ev.n;
       const k = s.ev.kind;
       // The astronaut is never told what broke or where: that is mission control's job.
-      if (['alarm', 'solve', 'mistake', 'hit', 'blackout', 'power', 'gen'].includes(k)) radio.sfx(k);
       // The port says what went in: a rising two-tone for a sample, a flat buzz for a dud.
       if (k === 'found' || k === 'dud') { radio.sfxAt(k, world.port.localToWorld(tmpV.copy(world.fixtures.portMouth)), 1); if (k === 'found') { pulse(0, 0.5, 60); pulse(1, 0.5, 60); } else { pulse(0, 0.8, 90); setTimeout(() => pulse(0, 0.8, 90), 150); } }
       if (k === 'found' && s.tally && s.tally.banked >= s.tally.wanted) { radio.sfx('go'); pulse(0, 1, 160); pulse(1, 1, 160); } // the manifest is home
       if (k === 'end') radio.sfx(s.result && s.result.won ? 'won' : 'lost');
       if (k === 'solve') show('ok', 4);
-      if (k === 'mistake' || k === 'hit') show('bad', 5);
-      if (k === 'hit' || k === 'mistake') { pulse(0, 1, 250); pulse(1, 1, 250); }
+      if (k === 'hit') show('bad', 5);
+      if (k === 'hit') { pulse(0, 1, 250); pulse(1, 1, 250); }
     }
     if (run) world.apply(s.scene, now); else world.drawSamples([]);
     world.moveRovers(s.rovers, 1 - Math.exp(-Math.min(1, now - armFrame) * 10)); // eased by real time, so a slow frame does not leave a rover behind
@@ -1275,10 +1303,10 @@ renderer.setAnimationLoop(() => {
     }
   }
   world.update(now);
-  // The hall goes to its red backup lights when the switchboard trips, and when the battery runs flat.
-  const powerOut = debugOutage || (run && (!!s.scene.board || s.scene.dark));
+  // The hall goes to its red backup lights when the battery runs flat.
+  const powerOut = debugOutage || (run && s.scene.dark);
   interior.setPower(powerOut);
-  interior.setDamage(debugDamage ? { board: [], hull: {}, meteor: 5 } : run ? s.scene : null, where === 'in');
+  interior.setDamage(debugDamage ? { dark: true, hull: {}, meteor: 5 } : run ? s.scene : null, where === 'in');
   interior.update(dt, now);
   radio.room(where === 'in' ? (interior.dark ? 0.15 : 1) : 0);
   if (mode) control(dt, now); else keyed = false;

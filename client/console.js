@@ -4,13 +4,13 @@
 // Everything here is a picture: gauges, a map, a camera, lamps. Nobody is told in words what broke.
 import { connect } from '/net.js';
 import { Radio } from '/voice.js';
-import { CFG, TOOLS, PLACES, MODES, ROLES, SOCKET_SHAPES, SAMPLES, FAULTS } from '/shared/config.js';
-import { drawTool, drawShape, drawFault, drawGlyph, drawSample } from '/shared/icons.js';
+import { CFG, TOOLS, PLACES, MODES, ROLES, SAMPLES, FAULTS } from '/shared/config.js';
+import { drawTool, drawFault, drawGlyph, drawSample } from '/shared/icons.js';
 import { FIELD, CRATERS, BOULDERS, LANDMARKS } from '/shared/field.js';
 import { seatTaken, seatRefused, kicked } from '/seat.js';
 import { createLobby } from '/lobby.js';
 import { music } from '/music.js';
-import { PAL, CABLE, FONT, SAMPLE_COL, nixie, jewel, fontsReady } from '/shared/palette.js';
+import { PAL, FONT, SAMPLE_COL, nixie, jewel, fontsReady } from '/shared/palette.js';
 
 // /console.html?role=ops or the clean URL /ops; /control is the all-in-one seat.
 const PATH_ROLE = { ops: 'ops', tech: 'tech', sci: 'sci', control: 'all', all: 'all' };
@@ -105,7 +105,7 @@ setInterval(() => { $('link').textContent = net.open ? '' : 'NO LINK TO SERVER';
 
 // ---------- render ----------
 let testSlow = 1; // tests only (moonbase.drawEvery): redraw the instruments this many times less often
-const TOAST = { alarm: 'ALARM', solve: 'FIXED', mistake: 'SPARK', hit: 'METEOR HIT', power: 'POWER BACK', gen: 'GENERATOR RUNNING', blackout: 'BASE DARK', found: 'SAMPLE BANKED', dud: 'DUD' };
+const TOAST = { alarm: 'ALARM', solve: 'FIXED', hit: 'METEOR HIT', power: 'POWER BACK', gen: 'GENERATOR RUNNING', blackout: 'BASE DARK', found: 'SAMPLE BANKED', dud: 'DUD' };
 function render() {
   const s = state;
   $('clock').textContent = clock(s.timeLeft ?? CFG.roundSeconds);
@@ -187,7 +187,7 @@ function renderResults(s) {
     $('results').innerHTML = `<div class="panel">
     <div class="verdict ${r.won ? 'won' : 'lost'}">${r.won ? 'MISSION COMPLETE' : 'MISSION FAILED'}</div>
     <p>${esc(r.reason)}</p>
-    <p><b>Score ${d.score}</b> &nbsp;|&nbsp; manifest ${r.wanted ?? 0} of ${r.manifest ?? CFG.sample.manifest} &nbsp;|&nbsp; extra samples ${(r.samples ?? 0) - (r.wanted ?? 0)} &nbsp;|&nbsp; duds ${r.duds ?? 0} &nbsp;|&nbsp; fixed ${r.fixed} &nbsp;|&nbsp; meteor hits ${r.hits} &nbsp;|&nbsp; wrong plugs ${r.mistakes}${r.won ? ` &nbsp;|&nbsp; oxygen bonus +${r.bonus}` : ''}</p>
+    <p><b>Score ${d.score}</b> &nbsp;|&nbsp; manifest ${r.wanted ?? 0} of ${r.manifest ?? CFG.sample.manifest} &nbsp;|&nbsp; extra samples ${(r.samples ?? 0) - (r.wanted ?? 0)} &nbsp;|&nbsp; duds ${r.duds ?? 0} &nbsp;|&nbsp; fixed ${r.fixed} &nbsp;|&nbsp; meteor hits ${r.hits}${r.won ? ` &nbsp;|&nbsp; oxygen bonus +${r.bonus}` : ''}</p>
     <h2>What happened</h2>
     <ul class="log">${d.log.filter(l => l.kind !== 'start').map(l =>
       `<li class="${l.kind}"><span class="at">${clock(l.at)}</span><span class="sym">${l.type ? `<img alt="" src="${faultIcon(l.type)}">` : ''}</span><span>${esc(l.text)}</span><span class="d">${l.pts ? '+' + l.pts : ''}${l.o2 ? l.o2 + ' O2' : ''}</span></li>`).join('')}</ul>
@@ -474,7 +474,7 @@ function decodeSeen(hex) {
   for (let i = 0; i < hex.length; i++) { const v = parseInt(hex[i], 16); for (let b = 0; b < 4; b++) if (v >> b & 1) out[i * 4 + b] = 1; }
   return out;
 }
-const LEGEND = ['dust', 'board', 'wheel', 'hull', 'suit'], LEGEND_NAME = { dust: 'SOLAR', board: 'BOARD', wheel: 'WHEEL', hull: 'HULL', suit: 'SUIT' };
+const LEGEND = ['dust', 'wheel', 'hull', 'suit'], LEGEND_NAME = { dust: 'SOLAR', wheel: 'WHEEL', hull: 'HULL', suit: 'SUIT' };
 function drawSurvey(s) {
   const sv = s.survey, cv = $('surveyCv'); if (!sv || !cv) return;
   const g = cv.getContext('2d'), W = cv.width, H = cv.height, CX = W / 2, CY = 280, R = 262, now = performance.now();
@@ -647,30 +647,18 @@ function drawGuide(s) {
 function drawPower(s) {
   const cv = $('powerCv'), g = cv.getContext('2d'), W = cv.width, H = cv.height, p = s.power;
   panelBg(g, W, H);
-  // The battery: a fuel-gauge dial with its percentage on Nixie tubes, and a LOW BATT lamp.
+  // The battery: a fuel-gauge dial, laid out like the AIR console's oxygen, with a LOW BATT lamp.
   const low = p.battery < 30;
-  dial(g, W * 0.5, 128, 100, p.battery, 100, 'BATTERY', { redBelow: 30, unit: '%' });
-  jewel(g, W * 0.5 - 150, 150, 9, 'red', low && blinkOn()); label(g, 'LOW', W * 0.5 - 150, 172, 10, C.dim);
-  // Where the power is lost: coming in from the sun, or going out through the board.
-  dial(g, W * 0.27, 316, 90, p.solar, 100, 'SOLAR IN', { redBelow: 60, unit: '%' });
-  dial(g, W * 0.73, 316, 90, p.board, 100, 'BOARD OUT', { redBelow: 60, unit: '%' });
-  g.strokeStyle = PAL.rule; g.lineWidth = 3; g.beginPath(); g.moveTo(W * 0.27 + 104, 300); g.lineTo(W * 0.73 - 112, 300); g.stroke();
-  g.fillStyle = PAL.rule; g.beginPath(); g.moveTo(W * 0.73 - 112, 291); g.lineTo(W * 0.73 - 100, 300); g.lineTo(W * 0.73 - 112, 309); g.fill();
-  // The wiring diagram, printed on a cream card: each loose cable and the socket it belongs in.
-  if (s.wiring) {
-    const top = 420, bottom = H - 14;
-    g.fillStyle = PAL.dial; g.fillRect(20, top, W - 40, bottom - top);
-    g.strokeStyle = PAL.inkDim; g.lineWidth = 1; g.strokeRect(26.5, top + 6.5, W - 53, bottom - top - 13);
-    const n = s.wiring.length, row = (bottom - top - 16) / Math.max(1, n);
-    s.wiring.forEach((w, i) => {
-      const y = top + 8 + row * i + row / 2, col = CABLE[w.color];
-      g.fillStyle = col; g.strokeStyle = PAL.inkDial; g.lineWidth = 1.5;
-      g.fillRect(70, y - 11, 56, 22); g.strokeRect(70, y - 11, 56, 22); g.fillRect(126, y - 6, 14, 12);
-      g.strokeStyle = col; g.lineWidth = 6; g.beginPath(); g.moveTo(146, y); g.lineTo(W - 190, y); g.stroke();
-      g.fillStyle = col; g.beginPath(); g.moveTo(W - 190, y - 11); g.lineTo(W - 168, y); g.lineTo(W - 190, y + 11); g.fill();
-      drawShape(g, SOCKET_SHAPES[w.socket], W - 110, y, Math.min(40, row * 0.8), PAL.inkDial);
-    });
-  }
+  dial(g, W * 0.5, 140, 110, p.battery, 100, 'BATTERY', { redBelow: 30, unit: '%' });
+  jewel(g, W * 0.5 - 160, 160, 9, 'red', low && blinkOn()); label(g, 'LOW', W * 0.5 - 160, 182, 10, C.dim);
+  // Power coming in from the sun. Below 100 the panels are dusty and the battery is running down.
+  dial(g, W * 0.3, 410, 100, p.solar, 100, 'SOLAR IN', { redBelow: 60, unit: '%' });
+  // Which way the battery is going: two lamps, one lit.
+  const charging = p.solar >= 100, lx = W * 0.74;
+  jewel(g, lx, 345, 26, 'green', charging);
+  plate(g, 'CHARGE', lx, 392, 110, 12);
+  jewel(g, lx, 445, 26, 'amber', !charging && blinkOn());
+  plate(g, 'DRAIN', lx, 492, 110, 12);
 }
 
 // ---------- Scientist: AIR ----------

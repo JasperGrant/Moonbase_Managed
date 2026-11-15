@@ -320,14 +320,14 @@ try {
       const cells = [0, 1, 2].map(c => F.dustCells[pn * 6 + row * 3 + c]);
       const n = cells[0].getWorldDirection(new v.T.Vector3()), into = n.clone().negate();
       const at = c => v.wp(c).addScaledVector(n, gap);
-      // Across the middle cell and just into the outer two: touching a cell anywhere brushes it off.
+      // Across the middle cell and 16 cm into the outer two: a cell counts once the bristles have crossed 12 cm of it.
       const mid = at(cells[1]), along = at(cells[2]).sub(at(cells[0])).normalize();
-      const a = mid.clone().addScaledVector(along, -0.44), b = mid.clone().addScaledVector(along, 0.44), ends = row ? [b, a] : [a, b]; // there and back
+      const a = mid.clone().addScaledVector(along, -0.52), b = mid.clone().addScaledVector(along, 0.52), ends = row ? [b, a] : [a, b]; // there and back
       await v.move('right', ends[0], 4, into, 'brush');
       await v.move('right', ends[1], 16, into, 'brush');
     }
   }, { pn, gap });
-  await stand(panels[0].x + panels[0].nx * 0.62, panels[0].z + panels[0].nz * 0.62, panels[0].x, panels[0].z);
+  await stand(panels[0].x + panels[0].nx * 0.55, panels[0].z + panels[0].nz * 0.55, panels[0].x, panels[0].z);
   await kit('brush');
   check(await P(() => window.vr.holding('right')?.id) === 'brush', 'brush: could not put the brush in the right hand at the panels');
   await sweep(0, 0.35);
@@ -335,12 +335,16 @@ try {
   check(g.faults.dust.cells.every(Boolean), 'brush: waving the brush 35 cm off the panel cleaned it');
   await P(() => window.vr.haptics());
   for (let pn = 0; pn < 3; pn++) {
-    await stand(panels[pn].x + panels[pn].nx * 0.62, panels[pn].z + panels[pn].nz * 0.62, panels[pn].x, panels[pn].z);
+    await stand(panels[pn].x + panels[pn].nx * 0.55, panels[pn].z + panels[pn].nz * 0.55, panels[pn].x, panels[pn].z); // close in: a full row is a long reach
     await sweep(pn, 0.04);
     await page.waitForTimeout(250);
     const left = g.faults.dust ? g.faults.dust.cells.slice(pn * 6, pn * 6 + 6).filter(Boolean).length : 0;
     check(left === 0, `brush: one pass along each row of panel ${pn + 1} left ${left} of 6 cells dusty`);
-    if (pn === 0) check(await P(() => window.moonbase.scene.children.some(o => o.isMesh && o.userData.dir && o.visible)), 'brush: no puff of dust came off the panel');
+    if (pn === 0) {
+      const d = await P(() => ({ flying: window.moonbase.world.fixtures.dust.flying, left: window.moonbase.world.fixtures.dust.left(0) }));
+      check(d.flying > 0, 'brush: no grains of dust came off the panel: ' + JSON.stringify(d));
+      check(d.left < 0.6, 'brush: the dust layer on the panel did not thin where the brush went: ' + JSON.stringify(d));
+    }
   }
   check(await serverUntil(() => !g.faults.dust), 'brush: all three panels swept but the fault is not fixed');
   buzz = await P(() => window.vr.haptics());
@@ -385,8 +389,8 @@ try {
   await letGo('right');
   await reachOk('welding the crack');
 
-  // ---------- 4. pushing plugs into sockets (inside the habitat) ----------
-  step('4. pushing plugs into sockets');
+  // ---------- 4. into the habitat, and its lights in a blackout ----------
+  step('4. into the habitat, and its lights in a blackout');
   // In through the airlock: walk into airlock S's chamber. The hatch behind shuts, the head is moved to
   // the chamber's twin in the hall without moving in the chamber, the air comes back, the hatch in front opens.
   await kit();
@@ -407,53 +411,14 @@ try {
   check(r.jump !== null && r.jump < 0.01, `airlock: the head moved ${r.jump} m in the chamber at the swap; it must not move at all`);
   check(r.inner > 0.99, 'airlock: the inner hatch did not open onto the hall');
   check(r.pose.inside && r.pose.door === 'S', 'airlock: the pose sent to the server does not say inside, at door S: ' + JSON.stringify(r.pose));
-  g.break('board');
-  await P(() => window.vr.until(s => s.scene.board, 3));
-  check(await P(async () => { for (let i = 0; i < 120 && window.moonbase.interior.phase !== 'backup'; i++) await window.vr.sleep(50); return window.moonbase.interior.phase; }) === 'backup', 'board: the hall did not go to its red backup lights when the switchboard tripped');
-  const boardAt = await P(() => { const v = window.vr, F = window.moonbase.world.fixtures; const p = F.board.localToWorld(v.V(0, 1.4, 0)), n = F.board.getWorldDirection(new v.T.Vector3()); return { x: p.x, z: p.z, nx: n.x, nz: n.z }; });
-  await stand(boardAt.x + boardAt.nx * 0.6, boardAt.z + boardAt.nz * 0.6, boardAt.x, boardAt.z);
-  // Carry a loose plug to a socket: grab it where it hangs, bring it up in front of the socket, push it in.
-  const plugInto = (cable, socket) => P(async ({ cable, socket }) => {
-    const v = window.vr, mb = window.moonbase, F = mb.world.fixtures;
-    const n = F.board.getWorldDirection(new v.T.Vector3()), into = n.clone().negate();
-    await v.until(() => F.plugs[cable].position.distanceTo(F.plugRest[cable]) < 0.01, 5); // it has dropped out and is hanging
-    await v.move('right', v.wp(F.plugs[cable]), 6, into); await v.frames(2);
-    const ring = v.ring('right');
-    v.grip('right', true); await v.frames(2);
-    const held = v.holding('right')?.kind;
-    const sock = F.board.localToWorld(F.sockets[socket].clone());
-    await v.move('right', sock.clone().addScaledVector(n, 0.25), 8, into);
-    const ringBefore = { on: mb.world.fixtures.board.children.some(o => o.isMesh && o.geometry.type === 'TorusGeometry' && o.visible) };
-    await v.move('right', sock, 8, into);
-    await v.frames(3); await v.sleep(350); await v.frames(2);
-    const stillHeld = !!v.holding('right');
-    v.grip('right', false); await v.frames(2);
-    return { ring, held, ringBefore: ringBefore.on, stillHeld };
-  }, { cable, socket });
-  freeO2 = true;
-  const cables = g.faults.board.cables;
-  const loose = cables.map((c, i) => ({ i, ...c })).filter(c => !c.seated);
-  const fullSocket = cables.find(c => c.seated).socket;
-  // A full socket: the ring is red and nothing happens.
-  let o2 = g.oxygen, mistakes = g.stats.mistakes;
-  r = await plugInto(loose[0].i, fullSocket);
-  check(r.ring === PAL.green && r.held === 'plug', 'board: could not pick up a hanging plug: ' + JSON.stringify(r));
-  check(g.stats.mistakes === mistakes && !cables[loose[0].i].seated, 'board: pushing a plug at a socket that is already full did something');
-  // A wrong socket: a spark, 4 oxygen, and the plug drops out of the hand.
-  const wrong = [0, 1, 2, 3].find(k => k !== fullSocket && k !== loose[0].socket);
-  await P(() => window.vr.haptics());
-  r = await plugInto(loose[0].i, wrong);
-  check(g.stats.mistakes === mistakes + 1 && o2 - g.oxygen >= CFG.wrongPlug, `board: a wrong socket should cost ${CFG.wrongPlug} oxygen and count as a mistake`);
-  check(!r.stillHeld && r.ringBefore, 'board: after a wrong socket the plug should drop out of the hand, and the socket should have lit up on the way in: ' + JSON.stringify(r));
-  check((await P(() => window.vr.haptics())).some(b => b.strength === 1), 'board: no buzz when the plug went in');
-  freeO2 = false;
-  for (const c of loose) {
-    r = await plugInto(c.i, c.socket);
-    check(await serverUntil(() => !g.faults.board || g.faults.board.cables[c.i].seated, 2), `board: the ${c.color} plug did not seat in its socket: ${JSON.stringify(r)}`);
-  }
-  check(await serverUntil(() => !g.faults.board), 'board: all three plugs seated but the fault is not fixed');
-  check(await P(async () => { for (let i = 0; i < 120 && window.moonbase.interior.phase !== 'main'; i++) await window.vr.sleep(50); return window.moonbase.interior.phase; }) === 'main', 'board: the roof lights did not come back');
-  await reachOk('the switchboard');
+  // There is no switchboard on the west wall any more; a flat battery is what puts the hall on its backup lights.
+  check(await P(() => !window.moonbase.world.fixtures.board && !window.moonbase.world.fixtures.plugs), 'hall: the switchboard is still there');
+  g.break('dust'); g.battery = 0;
+  await P(() => window.vr.until(s => s.scene.dark, 3));
+  check(await P(async () => { for (let i = 0; i < 120 && window.moonbase.interior.phase !== 'backup'; i++) await window.vr.sleep(50); return window.moonbase.interior.phase; }) === 'backup', 'blackout: the hall did not go to its red backup lights when the battery ran flat');
+  delete g.faults.dust; g.battery = 100;
+  check(await P(async () => { for (let i = 0; i < 120 && window.moonbase.interior.phase !== 'main'; i++) await window.vr.sleep(50); return window.moonbase.interior.phase; }) === 'main', 'blackout: the roof lights did not come back with the power');
+  await stand(HALL_X, -6, HALL_X, -8); // out of airlock S's chamber and up the hall, so the airlocks are armed again
   check(sheltered(g.astro, g.rovers.hauler), 'inside the habitat should count as cover from a meteor shower');
   // And out again through the east door: the twin on the hall's east wall comes out at the long module's end.
   r = await P(async () => {
@@ -853,37 +818,24 @@ try {
     // The hall's window, looking out at the Moon.
     await draw('window', async () => {
       const v = window.vr;
-      await v.stand(HALL_X + 1.6, -1.1, HALL_X + 1.9, 0);
+      await v.stand(500 + 1.6, -1.1, 500 + 1.9, 0); // 500: HALL_X, which this page cannot see
       window.fakeXR.head(0, 1.7, 0, 0, 0.0);
       await v.frames(4);
     });
     await stand(panels[1].x + panels[1].nx * 0.62, panels[1].z + panels[1].nz * 0.62, panels[1].x, panels[1].z);
     await kit('brush');
     await draw('brushing', async () => {
-      const v = window.vr, F = window.moonbase.world.fixtures, c = F.dustCells[6 + 1], n = c.getWorldDirection(new v.T.Vector3());
-      await v.move('right', v.wp(c).addScaledVector(n, 0.04), 6, n.clone().negate(), 'brush');
-      await v.frames(6);
+      // Half a pass along the top row and partway back lower down: a streaky path through the dust, grains in the air.
+      const v = window.vr, F = window.moonbase.world.fixtures, n = F.dustCells[6].getWorldDirection(new v.T.Vector3()), into = n.clone().negate();
+      const at = (cell, dx, dy) => { const p = v.wp(F.dustCells[cell]); return F.dustCells[cell].parent.localToWorld(F.dustCells[cell].parent.worldToLocal(p).add(v.V(dx, dy, 0.04))); };
+      await v.move('right', at(6, -0.2, 0.05), 4, into, 'brush');
+      await v.move('right', at(7, 0.25, 0.1), 14, into, 'brush');
+      await v.move('right', at(7, -0.1, -0.12), 8, into, 'brush');
+      await v.move('right', at(6, 0.0, -0.18), 8, into, 'brush');
+      await v.frames(2);
+      window.fakeXR.head(0, 1.7, 0, 0, -0.12);
     });
     await letGo('right');
-    // Inside, a plug in the hand on its way to a socket.
-    await kit();
-    g.break('board');
-    await P(() => window.vr.until(s => s.scene.board, 3));
-    await stand(boardAt.x + boardAt.nx * 0.75, boardAt.z + boardAt.nz * 0.75, boardAt.x, boardAt.z);
-    await draw('plug', async () => {
-      const v = window.vr, mb = window.moonbase, F = mb.world.fixtures, cable = mb.state().scene.board.findIndex(c => !c.seated);
-      const n = F.board.getWorldDirection(new v.T.Vector3()), into = n.clone().negate();
-      await v.until(() => F.plugs[cable].position.distanceTo(F.plugRest[cable]) < 0.01, 5);
-      await v.sleep(2500); await v.frames(3); // the hall is on its red backup lights by now
-      await v.move('right', v.wp(F.plugs[cable]), 5, into); await v.frames(2);
-      v.grip('right', true); await v.frames(2);
-      const free = [0, 1, 2, 3].find(k => !mb.state().scene.board.some(c => c.seated && c.socket === k));
-      await v.move('right', F.board.localToWorld(F.sockets[free].clone()).addScaledVector(n, 0.2).add(v.V(0, -0.02, 0)), 6, into);
-      window.fakeXR.head(0, 1.7, 0, 0, -0.25);
-      await v.frames(3);
-    });
-    await P(async () => { window.vr.grip('right', false); await window.vr.frames(2); });
-    delete g.faults.board;
     // The base, from the south.
     await draw('base', async () => {
       const v = window.vr;
@@ -933,6 +885,15 @@ try {
       return { off: v.tipGap() - 0.06, presenting: mb.renderer.xr.isPresenting };
     };
     v.push = async (inOut) => { v.hand('right', v.where('right').addScaledVector(v.exitOut(), -0.06 * inOut)); await v.fr(1); };
+    // The same with a controller: what touches the cap is the drawn glove's fingertip.
+    const gloveTip = () => mb.fx.gloves[v.index('right')].userData.right.userData.tip;
+    v.lineUpGlove = async () => {
+      v.readCuff(); await v.fr(3);
+      if (!gloveTip()) return { off: null, why: 'the glove has no Tip_Index' };
+      let at = v.where('right');
+      for (let k = 0; k < 4; k++) { at = at.add(v.exitAt().addScaledVector(v.exitOut(), 0.06).sub(v.wp(gloveTip()))); v.hand('right', at); await v.fr(2); }
+      return { off: v.wp(gloveTip()).distanceTo(v.exitAt()) - 0.06 };
+    };
     v.hold = async ms => { for (const end = Date.now() + ms; Date.now() < end && mb.renderer.xr.isPresenting;) { await v.sleep(100); await v.fr(1); } };
     // Where the astronaut is and what the cuff says.
     v.after = () => {
@@ -998,11 +959,35 @@ try {
   r = await P(async () => { const v = window.vr; await v.hold(1500); return v.after(); });
   check(r.presenting, 'exit: holding on after the debrief EXIT ended the headset session: ' + JSON.stringify(r));
   if (SHOTS) await draw('board-last-mission', async () => { window.fakeXR.head(0, 1.7, 0, 0, 0); for (const s of ['left', 'right']) window.fakeXR.hand(s, [s === 'left' ? -0.22 : 0.22, 1.1, -0.1], [-0.7071, 0, 0, 0.7071]); await window.vr.fr(4); });
-  // In the lobby, with no debrief: lift the finger, press again, and the session ends.
+  // In the lobby, with no debrief. First the right controller: the glove's fingertip on the cap starts
+  // to press it, and so does pointing at it and holding the trigger. Both let go before it goes.
+  await P(async () => { const v = window.vr; await v.push(-1); await v.fr(3); window.fakeXR.kind('left', 'controller'); window.fakeXR.kind('right', 'controller'); await v.fr(8); });
+  r = await P(() => window.vr.lineUpGlove());
+  check(r.off !== null && Math.abs(r.off) < 0.015, 'exit: could not line the glove fingertip up with the EXIT button: ' + JSON.stringify(r));
+  r = await P(async () => { const v = window.vr, mb = window.moonbase; await v.push(1); await v.sleep(350); await v.fr(2); const pressing = mb.arm.pressing; await v.push(-1); await v.sleep(700); await v.fr(3); return { pressing: +pressing.toFixed(2), after: +mb.arm.pressing.toFixed(2), presenting: mb.renderer.xr.isPresenting }; });
+  check(r.presenting && r.pressing > 0.3 && r.after === 0, 'exit: the right glove\'s fingertip on the EXIT button should press it, and letting go should let it back up: ' + JSON.stringify(r));
+  r = await P(async () => {
+    const v = window.vr, mb = window.moonbase;
+    v.readCuff(); await v.fr(3);
+    const at = v.exitAt(), out = v.exitOut();
+    v.hand('right', at.clone().addScaledVector(out, 0.3).add(v.V(0.05, -0.05, 0)), at.clone().sub(at.clone().addScaledVector(out, 0.3).add(v.V(0.05, -0.05, 0)))); await v.fr(3);
+    const lit = mb.arm.invited;
+    window.fakeXR.trigger('right', true); await v.sleep(350); await v.fr(2);
+    const pressing = mb.arm.pressing;
+    window.fakeXR.trigger('right', false); await v.sleep(700); await v.fr(3);
+    return { lit, pressing: +pressing.toFixed(2), after: +mb.arm.pressing.toFixed(2), presenting: mb.renderer.xr.isPresenting };
+  });
+  check(r.presenting && r.lit && r.pressing > 0.3 && r.after === 0, 'exit: pointing the right controller at the EXIT button should light it, and holding the trigger should press it: ' + JSON.stringify(r));
+  // Then bare hands, the way the Quest really behaves: the left hand drops out of tracking for a moment
+  // while the right one covers it. The press carries on through the gap, and the session ends.
+  await P(async () => { const v = window.vr; v.hand('right', v.where('right').add(v.V(0.15, -0.2, 0.15))); await v.fr(3); window.fakeXR.kind('left', 'hand'); window.fakeXR.kind('right', 'hand'); await v.fr(8); });
   r = await P(() => window.vr.lineUp());
   r = await P(async () => { const v = window.vr; await v.push(1); await v.sleep(250); await v.fr(2); return { pressing: +window.moonbase.arm.pressing.toFixed(2), presenting: window.moonbase.renderer.xr.isPresenting }; });
   check(r.presenting && r.pressing > 0, 'exit: a fingertip held on the EXIT button should start to press it (cap down, lamp warming): ' + JSON.stringify(r));
-  await P(() => window.vr.hold(1500));
+  // 0.25 s pressed so far; lose the left hand for 0.45 s with the finger still on the cap. The cuff stays
+  // where it was and the press finishes inside the gap.
+  r = await P(async () => { const v = window.vr, mb = window.moonbase; await v.sleep(100); window.fakeXR.kind('left', null); await v.sleep(450); const ended = !mb.renderer.xr.isPresenting; if (!ended) { window.fakeXR.kind('left', 'hand'); await v.hold(1500); } return { ended }; });
+  check(r.ended, 'exit: losing the left hand for a moment while pressing EXIT reset the press: ' + JSON.stringify(r));
   r = await after();
   check(!r.presenting, 'exit: in the lobby, holding the EXIT button did not end the headset session: ' + JSON.stringify(r));
   check(await P(() => !document.getElementById('gate').hidden), 'exit: the lobby did not come back after leaving the headset');

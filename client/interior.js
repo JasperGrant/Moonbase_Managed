@@ -19,7 +19,7 @@ export const ROOM = {
   origin: { x: 500, z: 0 },          // where the room sits in the world, well clear of the terrain
   arrive: { x: 0, z: -1.3 },         // where the astronaut stands after coming in
   height: 3.2,
-  panel: { x: -3.44, z: -7.7 },      // breaker panel, on the west wall
+  panel: { x: -3.44, z: -7.7 },      // the power junction box, on the west wall
 };
 export const HALL = { x0: -3.5, x1: 3.5, z0: -12, z1: 0 };
 export const COR = { x0: 1.5, x1: 3.5, z0: -15, z1: -12 };
@@ -144,7 +144,7 @@ export function buildInterior(THREE, scene, { sfx = () => {} } = {}) {
   }
   const D_ = PLACES.doors;
   wallWithDoors(HALL.x0, 0, HALL.x1, 0, 0, H, 0, -1, [D_.S.hall.x]);       // south, with airlock S and the window
-  wallWithDoors(HALL.x0, HALL.z0, HALL.x0, 0, 0, H, 1, 0, [D_.W.hall.z]);  // west, with airlock W and the breaker panel
+  wallWithDoors(HALL.x0, HALL.z0, HALL.x0, 0, 0, H, 1, 0, [D_.W.hall.z]);  // west, with airlock W and the junction box
   wall(HALL.x0, HALL.z0, COR.x0, HALL.z0, 0, H, 0, 1);       // north, up to the corridor opening
   wall(COR.x0, HALL.z0, COR.x1, HALL.z0, CH, H, 0, 1);       // header over the opening
   wallWithDoors(HALL.x1, 0, HALL.x1, COR.z0, 0, H, -1, 0, [D_.E.hall.z]); // east, hall and corridor, with airlock E
@@ -262,12 +262,8 @@ export function buildInterior(THREE, scene, { sfx = () => {} } = {}) {
     [[-0.3, H, -3.0], [-0.3, 2.86, -3.6], [-0.3, 2.86, -4.45]],
   ]) group.add(new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts.map(p => new THREE.Vector3(...p))), 12, 0.022, 5), cableMat));
 
-  // Breaker panel surround, west wall. The panel itself is built by stations.js on `mount`.
-  const mount = new THREE.Group();
-  mount.position.set(ROOM.panel.x, 0, ROOM.panel.z); mount.rotation.y = Math.PI / 2; // local +z faces into the room
-  group.add(mount);
+  // The power junction box high on the west wall, with its conduit up into the ceiling.
   box(D, 0.1, 0.3, 0.5, -3.44, 2.15, -7.7); tube(G, [-3.42, 2.3, -7.8], [-3.42, H, -7.8], 0.04); tube(G, [-3.42, 2.3, -7.6], [-3.42, H, -7.6], 0.04);
-  for (const z of [-8.45, -6.95]) box(Y, 0.9, 0.004, 0.08, -3.0, 0.004, z); box(Y, 0.08, 0.004, 1.58, -2.55, 0.004, -7.7);
   const beacon = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 0.12, 10), new THREE.MeshBasicMaterial({ color: PAL.hex.amberOff, toneMapped: false }));
   beacon.position.set(-3.34, 2.36, -7.7); group.add(beacon);
   box(D, 0.14, 0.04, 0.14, -3.34, 2.29, -7.7);
@@ -366,7 +362,7 @@ export function buildInterior(THREE, scene, { sfx = () => {} } = {}) {
   const SKY = new THREE.Color(0xe8dcc4), GROUND = new THREE.Color(0x6e675a), RSKY = new THREE.Color(0x8a2e1e), RGROUND = new THREE.Color(0x3a140c);
   const ON = new THREE.Color(0xffe8c4), OFF = new THREE.Color(0x2b2a26), RON = new THREE.Color(PAL.hex.red), ROFF = new THREE.Color(PAL.hex.redOff);
   const MAIN_FILL = 1.75, MAIN_DOWN = 1.4, DARK_FILL = 0.035, BACKUP_FILL = 0.2, BACKUP_POINT = 9;
-  // Roof rows re-strike starting with the one nearest the breaker panel.
+  // Roof rows re-strike starting with the one nearest the junction box.
   const ORDER = ROOF_ROWS.map((z, i) => i).sort((a, b) => Math.abs(ROOF_ROWS[a] - ROOM.panel.z) - Math.abs(ROOF_ROWS[b] - ROOM.panel.z));
   const rows = ROOF_ROWS.map(() => 1);
   let out = false, phase = 'main', t = 0, backupLevel = 0, struck = 0, nextAlert = 0;
@@ -393,7 +389,7 @@ export function buildInterior(THREE, scene, { sfx = () => {} } = {}) {
   const inSolid = (x, z) => SOLIDS.some(([x0, x1, z0, z1]) => x > x0 - BODY + EPS && x < x1 + BODY - EPS && z > z0 - BODY + EPS && z < z1 + BODY - EPS);
 
   return {
-    group, mount, hatch, damage, doors, window: win, windowGlass,
+    group, hatch, damage, doors, window: win, windowGlass,
     // The server's scene, every frame (null between rounds): faults knock things loose, fixes put them back.
     setDamage(scene, audible) { damage.audible = audible; damage.set(scene); },
     get phase() { return phase; },          // 'main' | 'fail' | 'dark' | 'backup' | 'restore'
