@@ -10,6 +10,8 @@
 // The tools are physics bodies (client/physics.js): they lie where they were left, fall, tumble and
 // can be thrown. The astronaut holds one at a time, in either hand; the other hand stays free for work.
 import { FAULTS, TOOLS, PLACES, CFG } from '/shared/config.js';
+// Samples: picked off the ground (or out of a cup on the Hauler) like a tool, two hands' worth at most, then
+// let go over a cup, over the port, or anywhere else to fall.
 import { drawTool } from '/shared/icons.js';
 import { PAL } from '/shared/palette.js';
 import { loadGlove, loadPeriod, MODELS } from '/shared/assets.js';
@@ -30,6 +32,11 @@ const PATCH_RANGE = 0.13;   // metres from the patch to the leak
 const WELD_DWELL = 0.4;     // seconds the tip must stay on one point of the crack
 const WELD_RANGE = 0.12;    // metres from the tip to that point
 const HEAVY_LAG = 9;        // 1/s: how fast the tire and the generator catch up with the hand (they swing)
+const GRAB_SAMPLE = 0.24;   // metres from a hand to a rock sample to take it
+const GRAB_RAIL = 0.3;      // ... to the Hauler's rail to get on
+const CUP_SNAP = 0.22;      // metres: a sample let go this close to an empty cup goes in it
+const PORT_SNAP = 0.35;     // ... this close to the port's mouth goes in the port
+const DESK_SAMPLES = [[-0.26, -0.24, -0.55], [-0.12, -0.3, -0.5]]; // on a laptop, where carried samples sit in the view
 const DESK_HOLD = [0.24, -0.26, -0.55]; // on a laptop, where the held tool sits in the view
 
 // Each tool's collider (client/physics.js parts, in the tool's own frame, -z away from the hand), how it
@@ -51,7 +58,7 @@ const DECOYS = {
 };
 const BIG = id => id === 'tire' || id === 'gen';
 
-export function buildFixtures(THREE, world, { rig, camera, send, sfx = () => {}, sfxAt = null, pulse = () => {}, phys = null, interior = null, where = () => 'out' }) {
+export function buildFixtures(THREE, world, { rig, camera, send, sfx = () => {}, sfxAt = null, pulse = () => {}, phys = null, interior = null, where = () => 'out', onRail = () => false }) {
   const F = world.fixtures;
   const V = () => new THREE.Vector3();
   const a = V(), b = V(), c = V(), q4 = new THREE.Quaternion();
@@ -190,6 +197,7 @@ export function buildFixtures(THREE, world, { rig, camera, send, sfx = () => {},
     const other = inHand();
     if (other && i === DESK) drop(held.findIndex(isTool), [0, 0, 0], true); // on a laptop, a click on another tool swaps
     if (held[i]) return false;
+    if (i === DESK && deskSamples.length >= 2) { refusedAt = clock(); refused = id; sfx('refuse'); return false; } // both hands full of rock
     else if (other) {
       refusedAt = clock(); refused = id; sfx('refuse');
       if (i >= 0) { pulse(i, 1, 90); setTimeout(() => pulse(i, 1, 90), 160); }
@@ -312,7 +320,7 @@ export function buildFixtures(THREE, world, { rig, camera, send, sfx = () => {},
     for (const [x0, x1, z0, z1, top] of SOLIDS) fixedBox('hall', x1 - x0, top, z1 - z0, (x0 + x1) / 2, top / 2, (z0 + z1) / 2);
     for (const d of Object.values(D)) chamber('hall', d.hall, false, true);
     // The Moon: the ground, the habitat's core and its two side modules, and the four chambers.
-    if (world.height) P.terrain(world.height, CFG.bounds + 3, 1);
+    if (world.height) P.terrain(world.height, CFG.bounds + 4, 2); // on the field's own 2 m lattice
     P.fixed('surface', new C.Cylinder(2.5, 2.5, 3.6, 16), 0, 1.8, 0);
     fixedBox('surface', 2.4, 2.6, 1.9, -3.4, 1.3, 0);
     fixedBox('surface', 5.2, 2.8, 2.9, 4.8, 1.4, 0);
@@ -341,10 +349,13 @@ export function buildFixtures(THREE, world, { rig, camera, send, sfx = () => {},
     send({ fix: 'board', cable, socket });
   }
 
-  const wheelHit = add(F.wheel, new THREE.SphereGeometry(0.45, 8, 6), ghost);
-  target(wheelHit, () => st.scene?.wheel === 1, () => pullWheel());
-  const hubHit = add(F.hub, new THREE.SphereGeometry(0.3, 8, 6), ghost);
-  target(hubHit, () => st.scene?.wheel === 2, () => fitTire());
+  // Each rover has a wheel that can break: the Scout's and the Hauler's.
+  const wheelOf = rid => st.scene?.wheels?.[rid] || 0;
+  const brokenRover = () => Object.keys(F.wheels).find(rid => wheelOf(rid) > 0) || null;
+  for (const [rid, w] of Object.entries(F.wheels)) {
+    target(add(w.wheel, new THREE.SphereGeometry(0.45, 8, 6), ghost), () => wheelOf(rid) === 1, () => pullWheel());
+    target(add(w.hub, new THREE.SphereGeometry(0.3, 8, 6), ghost), () => wheelOf(rid) === 2, () => fitTire());
+  }
   function pullWheel() { once('pull', () => { sfx('click'); send({ fix: 'wheel', pull: true }); }); }
   function fitTire() { return need('wheel') && once('fit', () => { sfx('click'); send({ fix: 'wheel', fit: true }); }); }
 
@@ -444,7 +455,14 @@ export function buildFixtures(THREE, world, { rig, camera, send, sfx = () => {},
       offer(b.distanceTo(p), GRAB_CORD, { kind: 'cord', start: p.clone() });
     }
     F.plugs.forEach((plug, n) => { if (plugLoose(n) && !plug.userData.held) offer(worldPos(plug, b).distanceTo(p), GRAB_PLUG, { kind: 'plug', i: n }); });
-    if (st.scene?.wheel === 1) offer(worldPos(F.wheel, b).distanceTo(p), 0.5, { kind: 'wheel', start: p.clone() });
+    for (const [rid, w] of Object.entries(F.wheels)) if (wheelOf(rid) === 1) offer(worldPos(w.wheel, b).distanceTo(p), 0.5, { kind: 'wheel', rid, start: p.clone() });
+    // Rock samples, on the ground or in a cup, while outside and a hand is free for one.
+    if (placeNow() === 'surface') for (const s of st.scene?.samples || []) {
+      if ((s.at !== 'ground' && s.at !== 'tray') || mine(s.id)) continue;
+      offer(samplePos(s, b).distanceTo(p), GRAB_SAMPLE, { kind: 'sample', id: s.id });
+    }
+    // The Hauler's rail: grab it to get on.
+    if (placeNow() === 'surface') offer(worldPos(F.rail, b).distanceTo(p), GRAB_RAIL, { kind: 'rail' });
     return best;
   }
 
@@ -477,8 +495,135 @@ export function buildFixtures(THREE, world, { rig, camera, send, sfx = () => {},
   // Is a mesh in the part of the world being drawn?
   const isShown = m => { for (let o = m; o; o = o.parent) if (!o.visible) return false; return true; };
 
+  // ---------- rock samples ----------
+  // The server says where each sample is (st.scene.samples: on the ground, in a cup, in a hand). A sample in
+  // one of our hands, or falling from one, is drawn where we say (world.sampleOverride).
+  const deskSamples = [];          // on a laptop: the ids carried, in the one "hand"
+  const falling = [];              // { id, p, v, sent, t }: let go, dropping at lunar gravity
+  const pending = new Map();       // id -> time we asked for it: until the server agrees it is ours
+  const handPts = [null, null];    // where each headset hand's fingers are this frame
+  const handVel = [V(), V()], handWas = [V(), V()];
+  const mine = id => deskSamples.includes(id) || held.some(h => h?.kind === 'sample' && h.id === id) || falling.some(f => f.id === id);
+  const sizeOf = id => { let h = 7; for (const ch of id) h = (h * 31 + ch.charCodeAt(0)) % 9973; return 0.17 + h / 9973 * 0.12; };
+  function samplePos(s, out) {
+    if (s.at === 'tray' && F.cups[s.slot]) return F.cups[s.slot].getWorldPosition(out).setY(out.y + 0.09);
+    return out.set(s.x, world.height(s.x, s.z) + sizeOf(s.id) * 0.3, s.z);
+  }
+  const slotFree = n => !!st.scene && !st.scene.tray?.[n];
+  function pickSample(id, i) {
+    const s = (st.scene?.samples || []).find(x => x.id === id); if (!s) return false;
+    if (i === DESK) { if (deskSamples.length >= (inHand() ? 1 : 2)) { sfx('refuse'); return false; } deskSamples.push(id); }
+    else held[i] = { kind: 'sample', id };
+    pending.set(id, clock());
+    samplePos(s, a);
+    if (s.at === 'ground') { world.puff?.(a, 8, 0.4); if (sfxAt) sfxAt('scrape', a, 0.8); else sfx('scrape'); }
+    else sfx('clink');
+    if (i >= 0 && i !== DESK) pulse(i, 0.5, 40);
+    send({ pick: id });
+    return true;
+  }
+  // Let go of a sample in hand i at world point p: into a cup, into the port, or down onto the ground.
+  function letGoSample(i, id, p = i === DESK ? null : handPts[i], v = i === DESK ? [0, 0, 0] : handVel[i].toArray()) {
+    if (i === DESK) { const k = deskSamples.indexOf(id); if (k >= 0) deskSamples.splice(k, 1); } else held[i] = null;
+    pending.delete(id);
+    if (!p) { camera.getWorldPosition(a); camera.getWorldDirection(b); b.y = 0; b.normalize(); p = a.clone().addScaledVector(b, 0.5).setY(a.y - 0.5); }
+    // Over an empty cup?
+    let slot = -1, best = CUP_SNAP;
+    F.cups.forEach((cup, n) => { const d = cup.getWorldPosition(c).setY(c.y + 0.08).distanceTo(p); if (d < best && slotFree(n)) { best = d; slot = n; } });
+    if (slot >= 0) { send({ tray: id, slot }); sfx('clink'); if (i >= 0 && i !== DESK) pulse(i, 0.6, 50); return; }
+    // Over the port's mouth?
+    if (world.port.localToWorld(c.copy(F.portMouth)).distanceTo(p) < PORT_SNAP) {
+      send({ bank: id }); if (sfxAt) sfxAt('lid', c, 1); else sfx('lid');
+      if (i >= 0 && i !== DESK) pulse(i, 0.8, 80);
+      return;
+    }
+    // Otherwise it falls.
+    falling.push({ id, p: p.clone(), v: V().fromArray(v).clampLength(0, 5), sent: false, t: clock() });
+  }
+  // Q on a laptop, or a test: put down the last sample carried.
+  function dropSample() {
+    if (deskSamples.length) { letGoSample(DESK, deskSamples[deskSamples.length - 1]); return true; }
+    const i = held.findIndex(h => h?.kind === 'sample'); if (i < 0) return false;
+    letGoSample(i, held[i].id); return true;
+  }
+  // A click on a sample (laptop, or pointing): take it into the desk hand.
+  function deskPick(id) { return pickSample(id, DESK); }
+  // Click targets for the laptop: one invisible ball per sample in view, the four cups and the port.
+  const sampleHits = Array.from({ length: 24 }, () => {
+    const m = add(outside, new THREE.SphereGeometry(0.22, 8, 6), ghost); m.visible = false; m.userData.sid = null;
+    return target(m, () => !!m.userData.sid && running(), () => deskPick(m.userData.sid));
+  });
+  F.cups.forEach((cup, n) => target(add(cup, new THREE.SphereGeometry(0.14, 8, 6), ghost, 0, 0.08, 0), () => deskSamples.length > 0 && slotFree(n), () => { letGoSample(DESK, deskSamples[0], cup.getWorldPosition(V()).setY(cup.getWorldPosition(V()).y + 0.08)); }));
+  target(add(world.port, new THREE.SphereGeometry(0.3, 8, 6), ghost, F.portMouth.x, F.portMouth.y, F.portMouth.z), () => deskSamples.length > 0, () => { letGoSample(DESK, deskSamples[0], world.port.localToWorld(F.portMouth.clone())); });
+  target(add(F.rail, new THREE.SphereGeometry(0.35, 8, 6), ghost), () => running(), () => onRail(DESK));
+  // Where a sample we have is drawn.
+  const ov = V();
+  world.sampleOverride = id => {
+    const f = falling.find(x => x.id === id); if (f) return f.p;
+    const k = deskSamples.indexOf(id);
+    if (k >= 0) return camera.localToWorld(ov.set(...DESK_SAMPLES[k]));
+    const i = held.findIndex(h => h?.kind === 'sample' && h.id === id);
+    if (i >= 0 && handPts[i]) return ov.copy(handPts[i]).add(b.set(0, -0.03, 0));
+    return null;
+  };
+  // The server's word on samples: a pick it refused goes back; a put it has taken stops falling.
+  function syncSamples() {
+    const list = st.scene?.samples || [];
+    const at = id => list.find(s => s.id === id);
+    for (const [id, t] of pending) {
+      const s = at(id);
+      if (s && s.at === 'hand') pending.delete(id);
+      else if (clock() - t > 3) { // refused: out of reach, or both hands full
+        pending.delete(id);
+        const k = deskSamples.indexOf(id); if (k >= 0) deskSamples.splice(k, 1);
+        held.forEach((h, n) => { if (h?.kind === 'sample' && h.id === id) held[n] = null; });
+        sfx('refuse');
+      }
+    }
+    // The server has a sample in our hand that we do not (a slow page, a reload): on a laptop take it back
+    // into the hand; in a headset, put it down where we stand.
+    for (const id of st.carry || []) {
+      if (mine(id) || pending.has(id)) continue;
+      if (!handPts[0] && !handPts[1] && deskSamples.length < 2) deskSamples.push(id);
+      else { camera.getWorldPosition(a); send({ put: id, x: +a.x.toFixed(2), z: +a.z.toFixed(2) }); }
+    }
+    for (let n = falling.length - 1; n >= 0; n--) { const f = falling[n], s = at(f.id); if (f.sent && (!s || s.at !== 'hand' || clock() - f.t > 3)) falling.splice(n, 1); }
+  }
+  function stepSamples(dt, hands, vr) {
+    for (let i = 0; i < 2; i++) {
+      const hp = vr && hands[i] ? hands[i].point : null;
+      if (hp && dt > 0) { handVel[i].copy(hp).sub(handWas[i]).divideScalar(dt); handWas[i].copy(hp); }
+      handPts[i] = hp;
+    }
+    // A sample held in a hand that has gone away (the controllers put down) falls.
+    held.forEach((h, i) => { if (h?.kind === 'sample' && i !== DESK && !handPts[i]) letGoSample(i, h.id, null); });
+    for (const f of falling) {
+      if (f.sent) continue;
+      f.v.y -= 1.62 * dt; f.p.addScaledVector(f.v, dt);
+      const floor = world.height(f.p.x, f.p.z) + sizeOf(f.id) * 0.3;
+      if (f.p.y <= floor) {
+        f.p.y = floor; f.sent = true;
+        world.puff?.(f.p, 8, 0.5);
+        camera.getWorldPosition(c);
+        if (f.p.distanceTo(c) < 4) { if (sfxAt) sfxAt('thud', f.p, 0.4, { mass: 0.6 }); else sfx('clank'); }
+        send({ put: f.id, x: +f.p.x.toFixed(2), z: +f.p.z.toFixed(2) });
+      }
+    }
+    // Click targets on the samples in view.
+    let n = 0;
+    if (placeNow() === 'surface') for (const s of st.scene?.samples || []) {
+      if (n >= sampleHits.length) break;
+      if ((s.at !== 'ground' && s.at !== 'tray') || mine(s.id)) continue;
+      const m = sampleHits[n++]; samplePos(s, m.position); m.userData.sid = s.id; m.visible = true;
+    }
+    for (; n < sampleHits.length; n++) { sampleHits[n].userData.sid = null; sampleHits[n].visible = false; }
+    world.redrawSamples?.();
+  }
+
   const api = {
     tools, rings, gloves, spot, outside,
+    get carried() { return [...deskSamples, ...held.filter(h => h?.kind === 'sample').map(h => h.id)]; },
+    dropSample, deskPick,
     get refusedAt() { return refusedAt; },
     // Meshes that can be pointed at right now.
     targets: () => hits.filter(m => m.userData.enabled() && m.parent && isShown(m)),
@@ -524,7 +669,9 @@ export function buildFixtures(THREE, world, { rig, camera, send, sfx = () => {},
       if (what.kind === 'tool') { take(what.id, i); return true; }
       held[i] = what;
       if (what.kind === 'plug') { F.plugs[what.i].userData.held = true; selectedPlug = -1; }
-      if (what.kind === 'wheel') F.wheel.userData.held = true;
+      if (what.kind === 'wheel') F.wheels[what.rid].wheel.userData.held = true;
+      if (what.kind === 'sample') { held[i] = null; return pickSample(what.id, i); }
+      if (what.kind === 'rail') { held[i] = null; if (!onRail(i)) return false; held[i] = what; sfx('clank'); pulse(i, 0.9, 70); return true; }
       sfx('click');
       pulse(i, 0.7, 50);
       return true;
@@ -534,14 +681,16 @@ export function buildFixtures(THREE, world, { rig, camera, send, sfx = () => {},
       const h = held[i];
       if (!h) return;
       if (isTool(h)) { const v = velocity(h.id), fast = Math.hypot(...v) > 1.5; drop(i, v); if (fast) pulse(i, 0.8, 60); return; }
+      if (h.kind === 'sample') { letGoSample(i, h.id); return; }
       held[i] = null;
       if (h.kind === 'plug') F.plugs[h.i].userData.held = false;
-      if (h.kind === 'wheel') F.wheel.userData.held = false;
+      if (h.kind === 'wheel') F.wheels[h.rid].wheel.userData.held = false;
     },
     holding: i => held[i],
     // A new mission: the server lays the tools out again; take its word for every one.
     reset() {
       held.forEach((h, i) => { if (isTool(h)) drop(i, [0, 0, 0], true); held[i] = null; });
+      deskSamples.length = 0; falling.length = 0; pending.clear();
       for (const id in T) { T[id].seen = ''; T[id].report = null; T[id].drop = -9; }
       for (const [id, d] of Object.entries(DECOYS)) { if (T[id].state === 'gone' && phys) phys.restore(id); T[id].state = 'loose'; lay(id, 'hall', ...d.at); }
     },
@@ -581,9 +730,10 @@ export function buildFixtures(THREE, world, { rig, camera, send, sfx = () => {},
           if (!ours && (!pose || inside !== !!t.inside || Math.hypot(pose.x - t.x, pose.z - t.z) > 0.05)) lay(id, t.inside ? 'hall' : 'surface', t.x, t.y, t.z);
         }
       }
+      syncSamples();
       held.forEach((h, i) => { // you cannot work what is already fixed
         if (h?.kind === 'plug' && !plugLoose(h.i)) { F.plugs[h.i].userData.held = false; held[i] = null; }
-        if (h?.kind === 'wheel' && s.scene?.wheel !== 1) { F.wheel.userData.held = false; held[i] = null; }
+        if (h?.kind === 'wheel' && wheelOf(h.rid) !== 1) { F.wheels[h.rid].wheel.userData.held = false; held[i] = null; }
         if (h?.kind === 'cord' && T.gen.state === 'gone') held[i] = null;
       });
       if (selectedPlug >= 0 && !plugLoose(selectedPlug)) selectedPlug = -1;
@@ -655,10 +805,10 @@ export function buildFixtures(THREE, world, { rig, camera, send, sfx = () => {},
             plug.userData.held = false; held[i] = null;
           }
         } else if (h.kind === 'wheel') {
-          world.rover.worldToLocal(F.wheel.position.copy(p));
+          world.rovers[h.rid].worldToLocal(F.wheels[h.rid].wheel.position.copy(p));
           const out = p.distanceTo(h.start);
           once('wheelBuzz' + i, () => pulse(i, Math.min(1, 0.3 + out / WHEEL_PULL * 0.5), 40), 0.08); // it resists
-          if (out > WHEEL_PULL) { pullWheel(); pulse(i, 1, 200); F.wheel.userData.held = false; held[i] = null; }
+          if (out > WHEEL_PULL) { pullWheel(); pulse(i, 1, 200); F.wheels[h.rid].wheel.userData.held = false; held[i] = null; }
         } else if (h.kind === 'tool') {
           const g = tools[h.id];
           g.updateWorldMatrix(true, false);
@@ -685,7 +835,8 @@ export function buildFixtures(THREE, world, { rig, camera, send, sfx = () => {},
           }
           if (h.id === 'patch' && st.suit && spot.visible && tip.distanceTo(worldPos(spot, c)) < PATCH_RANGE && patchSuit()) pulse(i, 1, 120);
           // The tire goes on when its centre, out in front of the hand, meets the bare hub.
-          if (h.id === 'tire' && st.scene?.wheel === 2 && worldPos(g, a).distanceTo(worldPos(F.hub, c)) < TIRE_FIT && fitTire()) pulse(i, 1, 200);
+          const br = brokenRover();
+          if (h.id === 'tire' && br && wheelOf(br) === 2 && worldPos(g, a).distanceTo(worldPos(F.wheels[br].hub, c)) < TIRE_FIT && fitTire()) pulse(i, 1, 200);
         }
       });
       welder.spark.visible = welding;
@@ -705,10 +856,13 @@ export function buildFixtures(THREE, world, { rig, camera, send, sfx = () => {},
         const ring = rings[i], name = what ? what.kind + (what.id || what.i || '') : null;
         ring.visible = !!what;
         if (what) {
-          const obj = what.kind === 'plug' ? F.plugs[what.i] : what.kind === 'wheel' ? F.wheel : what.kind === 'cord' ? tools.gen.userData.handle : tools[what.id];
-          worldPos(obj, ring.position);
+          if (what.kind === 'sample') { const sm = (st.scene?.samples || []).find(x => x.id === what.id); if (sm) samplePos(sm, ring.position); }
+          else {
+            const obj = what.kind === 'plug' ? F.plugs[what.i] : what.kind === 'wheel' ? F.wheels[what.rid].wheel : what.kind === 'cord' ? tools.gen.userData.handle : what.kind === 'rail' ? F.rail : tools[what.id];
+            worldPos(obj, ring.position);
+          }
           const big = what.kind === 'wheel' || BIG(what.id);
-          ring.scale.setScalar((big ? 0.3 : what.kind === 'plug' || what.kind === 'cord' ? 0.09 : 0.14) * (0.94 + Math.sin(now * 8) * 0.06));
+          ring.scale.setScalar((big ? 0.3 : what.kind === 'plug' || what.kind === 'cord' ? 0.09 : what.kind === 'rail' ? 0.18 : 0.14) * (0.94 + Math.sin(now * 8) * 0.06));
           ring.quaternion.copy(camera.getWorldQuaternion(q4));
           // Red if the other hand already has a tool: one at a time.
           ring.material.color.setHex(what.kind === 'tool' && inHand() ? PAL.hex.red : PAL.hex.green);
@@ -716,6 +870,8 @@ export function buildFixtures(THREE, world, { rig, camera, send, sfx = () => {},
         if (name !== hover[i]) { hover[i] = name; if (name) pulse(i, 0.25, 20); }
       });
       for (let i = hands.length; i < 2; i++) rings[i].visible = gloves[i].visible = false;
+
+      stepSamples(dt, hands, vr);
 
       // Crack hit targets follow the crack to its current spot.
       weldHits.forEach((m, n) => m.position.copy(F.crackPts[n]));
@@ -753,7 +909,8 @@ export function buildFixtures(THREE, world, { rig, camera, send, sfx = () => {},
         }, { d: Infinity, p: null });
         show('dust', !!st.scene.dust && !!near.p, near.p ? near.p.setY(2.35) : a);
         show('hull', !!st.scene.hull, a.copy(F.crack.userData.centre).addScaledVector(F.crack.userData.normal, 0.25).setY(2.1));
-        show('wheel', st.scene.wheel > 0, worldPos(F.hub, a).setY(1.5));
+        const br = brokenRover();
+        show('wheel', !!br, br ? worldPos(F.wheels[br].hub, a).setY(a.y + 1.1) : a);
       } else for (const k in hints) hints[k].visible = false;
     },
   };

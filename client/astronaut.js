@@ -8,8 +8,10 @@ import { buildFixtures } from '/stations.js';
 import { buildInterior, ROOM } from '/interior.js';
 import { buildPhysics } from '/physics.js';
 import { CHAMBER } from '/airlock.js';
-import { CFG, CREW, ROLES, PLACES, covers } from '/shared/config.js';
+import { CFG, CREW, ROLES, PLACES, HAULER, covers } from '/shared/config.js';
 import { sheltered } from '/shared/rules.js';
+import { SOLID, pushOut } from '/shared/field.js';
+import { loadPeriod } from '/shared/assets.js';
 import { seatRefused, seatTaken, kicked } from '/seat.js';
 import { buildArm } from '/arm.js';
 import { PAL, FONT, nixie, fontsReady } from '/shared/palette.js';
@@ -72,7 +74,15 @@ function pulse(i, strength = 0.5, ms = 40) {
   src?.gamepad?.hapticActuators?.[0]?.pulse?.(strength, ms)?.catch?.(() => {});
 }
 const phys = buildPhysics();
-const fx = buildFixtures(THREE, world, { rig, camera, send: a => net.send({ t: 'do', a }), sfx: k => radio.sfx(k), sfxAt: (k, p, g, o) => radio.sfxAt(k, p, g, o), pulse, phys, interior, where: () => where });
+const fx = buildFixtures(THREE, world, { rig, camera, send: a => net.send({ t: 'do', a }), sfx: k => radio.sfx(k), sfxAt: (k, p, g, o) => radio.sfxAt(k, p, g, o), pulse, phys, interior, where: () => where, onRail: i => mount(i) });
+
+// The samples banked so far stand in a rack on the hall's bench, one canister each.
+const rack = [];
+for (let n = 0; n < CFG.sample.manifest + 2; n++) {
+  const g = new THREE.Group(); g.name = 'Rack_Canister_' + n; g.position.set(1.0 - (n % 3) * 0.14, 0.96, -4.72 + Math.floor(n / 3) * 0.14); g.visible = false;
+  interior.group.add(g); rack.push(g);
+}
+loadPeriod(THREE, 'sample-canister', { rough: 0.6, metal: 0.4 }).then(m => { m.scale.setScalar(2.4); m.position.y = 0.04; for (const g of rack) g.add(m.clone()); }).catch(e => console.warn('sample-canister', e));
 outdoors.push(fx.outside); // tools lying on the Moon are hidden with the rest of the surface
 
 const lamp = new THREE.SpotLight(PAL.hex.incandescent, 14, 16, 0.65, 0.7, 1.4); // candela; 40 blew out panels at arm's length
@@ -107,18 +117,17 @@ function status(now) {
   return now < flashUntil ? flash : '';
 }
 const running = () => !!state && state.phase === 'run';
-const noSignal = () => running() && !state.powered; // the base is blacked out: the radio is dead
-const radioState = () => noSignal() ? 'dead' : talking ? 'tx' : rx ? 'rx' : keyed && !radio.micOk ? 'nomic' : '';
+const radioState = () => talking ? 'tx' : rx ? 'rx' : keyed && !radio.micOk ? 'nomic' : ''; // comms always work
 // How many things are visibly broken right now. The cuff lights a warning triangle for each (up to two);
 // it does not say what they are.
 function alarms() {
   if (!running()) return 0;
   const sc = state.scene;
-  return (sc.dust ? 1 : 0) + (sc.board ? 1 : 0) + (sc.wheel ? 1 : 0) + (sc.hull ? 1 : 0) + (state.suit ? 1 : 0);
+  return (sc.dust ? 1 : 0) + (sc.board ? 1 : 0) + (Object.values(sc.wheels || {}).some(Boolean) ? 1 : 0) + (sc.hull ? 1 : 0) + (state.suit ? 1 : 0);
 }
 function drawGauges(now) {
   arm.draw({ state, status: status(now), debrief: !!debrief, zoom: scopeOn() ? zoom : 1, total: CFG.roundSeconds, radio: radioState(),
-    alarms: alarms(), held: running() ? fx.inHand || '' : '' });
+    alarms: alarms(), held: running() ? fx.inHand || '' : '', samples: running() && state.tally ? state.tally : null });
   arm.signal(radioState(), now);
 }
 function show(what, seconds) { flash = what; flashUntil = performance.now() / 1000 + seconds; }
@@ -272,7 +281,8 @@ addEventListener('keydown', e => {
   if (e.key === ' ' || (e.key === 'Tab' && mode === 'desk')) e.preventDefault();
   if (e.key.toLowerCase() === 'l' && mode === 'desk' && !e.repeat) debugOutage = !debugOutage;
   if (e.key.toLowerCase() === 'k' && mode === 'desk' && !e.repeat) debugDamage = !debugDamage;
-  if (e.key.toLowerCase() === 'q' && mode === 'desk' && !e.repeat) fx.dropHeld();
+  if (e.key.toLowerCase() === 'q' && mode === 'desk' && !e.repeat) { if (!fx.dropHeld()) fx.dropSample(); }
+  if (e.key.toLowerCase() === 'e' && mode === 'desk' && !e.repeat) { if (riding) dismount(-1); else mount(2); } // on and off the Hauler
 });
 addEventListener('keyup', e => { keys[e.key.toLowerCase()] = false; });
 addEventListener('blur', () => { for (const k in keys) keys[k] = false; });
@@ -364,17 +374,30 @@ function inModule(x, z) {
 }
 function groundTarget(controller, out) {
   if (mode === 'vr' && state?.phase === 'lobby') return null; // no teleporting about before the start
+  if (riding) return null;
   aim(controller);
-  const p = raycaster.ray.intersectPlane(ground, out);
-  if (!p || p.distanceTo(raycaster.ray.origin) > TELEPORT_MAX) return null;
+  const o = raycaster.ray.origin, d = raycaster.ray.direction;
+  let p = null;
+  if (where === 'in') p = raycaster.ray.intersectPlane(ground, out);
+  else for (let t = 0.3; t <= TELEPORT_MAX; t += 0.15) { // march along the ray until it meets the real ground
+    const x = o.x + d.x * t, y = o.y + d.y * t, z = o.z + d.z * t, g = world.height(x, z);
+    if (y <= g) { p = out.set(x, g, z); break; }
+  }
+  if (!p || p.distanceTo(o) > TELEPORT_MAX) return null;
   if (where === 'in') { const l = interior.toLocal(p.x, p.z); return interior.walkable(l.x, l.z) ? p : null; }
-  const d = Math.hypot(p.x, p.z);
-  return d > CFG.bounds - 1 || d < CFG.habRadius + 0.3 || inModule(p.x, p.z) ? null : p;
+  const r = Math.hypot(p.x, p.z);
+  return r > CFG.bounds - 1 || r < CFG.habRadius + 0.3 || inModule(p.x, p.z) || SOLID.some(s => Math.hypot(p.x - s.x, p.z - s.z) < s.r + 0.3) ? null : p;
 }
+// A hop needs a moment to recharge, so hopping is quicker than walking but slower than the Hauler.
+let hopAt = -9;
+const hopCharge = () => Math.min(1, (performance.now() / 1000 - hopAt) / CFG.teleportRecharge);
 function teleport(p) {
+  if (hopCharge() < 1 && mode === 'vr') return;
+  hopAt = performance.now() / 1000;
   camera.getWorldPosition(headPos);
   rig.position.x += p.x - headPos.x;
   rig.position.z += p.z - headPos.z;
+  floorY = where === 'in' ? 0 : world.height(p.x, p.z); rig.position.y = floorY + hopY;
 }
 // A hand's sideways offset from the head, in metres, positive to the right.
 function lateral(controller) {
@@ -490,7 +513,13 @@ function handControls(ptt) {
     } else {
       const p = !zoomGrab && !c.userData.grabbed && !targetInReach(c) && groundTarget(c, hitPoint);
       marker.visible = !!p;
-      if (p) marker.position.set(p.x, 0.02, p.z);
+      if (p) {
+        marker.position.set(p.x, p.y + 0.03, p.z);
+        // The ring fills round as the hop recharges.
+        const k = hopCharge();
+        marker.geometry.setDrawRange(0, 6 * Math.max(1, Math.ceil(32 * k)));
+        marker.material.opacity = k < 1 ? 0.45 : 0.85;
+      }
     }
   }
   return ptt;
@@ -916,7 +945,7 @@ function placeInside() {
   }
   showPlace('in');
   door = CFG.spawn.door;
-  rig.position.y = 0; vy = 0;
+  rig.position.y = 0; vy = 0; floorY = 0; hopY = 0; riding = false; rideWas = null;
   rig.rotation.set(0, 0, 0);
   rig.updateMatrixWorld(true);
   camera.getWorldPosition(headPos);
@@ -946,12 +975,16 @@ function chamberAt(l) {
   return null;
 }
 // While a door cycles, the head stays in that chamber.
+let inChamber = false;
 function clampWalk() {
   camera.getWorldPosition(headPos);
   const lv = new THREE.Vector3();
+  inChamber = false;
+  if (riding) return; // the footplate holds the head (rideStep)
+  if (cycle) inChamber = true;
   if (cycle) { const ch = chamberOf(cycle.id); clampChamber(ch, localHead(ch, lv)); return; }
   const at = chamberAt(lv);
-  if (at) { clampChamber(at.ch, at.l); return; }
+  if (at) { inChamber = true; clampChamber(at.ch, at.l); return; }
   if (where === 'in') {
     const l = interior.toLocal(headPos.x, headPos.z), c = interior.clamp(l.x, l.z);
     rig.position.x += c.x - l.x; rig.position.z += c.z - l.z;
@@ -962,6 +995,12 @@ function clampWalk() {
   else if (d < CFG.habRadius && d > 0.01) { const k = CFG.habRadius / d; rig.position.x += headPos.x * (k - 1); rig.position.z += headPos.z * (k - 1); }
   camera.getWorldPosition(headPos);
   const m = inModule(headPos.x, headPos.z); if (m) { rig.position.x += m.x; rig.position.z += m.z; }
+  // Out in the field: boulders and landmarks are solid.
+  camera.getWorldPosition(headPos);
+  if (Math.hypot(headPos.x, headPos.z) > 12) {
+    const p = pushOut(headPos.x, headPos.z, 0.35, SOLID, Infinity);
+    if (p.hit) { rig.position.x += p.x - headPos.x; rig.position.z += p.z - headPos.z; }
+  }
   // The outside of each chamber is solid.
   camera.getWorldPosition(headPos);
   for (const id in world.doors) {
@@ -974,6 +1013,71 @@ function clampWalk() {
   }
 }
 
+// ---------- riding the Hauler ----------
+// Stand on the footplate at the back and hold the rail. The Technician drives; the rig is carried with the
+// Hauler (turning with it, or holding its heading with CFG.ride.snapYaw), its floor is the plate, and the
+// horizon stays level: only the height changes. Get off once it has stopped: push the stick (E on a laptop).
+let riding = false, rideAt = 0, rideWas = null, floorY = 0, hopY = 0, rumbleAt = 0;
+const plateW = new THREE.Vector3(), rideM = new THREE.Matrix4(), rideT = new THREE.Matrix4();
+const haulerStopped = () => Math.abs(state?.rovers?.hauler?.v || 0) < 0.25;
+function mount(i) {
+  if (riding) return true; // already aboard: the hand just holds the rail
+  if (!running() || where !== 'out') return false;
+  if (!haulerStopped()) { radio.sfx('refuse'); return false; }
+  camera.getWorldPosition(headPos);
+  world.fixtures.plate.getWorldPosition(plateW);
+  if (Math.hypot(plateW.x - headPos.x, plateW.z - headPos.z) > CFG.ride.mountReach) return false;
+  net.send({ t: 'do', a: { mount: true } });
+  riding = true; rideAt = performance.now() / 1000; rideWas = null;
+  // Onto the plate in one frame: an instant move is comfortable, a glide is not.
+  rig.position.x += plateW.x - headPos.x; rig.position.z += plateW.z - headPos.z;
+  floorY = plateW.y; hopY = 0; vy = 0; rig.position.y = floorY;
+  radio.sfxAt('clank', plateW, 1);
+  if (i === 0 || i === 1) pulse(i, 1, 90);
+  return true;
+}
+function dismount(side = -1) {
+  if (!riding || !haulerStopped()) return false;
+  net.send({ t: 'do', a: { mount: false } });
+  riding = false; rideWas = null; rideAt = performance.now() / 1000;
+  const h = world.rovers.hauler, yaw = h.userData.yaw, sx = side >= 0 ? 1 : -1;
+  world.fixtures.plate.getWorldPosition(plateW);
+  const x = plateW.x + Math.cos(yaw) * 1.4 * sx, z = plateW.z - Math.sin(yaw) * 1.4 * sx;
+  camera.getWorldPosition(headPos);
+  rig.position.x += x - headPos.x; rig.position.z += z - headPos.z;
+  floorY = world.height(x, z); rig.position.y = floorY;
+  tmpV.set(x, floorY, z); world.puff(tmpV, 14, 0.7);
+  radio.sfxAt('thud', tmpV, 0.6, { mass: 80 }); pulse(0, 0.6, 60); pulse(1, 0.6, 60);
+  return true;
+}
+function rideStep(dt, now) {
+  const h = world.rovers.hauler, yaw = h.userData.yaw;
+  if (rideWas) {
+    // Carry the rig the way the Hauler moved since last frame: a turn about its old centre, then the step.
+    const dyaw = CFG.ride.snapYaw ? 0 : yaw - rideWas.yaw;
+    rideM.makeTranslation(h.position.x, 0, h.position.z).multiply(rideT.makeRotationY(dyaw)).multiply(tmpM.makeTranslation(-rideWas.x, 0, -rideWas.z));
+    moveRig(rideM);
+  }
+  rideWas = { x: h.position.x, z: h.position.z, yaw };
+  // The head stays over the footplate.
+  camera.getWorldPosition(headPos);
+  const P = HAULER.plate, cs = Math.cos(yaw), sn = Math.sin(yaw);
+  const dx = headPos.x - h.position.x, dz = headPos.z - h.position.z;
+  const lx = dx * cs - dz * sn, lz = dx * sn + dz * cs; // into the Hauler's frame (yaw only)
+  const cx = Math.max(P.x - P.hw, Math.min(P.x + P.hw, lx)), cz = Math.max(P.z - P.hd, Math.min(P.z + P.hd, lz));
+  if (cx !== lx || cz !== lz) {
+    rig.position.x += (cx * cs + cz * sn) - dx; rig.position.z += (-cx * sn + cz * cs) - dz;
+  }
+  world.fixtures.plate.getWorldPosition(plateW);
+  floorY = plateW.y;
+  // A motor hum and the regolith under the wheels, through the suit; a faint buzz in a hand on the rail.
+  const v = Math.abs(h.userData.v || 0);
+  if (v > 0.3 && now > rumbleAt) {
+    rumbleAt = now + 0.28;
+    radio.burst(0.3, 0.02 + v * 0.012, 'lowpass', 120 + v * 30);
+    for (const i of [0, 1]) if (fx.holding(i)?.kind === 'rail') pulse(i, 0.08 + v * 0.03, 40);
+  }
+}
 let vy = 0, turnArmed = true, lastPose = 0, shake = 0;
 function control(dt, now) {
   let mx = 0, mz = 0, jump = false, ptt = mode === 'desk' && !!keys.tab;
@@ -993,6 +1097,7 @@ function control(dt, now) {
       if (src.handedness === 'left') {
         if (Math.abs(sx) > 0.15) mx = sx;
         if (Math.abs(sy) > 0.15) mz = sy;
+        if (riding && Math.hypot(sx, sy) > 0.7) dismount(sx); // push the stick to step off (only once the Hauler has stopped)
         if (gp.buttons[0]?.pressed) ptt = true;
       } else {
         if (Math.abs(sx) > 0.6 && turnArmed) { turnRig(-Math.sign(sx) * Math.PI / 6); turnArmed = false; }
@@ -1011,18 +1116,27 @@ function control(dt, now) {
     deskExit(dt, now);
   }
 
-  if (waiting) mx = mz = 0, jump = false;
+  if (waiting || riding) mx = mz = 0, jump = false;
   const speed = WALK * dt;
   rig.position.x += (-mz * fwd.x + mx * -fwd.z) * speed;
   rig.position.z += (-mz * fwd.z + mx * fwd.x) * speed;
 
-  if (jump && rig.position.y === 0) vy = 2.0; // a slow, floaty lunar hop
+  if (jump && hopY === 0) vy = 2.0; // a slow, floaty lunar hop
   vy -= GRAVITY * dt;
-  rig.position.y = Math.max(0, rig.position.y + vy * dt);
-  if (rig.position.y === 0) vy = 0;
+  hopY = Math.max(0, hopY + vy * dt);
+  if (hopY === 0) vy = 0;
 
   // Stay inside the play area and outside the habitat walls; or, indoors, inside the hall; or in an airlock.
+  if (riding) rideStep(dt, now);
   clampWalk();
+  // Feet on the ground: the floor under the head, eased so a crater lip is a ramp and not a step. Indoors and
+  // in an airlock chamber the floor is flat at 0, so the swap between twins cannot be seen.
+  if (!riding) {
+    camera.getWorldPosition(headPos);
+    const want = where === 'in' || inChamber || Math.hypot(headPos.x, headPos.z) < CFG.habRadius + 0.6 ? 0 : world.height(headPos.x, headPos.z);
+    floorY += (want - floorY) * Math.min(1, dt * 10);
+  }
+  rig.position.y = floorY + hopY;
 
   keyed = ptt;
   if (ptt !== talking && radio.micOk) { talking = ptt; radio.setTalking(ptt); }
@@ -1045,7 +1159,7 @@ function myPose() {
   const h = headHeight();
   camera.getWorldDirection(fwd); fwd.y = 0; fwd.normalize();
   const d = PLACES.doors[door] || PLACES.doors.S, inside = where === 'in';
-  return { x: inside ? d.x : headPos.x, z: inside ? d.z : headPos.z, ry: Math.atan2(fwd.x, fwd.z), h, inside, door };
+  return { x: inside ? d.x : headPos.x, z: inside ? d.z : headPos.z, ry: Math.atan2(fwd.x, fwd.z), h, inside, door, riding };
 }
 function sendPose() { net.send({ t: 'pose', ...myPose() }); }
 
@@ -1066,6 +1180,7 @@ renderer.setAnimationLoop(() => {
     if (s.phase !== lastPhase) {
       music.mood(run ? 'run' : 'calm');
       if (run) { flashUntil = 0; debrief = null; fx.reset(); placeInside(); }
+      if (!run) riding = false;
       if (s.phase === 'results' && s.result && !debrief) startDebrief(s, now);
       lastPhase = s.phase;
     }
@@ -1074,13 +1189,22 @@ renderer.setAnimationLoop(() => {
       const k = s.ev.kind;
       // The astronaut is never told what broke or where: that is mission control's job.
       if (['alarm', 'solve', 'mistake', 'hit', 'blackout', 'power', 'gen'].includes(k)) radio.sfx(k);
+      // The port says what went in: a rising two-tone for a sample, a flat buzz for a dud.
+      if (k === 'found' || k === 'dud') { radio.sfxAt(k, world.port.localToWorld(tmpV.copy(world.fixtures.portMouth)), 1); if (k === 'found') { pulse(0, 0.5, 60); pulse(1, 0.5, 60); } else { pulse(0, 0.8, 90); setTimeout(() => pulse(0, 0.8, 90), 150); } }
+      if (k === 'found' && s.tally && s.tally.banked >= s.tally.wanted) { radio.sfx('go'); pulse(0, 1, 160); pulse(1, 1, 160); } // the manifest is home
       if (k === 'end') radio.sfx(s.result && s.result.won ? 'won' : 'lost');
       if (k === 'solve') show('ok', 4);
       if (k === 'mistake' || k === 'hit') show('bad', 5);
       if (k === 'hit' || k === 'mistake') { pulse(0, 1, 250); pulse(1, 1, 250); }
     }
-    if (run) world.apply(s.scene, now);
-    world.moveRover(s.rover);
+    if (run) world.apply(s.scene, now); else world.drawSamples([]);
+    world.moveRovers(s.rovers, 1 - Math.exp(-Math.min(1, now - armFrame) * 10)); // eased by real time, so a slow frame does not leave a rover behind
+    // The rack on the bench: one canister for each sample banked.
+    const banked = run && s.scene?.samples ? (s.tally?.banked || 0) + 0 : 0;
+    rack.forEach((g, n) => { g.visible = n < (run ? (s.scene?.port?.banked ?? banked) : 0); });
+    // Aboard and not riding (or the other way round): believe the server once it has had time to answer.
+    if (riding && run && !s.riding && performance.now() / 1000 - rideAt > 1.5) { riding = false; rideWas = null; }
+    if (!riding && run && s.riding && performance.now() / 1000 - rideAt > 1.5) { riding = true; rideWas = null; }
 
     // Sound: the leak hiss, and rocks landing during a shower. Indoors a hull breach is heard from
     // the airlock end of the hall, and the shower is a rumble through the walls.
@@ -1117,7 +1241,9 @@ renderer.setAnimationLoop(() => {
   }
   fx.update(dt, now, vr ? handInfo : [], vr);
   // Under cover while rocks are falling: the cuff says so, because there is no other way to know.
-  covered = run && s.scene.meteor !== null && sheltered(myPose(), s.rover);
+  covered = run && s.scene.meteor !== null && sheltered(myPose(), s.rovers.hauler);
+  // The shadow map's box follows the head round the field.
+  if (where === 'out') { camera.getWorldPosition(headPos); world.follow(headPos.x, headPos.z); }
 
   camera.getWorldPosition(headPos); camera.getWorldDirection(tmpV);
   radio.listen(headPos, tmpV);
@@ -1138,7 +1264,7 @@ renderer.setAnimationLoop(() => {
 });
 
 // For debugging from the browser console, and for the tests: moonbase.state(), moonbase.fx.targets() ...
-window.moonbase = { resetStanding: () => { standing = 1.2; }, state: () => state, fx, world, interior, radio, rig, camera, net, board, THREE, scene, use: () => use(null), headset: () => headset, sendPose, myPose, teleport, turnRig,
+window.moonbase = { mount: () => mount(2), dismount: () => dismount(-1), riding: () => riding, resetStanding: () => { standing = 1.2; }, state: () => state, fx, world, interior, radio, rig, camera, net, board, THREE, scene, use: () => use(null), headset: () => headset, sendPose, myPose, teleport, turnRig,
   where: () => where, placeInside, showPlace, renderer, phys, forcePortal: false,
   // For the tests: stand the head at (x, z) in a place ('in': room coordinates, 'out': world), facing yaw (0 = north).
   standAt(to, x, z, yaw = 0) { cycle = null; showPlace(to); rig.rotation.set(0, yaw, 0); rig.position.set(0, 0, 0); rig.updateMatrixWorld(true); camera.getWorldPosition(headPos); const p = to === 'in' ? interior.toWorld(x, z) : { x, z }; rig.position.x = p.x - headPos.x; rig.position.z = p.z - headPos.z; rig.updateMatrixWorld(true); },

@@ -1,5 +1,6 @@
 // Small rules that both the server and the clients need to agree on.
 import { CFG, PLACES } from './config.js';
+import { LANDMARKS as FIELD_MARKS } from './field.js';
 
 // Is the astronaut safe from a meteor shower? Inside (the hall or an airlock chamber), or crouched
 // beside the rover. pose: { x, z, h, inside } with h the head height in metres. rover: { x, z }.
@@ -9,7 +10,7 @@ export function sheltered(pose, rover) {
 }
 
 // What Mission Ops' tool log calls a place: a named spot in the hall, or the nearest landmark outside.
-const LANDMARKS = [['SOLAR', () => PLACES.panels[1]], ['DEPOT', () => PLACES.depot], ['DISH', () => PLACES.dish], ['DRILL', () => PLACES.drill]];
+const LANDMARKS = [['SOLAR', () => PLACES.panels[1]], ...FIELD_MARKS.map(l => [l.name, () => l])];
 export function areaName(inside, x, z, rover) {
   if (inside) {
     let best = null, d = Infinity;
