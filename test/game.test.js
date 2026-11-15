@@ -12,6 +12,16 @@ const run = (g, seconds) => { for (let t = 0; t < Math.round(seconds * 10) && g.
 const at = (g, p) => { g.astro = { ...g.astro, x: p.x, z: p.z, h: 1.65, inside: false }; };
 const inside = g => { g.astro = { ...g.astro, x: PLACES.doors.S.x, z: PLACES.doors.S.z, h: 1.65, inside: true, door: 'S' }; };
 const fresh = (mode = 'demo') => { const g = new Game(rng); g.setMode(mode); g.start(); g.script = []; return g; }; // no director: the test breaks things itself
+// Core a rock with the drill so it can be picked up: carry the drill to it (wherever it was), lock it on,
+// wait out the countdown. The core is left on the drill's tray; the drill stays on the rock.
+const core = (g, s) => {
+  at(g, s);
+  Object.assign(g.drill, { at: 'hand', site: null, left: 0 });
+  g.act({ drill: 'set', id: s.id });
+  assert.equal(g.drill.at, 'site', 'the drill locks on the rock');
+  for (let t = 0; t < CFG.drill.seconds * 10 + 2 && s.at !== 'drill'; t++) g.tick(0.1);
+  assert.equal(s.at, 'drill', 'the core comes up onto the tray');
+};
 // Put whatever is in the hands down where you stand, then fetch `tool` from wherever it lies.
 const kit = (g, tool) => {
   for (const t of g.hands.filter(Boolean)) g.act({ drop: t });
@@ -401,6 +411,77 @@ const kit = (g, tool) => {
   assert.ok(hot >= 4, 'the heat map has hot blocks');
 }
 
+// ---------- the core drill: two hands, the Hauler's rack, five seconds on a rock ----------
+{
+  const g = fresh();
+  g.oxygen = 1e6;
+  const s = g.samples.find(x => x.kind !== 'dud'), h = g.rovers.hauler;
+  assert.equal(g.drill.at, 'rover', 'the drill starts in its rack on the Hauler');
+  at(g, s);
+  g.act({ pick: s.id });
+  assert.equal(s.at, 'ground', 'a rock still in the ground cannot be picked up by hand');
+  assert.ok(!g.view('astronaut').scene.samples.find(x => x.id === s.id)?.cored, 'and the page is told it is not cored');
+  // Off the rack: beside the Hauler, with both hands empty.
+  g.act({ drill: 'take' });
+  assert.equal(g.drill.at, 'rover', 'from away from the Hauler: refused');
+  at(g, { x: h.x + 1.5, z: h.z });
+  g.tools.brush = { at: 'loose', inside: false, x: h.x + 1.5, y: 0, z: h.z, area: '' };
+  g.act({ take: 'brush' }); assert.ok(g.has('brush'));
+  g.act({ drill: 'take' });
+  assert.equal(g.drill.at, 'rover', 'a hand full: refused, it takes two');
+  g.act({ drop: 'brush' });
+  g.act({ drill: 'take' });
+  assert.equal(g.drill.at, 'hand'); assert.equal(g.handsFree, 0, 'the drill fills both hands');
+  g.act({ take: 'brush' }); assert.ok(!g.has('brush'), 'nothing else while carrying it');
+  g.act({ mount: true }); assert.equal(g.astro.riding, null, 'no riding with the drill in your arms');
+  // Back into the rack, and out again.
+  g.act({ drill: 'stow' }); assert.equal(g.drill.at, 'rover');
+  g.act({ drill: 'take' }); assert.equal(g.drill.at, 'hand');
+  // Put down on the way, then taken up again.
+  at(g, { x: s.x + 1, z: s.z });
+  g.act({ drill: 'put', x: s.x + 1.3, z: s.z });
+  assert.deepEqual([g.drill.at, g.drill.x], ['ground', s.x + 1.3]);
+  g.act({ drill: 'take' }); assert.equal(g.drill.at, 'hand');
+  // Locked on the rock: too far is refused, close enough counts down five seconds.
+  at(g, { x: s.x + 6, z: s.z }); g.act({ drill: 'set', id: s.id });
+  assert.equal(g.drill.at, 'hand', 'out of reach of the rock: refused');
+  at(g, { x: s.x + 1, z: s.z }); g.act({ drill: 'set', id: s.id });
+  assert.equal(g.drill.at, 'site'); assert.equal(g.drill.site, s.id); assert.equal(g.drill.left, CFG.drill.seconds);
+  assert.ok(Math.abs(g.drill.ry - Math.PI / 2) < 1e-6, 'its face turns toward the astronaut');
+  assert.equal(g.view('astronaut').scene.drill.at, 'site');
+  assert.equal(g.view('ops').drill.at, 'site', 'Mission Ops sees what the drill is doing');
+  g.act({ drill: 'take' }); assert.equal(g.drill.at, 'site', 'locked on while it drills');
+  g.act({ pick: s.id }); assert.equal(s.at, 'ground', 'nothing to take until the core is up');
+  run(g, CFG.drill.seconds - 1);
+  assert.ok(g.drill.left > 0.5 && g.drill.left < 1.5 && s.at === 'ground', 'one second to go: ' + g.drill.left);
+  run(g, 1.2);
+  assert.equal(g.drill.left, 0); assert.equal(s.at, 'drill', 'the core is presented on the drill');
+  assert.ok(g.view('astronaut').scene.samples.find(x => x.id === s.id).cored);
+  assert.ok(!('kind' in g.view('astronaut').scene.samples.find(x => x.id === s.id)), 'and still nobody on the Moon is told what it is');
+  // Take the core; then the drill comes back up.
+  g.act({ pick: s.id }); assert.equal(s.at, 'hand'); assert.deepEqual(g.carry, [s.id]);
+  g.act({ drill: 'take' }); assert.equal(g.drill.at, 'site', 'one hand full: the drill stays');
+  g.act({ put: s.id, x: s.x + 0.5, z: s.z });
+  assert.ok(s.at === 'ground' && s.free, 'a core put down is loose');
+  g.act({ drill: 'take' }); assert.equal(g.drill.at, 'hand', 'both hands free: the drill comes up');
+  g.act({ pick: s.id }); assert.equal(s.at, 'ground', 'not while carrying the drill');
+  g.act({ drill: 'put', x: s.x - 1, z: s.z });
+  g.act({ pick: s.id }); assert.equal(s.at, 'hand', 'a loose core is picked up by hand');
+  // Lifted with the core still on its tray: the core is left on the ground.
+  const s2 = g.samples.find(x => x !== s && x.at === 'ground');
+  g.act({ put: s.id, x: s.x, z: s.z });
+  core(g, s2);
+  g.act({ drill: 'take' });
+  assert.ok(g.drill.at === 'hand' && s2.at === 'ground' && s2.free, 'the core drops where the drill stood');
+  // A lookalike cores the same as the real thing: the drill does not tell.
+  const dud = g.samples.find(x => x.kind === 'dud' && x.at === 'ground');
+  core(g, dud); assert.equal(dud.at, 'drill');
+  // Through an airlock it does not go: carried in, it is left outside the door.
+  Object.assign(g.drill, { at: 'hand' });
+  g.setPose({ x: PLACES.doors.S.x, z: PLACES.doors.S.z, ry: 0, h: 1.65, inside: true, door: 'S' });
+  assert.equal(g.drill.at, 'ground'); assert.ok(Math.hypot(g.drill.x, g.drill.z) > 3, 'it stands outside the door');
+}
+
 // ---------- samples: pick up, carry, cup, bank, score ----------
 {
   const g = fresh();
@@ -408,6 +489,8 @@ const kit = (g, tool) => {
   const real = g.samples.filter(s => s.kind !== 'dud'), dud = g.samples.find(s => s.kind === 'dud');
   const wanted = kind => g.manifest.find(m => m.kind === kind && !m.got);
   const first = real.find(s => wanted(s.kind));
+  core(g, first); g.act({ drill: 'take' }); g.act({ drill: 'put', x: first.x - 1, z: first.z }); // the core left on the ground
+  inside(g);
   g.act({ pick: first.id });
   assert.equal(first.at, 'ground', 'from inside the hall: refused');
   at(g, { x: first.x + 30, z: first.z });
@@ -419,10 +502,10 @@ const kit = (g, tool) => {
   assert.deepEqual(g.view('astronaut').carry, [first.id]);
   // Two hands: a sample and a tool, or two samples. Never three.
   const second = real.find(s => s !== first);
-  Object.assign(second, { x: first.x + 1, z: first.z });
+  Object.assign(second, { x: first.x + 1, z: first.z, free: true });
   g.act({ pick: second.id });
   assert.equal(g.carry.length, 2);
-  const third = real.find(s => s !== first && s !== second); Object.assign(third, { x: first.x + 1, z: first.z });
+  const third = real.find(s => s !== first && s !== second); Object.assign(third, { x: first.x + 1, z: first.z, free: true });
   g.act({ pick: third.id });
   assert.equal(g.carry.length, 2, 'both hands full: refused');
   g.tools.brush = { at: 'loose', inside: false, x: first.x, y: 0, z: first.z, area: '' };
@@ -440,10 +523,20 @@ const kit = (g, tool) => {
   Object.assign(h, { x: 30, z: 30 }); at(g, { x: 30, z: 31 });
   g.act({ pick: first.id });
   assert.equal(first.at, 'hand'); assert.equal(g.tray[1], null, 'out of a cup and into a hand');
-  // Banking: only at the port.
+  // Banking: only at the port, which is in the hall.
   g.act({ bank: first.id });
-  assert.equal(first.at, 'hand', 'away from the port: refused');
-  at(g, { x: PLACES.port.x, z: PLACES.port.z + 1 });
+  assert.equal(first.at, 'hand', 'outside: refused');
+  inside(g);
+  // Let go in the hall: it lies on the hall floor, not outside the door, and can be taken up again indoors.
+  g.act({ put: first.id, x: 1.2, z: -6 });
+  assert.equal(first.at, 'ground'); assert.ok(first.inside, 'dropped indoors stays indoors');
+  assert.deepEqual([first.x, first.z], [1.2, -6]);
+  assert.ok(g.view('astronaut').scene.samples.some(x => x.id === first.id && x.inside), 'the astronaut sees it on the hall floor');
+  assert.ok(!g.view('sci').survey.samples.some(x => x.id === first.id), 'it is not on the field chart');
+  at(g, { x: 1.2, z: 2 }); g.act({ pick: first.id });
+  assert.equal(first.at, 'ground', 'a sample in the hall cannot be picked up from outside');
+  inside(g); g.act({ pick: first.id });
+  assert.equal(first.at, 'hand', 'picked up off the hall floor');
   const want = !!wanted(first.kind);
   g.act({ bank: first.id });
   assert.equal(first.at, 'banked');
@@ -451,8 +544,9 @@ const kit = (g, tool) => {
   assert.equal(g.view('sci').assay.kind, first.kind);
   assert.equal(g.view('astronaut').scene.port.banked, g.manifest.filter(m => m.got).length);
   // A lookalike is a dud.
-  Object.assign(dud, { x: PLACES.port.x, z: PLACES.port.z + 1 }); g.act({ pick: dud.id }); const sc = g.score;
-  g.act({ bank: dud.id });
+  Object.assign(dud, { free: true }); // already cored
+  at(g, dud); g.act({ pick: dud.id }); const sc = g.score;
+  inside(g); g.act({ bank: dud.id });
   assert.equal(dud.at, 'banked'); assert.equal(g.score, sc, 'a dud scores nothing');
   assert.equal(g.view('sci').assay.kind, 'dud'); assert.equal(g.result, null);
 }
@@ -464,7 +558,7 @@ const kit = (g, tool) => {
   const only = (role, allowed) => { for (const k of Object.keys(g.view(role))) assert.ok(allowed.includes(k), `${role} sees ${k}`); };
   const common = ['t', 'n', 'phase', 'mode', 'crew', 'score', 'result', 'powered', 'ev', 'timeLeft', 'oxygen', 'o2Max', 'tally'];
   only('astronaut', [...common, 'hands', 'tools', 'scene', 'suit', 'rovers', 'riding', 'carry', 'waypoint']);
-  only('ops', [...common, 'hands', 'tools', 'carry', 'tray', 'waypoint']);
+  only('ops', [...common, 'hands', 'tools', 'carry', 'tray', 'waypoint', 'drill']);
   only('tech', [...common, 'rovers', 'rider', 'scene', 'astro', 'meteor', 'tools']);
   only('sci', [...common, 'power', 'leak', 'drain', 'survey', 'manifest', 'assay', 'waypoint']);
   assert.ok(!('text' in g.view('ops').ev), 'nobody is told in words what broke');
@@ -481,8 +575,8 @@ const kit = (g, tool) => {
   // The crew's sample run, in one go: fetch every sample the manifest wants, from where the chart showed it.
   for (const m of g.manifest) {
     const s = g.samples.find(x => x.kind === m.kind && x.at === 'ground');
-    at(g, s); g.act({ pick: s.id });
-    at(g, { x: PLACES.port.x, z: PLACES.port.z + 1 }); g.act({ bank: s.id });
+    core(g, s); g.act({ pick: s.id });
+    inside(g); g.act({ bank: s.id });
   }
   inside(g);
   assert.deepEqual(g.view('sci').manifest.map(m => m.got), [true, true, true, true]);

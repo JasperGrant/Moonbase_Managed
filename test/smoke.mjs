@@ -519,6 +519,8 @@ try {
   });
   if (indoors !== 'ok') problems.push('astronaut: ' + indoors);
   await view(astro, 'astronaut-interior');
+  // The sample port on the hall's east wall, from the end of the workbench.
+  if (SHOTS) { await astro.evaluate(() => window.moonbase.standAt('in', 1.9, -5.4, -Math.PI / 2 + 0.4)); await view(astro, 'astronaut-port'); }
   await astro.evaluate(() => window.moonbase.placeInside());
 
   await view(astro, 'astronaut-spawn');

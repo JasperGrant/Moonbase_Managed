@@ -49,6 +49,9 @@ export class Game {
     // The field: samples, the heat map, and what has been explored (one byte per 5 m cell).
     this.samples = []; this.heat = []; this.manifest = [];
     this.carry = [];           // sample ids in the astronaut's hands (two at most, one if a tool is held)
+    // The core drill. at: 'rover' (in its rack on the Hauler), 'hand' (both of them), 'ground' (stood where it
+    // was put down) or 'site' (locked on a rock: `left` seconds to go, then the core is presented on its tray).
+    this.drill = { at: 'rover', x: 0, z: 0, ry: 0, site: null, left: 0 };
     this.tray = Array(CFG.sample.tray).fill(null);
     this.assay = null;         // the last thing banked: { kind } or { kind: 'dud' }
     this.seen = new Uint8Array(FIELD.n * FIELD.n);
@@ -70,7 +73,7 @@ export class Game {
     this.script = [...SCRIPTS[this.mode]];
     this.tools = this.layTools(); // after reset, so free play shuffles with this mission's dice
     const f = layField(this.rng, this.mode);
-    this.samples = f.samples.map(s => ({ ...s, at: 'ground' }));
+    this.samples = f.samples.map(s => ({ ...s, at: 'ground', free: false })); // free: cored, and loose to pick up
     this.heat = f.heat;
     this.manifest = f.manifest.map(kind => ({ kind, got: false }));
     this.next = CFG.firstFaultSeconds;
@@ -89,8 +92,8 @@ export class Game {
   has(tool) { return this.hands.includes(tool); }
   // Let go of a tool wherever it is held. Returns whether it was in a hand.
   letGo(tool) { const i = this.hands.indexOf(tool); if (i >= 0) this.hands[i] = null; return i >= 0; }
-  // Two hands: a tool or a rock sample fills one each.
-  get handsFree() { return 2 - this.hands.filter(Boolean).length - this.carry.length; }
+  // Two hands: a tool or a rock sample fills one each, and the drill both.
+  get handsFree() { return 2 - this.hands.filter(Boolean).length - this.carry.length - (this.drill.at === 'hand' ? 2 : 0); }
   // Where each tool lies at the start: at its home in the hall, under its sign (PLACES.toolHomes), in room
   // coordinates. at: 'loose' (lying somewhere), 'hand', or 'gone' (used up).
   layTools() {
@@ -112,6 +115,11 @@ export class Game {
     const riding = this.astro.riding;
     this.astro = { ...p, riding };
     if (riding) Object.assign(this.astro, this.plate(), { inside: false });
+    // The drill is field kit: it does not go through an airlock. Carried in, it is left standing outside the door.
+    if (this.astro.inside && this.drill.at === 'hand') {
+      const d = PLACES.doors[this.astro.door] || PLACES.doors.S;
+      Object.assign(this.drill, { at: 'ground', x: d.x + Math.sin(d.ry) * 2.2, z: d.z + Math.cos(d.ry) * 2.2, ry: d.ry });
+    }
   }
   // Mark the cells within r of (x, z) as explored.
   mark(x, z, r) {
@@ -183,6 +191,7 @@ export class Game {
     }
 
     this.drive(dt);
+    this.drilling(dt);
     this.checkWaypoint();
 
     // Power: a power fault drains the battery, and a flat battery darkens the base.
@@ -263,6 +272,16 @@ export class Game {
     if (!quiet) this.note('alarm', type === 'wheel' ? `${FAULTS[type].name} on the ${ROVERS[d.which].name}.` : `${FAULTS[type].name}.`, 0, 0, type);
   }
 
+  // The drill locked on a rock counts down; at zero the core comes up onto its tray, free to take.
+  drilling(dt) {
+    const d = this.drill;
+    if (d.at !== 'site' || d.left <= 0) return;
+    d.left = Math.max(0, d.left - dt);
+    if (d.left > 0) return;
+    const s = this.sample(d.site);
+    if (s && s.at === 'ground') { s.at = 'drill'; s.free = true; s.x = d.x; s.z = d.z; }
+  }
+
   sample(id) { return this.samples.find(s => s.id === id) || null; }
   unCarry(id) { this.carry = this.carry.filter(c => c !== id); }
 
@@ -306,29 +325,40 @@ export class Game {
       // On and off the Hauler's footplate. Only while it is stopped.
       const h = this.rovers.hauler, stopped = Math.abs(h.v) < 0.25;
       if (a.mount === true) {
-        if (this.astro.riding || this.astro.inside || !stopped || !this.near(this.plate(), CFG.ride.mountReach)) return;
+        if (this.astro.riding || this.astro.inside || !stopped || this.drill.at === 'hand' || !this.near(this.plate(), CFG.ride.mountReach)) return;
         this.astro.riding = 'hauler';
         Object.assign(this.astro, this.plate());
       } else if (a.mount === false) {
         if (!this.astro.riding || !stopped) return;
         this.astro.riding = null;
       }
+    } else if (a.drill !== undefined) {
+      this.drillAct(a);
     } else if (a.pick !== undefined) {
-      // A sample off the ground or out of a cup. Two hands: two samples, or a sample and a tool.
+      // A sample off the drill's tray, out of a cup, or off the ground once it has been cored (a rock still in
+      // the ground needs the drill). Two hands: two samples, or a sample and a tool.
       const s = this.sample(a.pick);
-      if (!s || this.astro.inside || this.handsFree < 1) return;
-      if (s.at === 'ground') { if (!this.near(s, CFG.sample.reach)) return; }
-      else if (s.at === 'tray') { if (!this.near(this.rovers.hauler, 4)) return; this.tray[s.slot] = null; delete s.slot; }
+      if (!s || this.handsFree < 1) return;
+      if (s.at === 'ground') { if (s.inside ? !this.astro.inside : this.astro.inside || !s.free || !this.near(s, CFG.sample.reach)) return; }
+      else if (s.at === 'drill') { if (this.astro.inside || !this.near(this.drill, CFG.drill.reach)) return; }
+      else if (s.at === 'tray') { if (this.astro.inside || !this.near(this.rovers.hauler, 4)) return; this.tray[s.slot] = null; delete s.slot; }
       else return;
       s.at = 'hand';
       this.carry.push(s.id);
     } else if (a.put !== undefined) {
-      // Let go of a sample: it lies where it came to rest (near the astronaut), or outside the door if dropped indoors.
+      // Let go of a sample: it lies where it came to rest, near the astronaut outside, or on the hall floor
+      // (room coordinates) if dropped indoors.
       const s = this.sample(a.put);
       if (!s || s.at !== 'hand') return;
       this.unCarry(s.id);
-      s.at = 'ground';
-      const ok = num(a.x) && num(a.z) && !this.astro.inside && Math.hypot(a.x - this.astro.x, a.z - this.astro.z) < 6 && Math.hypot(a.x, a.z) <= CFG.bounds;
+      s.at = 'ground'; s.free = true;
+      if (this.astro.inside) {
+        const ok = num(a.x) && num(a.z) && Math.abs(a.x) < 6 && a.z > -18 && a.z < 3;
+        s.inside = true; s.x = ok ? a.x : 0; s.z = ok ? a.z : -1.3;
+        return;
+      }
+      delete s.inside;
+      const ok = num(a.x) && num(a.z) && Math.hypot(a.x - this.astro.x, a.z - this.astro.z) < 6 && Math.hypot(a.x, a.z) <= CFG.bounds;
       s.x = ok ? a.x : this.astro.x; s.z = ok ? a.z : this.astro.z;
     } else if (a.tray !== undefined) {
       const s = this.sample(a.tray);
@@ -338,7 +368,7 @@ export class Game {
       s.at = 'tray'; s.slot = a.slot; this.tray[a.slot] = s.id;
     } else if (a.bank !== undefined) {
       const s = this.sample(a.bank);
-      if (!s || s.at !== 'hand' || this.astro.inside || !this.near(PLACES.port, CFG.sample.portReach)) return;
+      if (!s || s.at !== 'hand' || !this.astro.inside) return; // the port is in the hall: samples come home
       this.bank(s);
     } else if (a.fix === 'dust') {
       const f = this.faults.dust;
@@ -364,6 +394,35 @@ export class Game {
     } else if (a.fix === 'suit') {
       if (!this.faults.suit || !this.has('patch')) return;
       this.solve('suit');
+    }
+  }
+
+  // The core drill: { drill: 'take' } in both hands, { drill: 'stow' } into its rack on the Hauler,
+  // { drill: 'set', id } locked on a rock still in the ground, { drill: 'put', x, z } stood down anywhere.
+  drillAct(a) {
+    const d = this.drill, num = v => typeof v === 'number' && Number.isFinite(v);
+    if (this.astro.inside) return;
+    const nearHauler = this.near(this.rovers.hauler, 4);
+    if (a.drill === 'take') {
+      // Both hands, empty. Off the rack beside the Hauler, from where it stands, or off a rock once it is done.
+      if (d.at === 'hand' || this.handsFree < 2) return;
+      if (d.at === 'rover' ? !nearHauler : !this.near(d, CFG.drill.reach)) return;
+      if (d.at === 'site' && d.left > 0) return; // locked on until the core is up
+      // A core still on the tray is left on the ground where the drill stood.
+      for (const s of this.samples) if (s.at === 'drill') { s.at = 'ground'; s.free = true; s.x = d.x; s.z = d.z; }
+      Object.assign(d, { at: 'hand', site: null, left: 0 });
+    } else if (a.drill === 'stow') {
+      if (d.at !== 'hand' || !nearHauler) return;
+      Object.assign(d, { at: 'rover', site: null, left: 0 });
+    } else if (a.drill === 'set') {
+      const s = this.sample(a.id);
+      if (d.at !== 'hand' || !s || s.at !== 'ground' || s.free || !this.near(s, CFG.drill.reach)) return;
+      const ry = num(a.ry) ? a.ry : Math.atan2(this.astro.x - s.x, this.astro.z - s.z); // its face toward the astronaut
+      Object.assign(d, { at: 'site', x: s.x, z: s.z, ry, site: s.id, left: CFG.drill.seconds });
+    } else if (a.drill === 'put') {
+      if (d.at !== 'hand') return;
+      const ok = num(a.x) && num(a.z) && Math.hypot(a.x - this.astro.x, a.z - this.astro.z) < 4 && Math.hypot(a.x, a.z) <= CFG.bounds;
+      Object.assign(d, { at: 'ground', x: ok ? a.x : this.astro.x, z: ok ? a.z : this.astro.z, ry: num(a.ry) ? a.ry : this.astro.ry || 0, site: null, left: 0 });
     }
   }
 
@@ -425,8 +484,8 @@ export class Game {
   // in a hand or a cup. Only what it looks like: never whether it is real.
   samplesNear(points) {
     const r = CFG.sample.drawRadius;
-    return this.samples.filter(s => s.at === 'hand' || s.at === 'tray' || (s.at === 'ground' && points.some(p => Math.hypot(p.x - s.x, p.z - s.z) < r)))
-      .map(s => ({ id: s.id, look: s.look, x: s.x, z: s.z, at: s.at, ...(s.at === 'tray' ? { slot: s.slot } : {}) }));
+    return this.samples.filter(s => s.at === 'hand' || s.at === 'tray' || s.at === 'drill' || (s.at === 'ground' && (s.inside || points.some(p => Math.hypot(p.x - s.x, p.z - s.z) < r))))
+      .map(s => ({ id: s.id, look: s.look, x: s.x, z: s.z, at: s.at, ...(s.at === 'tray' ? { slot: s.slot } : {}), ...(s.inside && s.at === 'ground' ? { inside: true } : {}), ...(s.free ? { cored: true } : {}) }));
   }
 
   // What can physically be seen out on the surface: the astronaut's eyes and the rover cameras.
@@ -443,6 +502,7 @@ export class Game {
       samples: this.samplesNear(points),
       tray: [...this.tray],
       port: { ...this.tally, assay: this.assay },
+      drill: { ...this.drill, left: +this.drill.left.toFixed(2) },
       // The tools the rover cameras can see: in the astronaut's hands, and lying out on the surface.
       tools: { held: [...this.hands], ground: Object.fromEntries(Object.entries(this.tools).filter(([, t]) => t.at === 'loose' && !t.inside).map(([id, t]) => [id, { x: t.x, y: t.y, z: t.z, ry: t.ry || 0 }])) },
     };
@@ -461,7 +521,7 @@ export class Game {
       pct: Math.round(100 * this.seen.reduce((n, v) => n + v, 0) / this.seen.length),
       rovers: { scout: { x: rv.scout.x, z: rv.scout.z, ry: rv.scout.ry }, hauler: { x: rv.hauler.x, z: rv.hauler.z, ry: rv.hauler.ry } },
       astro: a.inside ? { x: 0, z: 0, ry: a.ry, inside: true } : a.riding || this.seenAt(a.x, a.z) ? { x: a.x, z: a.z, ry: a.ry, riding: !!a.riding } : null,
-      samples: this.samples.filter(s => s.at === 'ground' && s.kind !== 'dud' && this.seenAt(s.x, s.z)).map(s => ({ id: s.id, kind: s.kind, x: s.x, z: s.z })),
+      samples: this.samples.filter(s => s.at === 'ground' && !s.inside && s.kind !== 'dud' && this.seenAt(s.x, s.z)).map(s => ({ id: s.id, kind: s.kind, x: s.x, z: s.z })),
       tools: Object.entries(this.tools).filter(([, t]) => t.at === 'loose' && !t.inside && this.seenAt(t.x, t.z)).map(([id, t]) => ({ id, x: t.x, z: t.z })),
       fault: null,
     };
@@ -495,7 +555,7 @@ export class Game {
       Object.assign(v, { hands: [...this.hands], tools: this.toolView(), scene: this.scene([this.astro]), suit: !!this.faults.suit, rovers, riding: this.astro.riding, carry: [...this.carry] });
       return v;
     }
-    if (role === 'ops' || all) Object.assign(v, { hands: [...this.hands], tools: this.toolView(), carry: [...this.carry], tray: this.tray.map(Boolean) });
+    if (role === 'ops' || all) Object.assign(v, { hands: [...this.hands], tools: this.toolView(), carry: [...this.carry], tray: this.tray.map(Boolean), drill: { at: this.drill.at, left: this.drill.left, cored: this.samples.some(s => s.at === 'drill') } });
     if (role === 'tech' || all) {
       // Eyes and wheels: two cameras, no map. The meteor warning comes from the base's own radar.
       v.rovers = rovers;
