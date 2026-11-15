@@ -14,6 +14,7 @@
 // lamps, no words or numbers, only icons. Beside it is the EXIT button that ends the headset session.
 import { PAL, jewel } from '/shared/palette.js';
 import { loadGlove } from '/shared/assets.js';
+import { drawTool } from '/shared/icons.js';
 
 const W = 640, H = 374;                        // gauge face, in canvas pixels
 const FACE_W = 0.17, FACE_H = FACE_W * H / W;  // and in metres: a cuff display, not a tablet
@@ -178,11 +179,14 @@ export function buildArm(THREE) {
   // Where a fingertip has to be to press it, in this group's coordinates, and how far the cap sinks.
   const EXIT_TOP = new THREE.Vector3(EXIT_X, EXIT_Y + 0.004, 0.012);
   let pressing = 0;
-  // 0..1: how far the button is pressed. Moves the cap and lights the lamp.
-  function pressExit(f) {
+  // 0..1: how far the button is pressed. Moves the cap and lights the lamp. `invite`: the lamp is in
+  // its amber "press me" blink and lit this frame (the caller times the blink); a finger on it wins.
+  let invited = false;
+  function pressExit(f, invite = false) {
     pressing = Math.max(0, Math.min(1, f));
+    invited = invite;
     exitCap.position.z = 0.006 - 0.004 * pressing;
-    exitLampMat.color.setHex(pressing > 0 ? PAL.hex.red : PAL.hex.redOff);
+    exitLampMat.color.setHex(pressing > 0 ? PAL.hex.red : invite ? PAL.hex.amber : PAL.hex.redOff);
     if (pressing > 0 && pressing < 1) exitLampMat.color.multiplyScalar(0.55 + 0.45 * pressing);
   }
 
@@ -325,14 +329,16 @@ export function buildArm(THREE) {
   const at = (cx, cy, k, icon) => { g.save(); g.translate(cx, cy); g.scale(k, k); icon(); g.restore(); };
 
   let key = '', shown = null; // shown: what the face last drew, in words, for the smoke test
-  // info = { state, radio: '' | 'tx' | 'rx' | 'nomic', zoom, total, status: '' | 'ok' | 'bad' | 'won' | 'lost' | 'standby' }.
+  // info = { state, radio: '' | 'tx' | 'rx' | 'nomic', zoom, total, status: '' | 'ok' | 'bad' | 'won' | 'lost' | 'standby', debrief }.
+  // With `debrief` the gauges give way to the mission's outcome (status 'won' or 'lost').
   // Redraws only when something shown changes.
   function draw(info) {
     const s = info.state;
     const o2 = s ? Math.round(s.oxygen) : null, t = s ? Math.max(0, Math.ceil(s.timeLeft)) : null, alarms = info.alarms || 0;
-    const held = info.held || [false, false];
+    const held = Array.isArray(info.held) ? info.held : [null, info.held || null]; // [left, right]
     const level = info.zoom > 1.01 ? Math.max(1, Math.min(5, Math.round(info.zoom - 1))) : 0;
-    const k = [o2, s && s.o2Max, t, alarms, info.radio, level, info.status, held].join('|');
+    const debrief = !!info.debrief;
+    const k = [o2, s && s.o2Max, t, alarms, info.radio, level, info.status, held, debrief].join('|');
     if (k === key) return;
     key = k;
 
@@ -349,36 +355,54 @@ export function buildArm(THREE) {
       g.strokeStyle = PAL.bakelite; g.lineWidth = 2; g.beginPath(); g.moveTo(x - 4, y - 2); g.lineTo(x + 4, y + 2); g.stroke();
     }
 
-    // Suit oxygen: the needle on the dial, a bottle below the hub filled to the level left.
-    const frac = s ? Math.max(0, Math.min(1, s.oxygen / s.o2Max)) : 0, low = s ? s.oxygen < 25 : false;
-    dial(122, 182, 80, s ? Math.min(1, 25 / s.o2Max) : 0.25);
-    at(122, 236, 0.5, () => bottle(0, 0, frac, low ? RED : GREEN));
-    needle(122, 182, 80, frac);
-    jewel(g, 122, 330, 13, 'red', low);                    // low-oxygen lamp under the dial
+    if (debrief) {
+      // The debrief: one cream placard over both dials with a big tick (mission complete) or cross
+      // (mission failed), and an engraved arrow to the EXIT button at the elbow end of the cuff.
+      g.fillStyle = PAL.bezel; g.beginPath(); g.roundRect(44, 34, 402, 306, 6); g.fill();
+      g.fillStyle = PAL.bakelite; g.beginPath(); g.roundRect(50, 40, 390, 294, 4); g.fill();
+      const face = g.createRadialGradient(200, 120, 20, 245, 187, 260);
+      face.addColorStop(0, PAL.dial); face.addColorStop(1, '#c9bfa4');
+      g.fillStyle = face; g.beginPath(); g.roundRect(54, 44, 382, 286, 3); g.fill();
+      if (info.status === 'won') at(262, 187, 2.5, () => tick(0, 0, GREEN));
+      else at(262, 187, 2.5, () => cross(0, 0, RED));
+      g.fillStyle = PAL.inkDial; g.lineJoin = 'round'; // the arrow, pointing out of the face toward EXIT
+      g.beginPath(); g.moveTo(68, 187); g.lineTo(100, 161); g.lineTo(100, 177); g.lineTo(124, 177); g.lineTo(124, 197); g.lineTo(100, 197); g.lineTo(100, 213); g.closePath(); g.fill();
+    } else {
+      // Suit oxygen: the needle on the dial, a bottle below the hub filled to the level left.
+      const frac = s ? Math.max(0, Math.min(1, s.oxygen / s.o2Max)) : 0, low = s ? s.oxygen < 25 : false;
+      dial(122, 182, 80, s ? Math.min(1, 25 / s.o2Max) : 0.25);
+      at(122, 236, 0.5, () => bottle(0, 0, frac, low ? RED : GREEN));
+      needle(122, 182, 80, frac);
+      jewel(g, 122, 330, 13, 'red', low);                    // low-oxygen lamp under the dial
 
-    // Mission clock, or the outcome: a tick for fixed or complete, a cross for a mistake or failed.
-    const left = s && info.total ? Math.max(0, Math.min(1, s.timeLeft / info.total)) : 0;
-    const running = !!s && info.status !== 'standby', hurry = running && t <= 30;
-    dial(338, 182, 80, 30 / (info.total || 300), PAL.amber);
-    at(338, 236, 0.5, () => hourglass(0, 0, left, hurry ? AMBER : PAL.inkDial, running));
-    needle(338, 182, 80, running ? left : 0);
-    if (info.status === 'ok' || info.status === 'won') at(338, 182, 1.15, () => tick(0, 0, GREEN));
-    else if (info.status === 'bad' || info.status === 'lost') at(338, 182, 1.15, () => cross(0, 0, RED));
-    jewel(g, 338, 330, 13, 'amber', hurry);               // hurry lamp under the dial
+      // Mission clock, or the outcome: a tick for fixed or complete, a cross for a mistake or failed.
+      const left = s && info.total ? Math.max(0, Math.min(1, s.timeLeft / info.total)) : 0;
+      const running = !!s && info.status !== 'standby', hurry = running && t <= 30;
+      dial(338, 182, 80, 30 / (info.total || 300), PAL.amber);
+      at(338, 236, 0.5, () => hourglass(0, 0, left, hurry ? AMBER : PAL.inkDial, running));
+      needle(338, 182, 80, running ? left : 0);
+      if (info.status === 'ok' || info.status === 'won') at(338, 182, 1.15, () => tick(0, 0, GREEN));
+      else if (info.status === 'bad' || info.status === 'lost') at(338, 182, 1.15, () => cross(0, 0, RED));
+      jewel(g, 338, 330, 13, 'amber', hurry);               // hurry lamp under the dial
+    }
 
     // Radio: a lamp in the radio's colour above the microphone or the loudspeaker.
     jewel(g, 506, 70, 17, radio ? radio[2] : 'white', !!radio && info.radio !== 'dead');
     if (info.radio === 'rx') speaker(506, 196, BLUE);
     else microphone(506, 198, radio ? radio[1] : PAL.inkDim, info.radio === 'tx', info.radio === 'dead' ? RED : info.radio === 'nomic' ? AMBER : null);
 
-    // The hands: a jewel lamp for each, left and right, lit while that hand holds a tool. Icons only on
-    // the cuff: the lamps sit left and right of each other, as the hands do.
-    held.forEach((on, i) => jewel(g, 486 + i * 44, 330, 11, 'green', on));
+    // The hands, left and right: a jewel lamp each, lit while that hand holds something, and the tool's
+    // silhouette beside it (a decoy lights the lamp and shows nothing). Icons only on the cuff.
+    held.forEach((id, n) => {
+      const x = 452 + n * 82;
+      jewel(g, x, 330, 10, 'green', !!id);
+      if (['brush', 'patch', 'welder', 'tire', 'gen'].includes(id)) drawTool(g, id, x + 36, 326, 34, PAL.ink);
+    });
     for (let i = 0; i < 2; i++) at(592, 96 + i * 72, 0.78, () => warning(0, 0, i < alarms));
     at(594, 258, 0.88, () => magnifier(0, 0, level));
 
     tex.needsUpdate = true;
-    shown = { radio: radio ? radio[0] : 'STANDBY', icon: info.radio === 'rx' ? 'speaker' : info.radio === 'tx' ? 'microphone, live' : radio ? 'microphone, barred' : 'microphone, off', lamp: radio ? radio[1] : null, oxygen: o2, seconds: t, alarms, zoomPips: level, status: info.status || '', held: [...held] };
+    shown = { radio: radio ? radio[0] : 'STANDBY', icon: info.radio === 'rx' ? 'speaker' : info.radio === 'tx' ? 'microphone, live' : radio ? 'microphone, barred' : 'microphone, off', lamp: radio ? radio[1] : null, oxygen: o2, seconds: t, alarms, zoomPips: level, status: info.status || '', held, debrief };
   }
 
   // ---------- raising and lowering ----------
@@ -430,5 +454,5 @@ export function buildArm(THREE) {
     group.matrixWorldNeedsUpdate = true;
   }
 
-  return { group, canvas, draw, update, signal, setTracked, follow, aimUpper, exitButton, EXIT_TOP, pressExit, get pressing() { return pressing; }, get tracked() { return tracked; }, get raise() { return raise; }, get shown() { return shown; } };
+  return { group, canvas, draw, update, signal, setTracked, follow, aimUpper, exitButton, EXIT_TOP, pressExit, get pressing() { return pressing; }, get invited() { return invited; }, get tracked() { return tracked; }, get raise() { return raise; }, get shown() { return shown; } };
 }

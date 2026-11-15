@@ -39,7 +39,8 @@ function setup(opts = {}) {
   assert.ok(second.got.some(m => m.includes('"taken"')), 'a second person cannot take a held seat');
   assert.equal(second.role, null);
 
-  for (const c of [a, o, t]) say(c, { t: 'ready', on: true });
+  say(a, { t: 'suited', on: true }); say(o, { t: 'ready', for: 'astronaut', on: true });
+  for (const c of [o, t]) say(c, { t: 'ready', on: true });
   wait(S + 1);
   assert.equal(hub.game.phase, 'lobby', 'three ready and one not: no start');
 
@@ -72,13 +73,30 @@ function setup(opts = {}) {
   assert.equal(hub.crew().length, 0, 'every seat is freed');
   assert.ok([a, o, t, s].every(c => c.closed && c.got.some(m => m.includes('"home"'))), 'everyone is sent home');
   assert.deepEqual(hub.seats().ready, []);
+
+  // Back to the lobby from the debrief: any seat, the astronaut included, and only from the results.
+  const seat = { astronaut: a, ops: o, tech: t, sci: s };
+  for (const r of ['tech', 'sci', 'astronaut', 'ops']) {
+    hub.game.start();
+    say(seat[r], { t: 'lobby' });
+    assert.equal(hub.game.phase, 'run', `${r}: "lobby" is ignored while the mission runs`);
+    hub.game.end(false, 'test');
+    say(seat[r], { t: 'ready', on: true });
+    assert.deepEqual(hub.seats().ready, [], `${r}: ready is still ignored in the results`);
+    say(seat[r], { t: 'lobby' });
+    assert.equal(hub.game.phase, 'lobby', `${r} can take the crew back to the lobby`);
+    assert.deepEqual(hub.seats().ready, []);
+    say(seat[r], { t: 'lobby' });
+    assert.equal(hub.game.phase, 'lobby', 'a second press in the lobby does nothing');
+  }
 }
 
 // Leaving clears that seat's ready flag and cancels the countdown.
 {
   const { hub, join, say, wait } = setup();
   const cs = ['astronaut', 'ops', 'tech', 'sci'].map(join);
-  for (const c of cs) say(c, { t: 'ready', on: true });
+  say(cs[0], { t: 'suited', on: true }); say(cs[1], { t: 'ready', for: 'astronaut', on: true });
+  for (const c of cs.slice(1)) say(c, { t: 'ready', on: true });
   wait(1);
   assert.ok(hub.countdown !== null);
   hub.remove(cs[3]);
@@ -94,7 +112,7 @@ function setup(opts = {}) {
   const { hub, join, say, wait } = setup({ players: 2 });
   const a = join('astronaut'), all = join('all');
   assert.ok(join('sci').role === null, 'a 2-player game has no Scientist seat');
-  say(a, { t: 'ready', on: true }); say(all, { t: 'ready', on: true });
+  say(a, { t: 'suited', on: true }); say(all, { t: 'ready', for: 'astronaut', on: true }); say(all, { t: 'ready', on: true });
   wait(S + 0.5);
   assert.equal(hub.game.phase, 'run');
 }
@@ -102,12 +120,34 @@ function setup(opts = {}) {
 // The state every seat receives carries ready and countdown.
 {
   const { hub, join, say } = setup();
-  const a = join('astronaut');
-  say(a, { t: 'ready', on: true });
+  const a = join('astronaut'), o = join('ops');
+  say(a, { t: 'suited', on: true }); say(o, { t: 'ready', for: 'astronaut', on: true });
   hub.tick();
   const st = JSON.parse(a.got.at(-1));
   assert.deepEqual(st.ready, ['astronaut']);
-  assert.ok('countdown' in st);
+  assert.ok('countdown' in st && st.suited === true);
+}
+
+// Mission Ops calls the astronaut GO. The astronaut cannot ready themselves, nobody can ready an astronaut
+// who is not suited up, only Ops (or the 2-player console) can do it, and taking the headset off stands them down.
+{
+  const { hub, join, say } = setup();
+  const a = join('astronaut'), o = join('ops'), t = join('tech'), s = join('sci');
+  say(a, { t: 'ready', on: true });
+  assert.ok(!hub.seats().ready.includes('astronaut'), 'the astronaut cannot ready themselves');
+  say(o, { t: 'ready', for: 'astronaut', on: true });
+  assert.ok(!hub.seats().ready.includes('astronaut'), 'not before the headset is on');
+  say(a, { t: 'suited', on: true });
+  assert.equal(hub.seats().suited, true);
+  for (const c of [t, s]) say(c, { t: 'ready', for: 'astronaut', on: true });
+  assert.ok(!hub.seats().ready.includes('astronaut'), 'only Mission Ops calls the astronaut GO');
+  say(o, { t: 'ready', for: 'astronaut', on: true });
+  assert.ok(hub.seats().ready.includes('astronaut') && !hub.seats().ready.includes('ops'), 'Ops readied the astronaut, not themselves');
+  say(a, { t: 'suited', on: false });
+  assert.ok(!hub.seats().ready.includes('astronaut') && !hub.seats().suited, 'headset off: stood down');
+  say(a, { t: 'suited', on: true }); say(o, { t: 'ready', for: 'astronaut', on: true });
+  hub.remove(a);
+  assert.ok(!hub.seats().suited && !hub.seats().ready.includes('astronaut'), 'the astronaut leaving clears both');
 }
 
 // Testing alone: with requireFullCrew off, one ready player starts the mission.
@@ -161,12 +201,12 @@ function setup(opts = {}) {
 {
   const two = setup({ players: 2 });
   const [a, all] = ['astronaut', 'all'].map(two.join);
-  two.say(a, { t: 'ready', on: true }); two.say(all, { t: 'ready', on: true });
+  two.say(a, { t: 'suited', on: true }); two.say(all, { t: 'ready', for: 'astronaut', on: true }); two.say(all, { t: 'ready', on: true });
   two.wait(S + 0.5);
   assert.equal(two.hub.game.phase, 'run');
   const four = setup({ players: 4 });
   const [a4, o4] = ['astronaut', 'ops'].map(four.join);
-  four.say(a4, { t: 'ready', on: true }); four.say(o4, { t: 'ready', on: true });
+  four.say(a4, { t: 'suited', on: true }); four.say(o4, { t: 'ready', for: 'astronaut', on: true }); four.say(o4, { t: 'ready', on: true });
   four.wait(S + 1);
   assert.equal(four.hub.game.phase, 'lobby', '4 players: two ready is not enough');
 }
@@ -278,11 +318,11 @@ function setup(opts = {}) {
 {
   const { hub, join, say } = setup();
   const a = join('astronaut');
-  say(a, { t: 'pose', x: 1, z: 2, ry: 0.5, h: 1.6, in: true, arms: [[-0.3, 1.1, 0.4], [0.2, 'x', 0]] });
-  assert.deepEqual(hub.game.astro, { x: 1, z: 2, ry: 0.5, h: 1.6, in: true, arms: [[-0.3, 1.1, 0.4], null] }, 'a hand that is not three numbers is not tracked');
+  say(a, { t: 'pose', x: 1, z: 2, ry: 0.5, h: 1.6, inside: true, door: 'S', arms: [[-0.3, 1.1, 0.4], [0.2, 'x', 0]] });
+  assert.deepEqual(hub.game.astro, { x: 1, z: 2, ry: 0.5, h: 1.6, inside: true, door: 'S', arms: [[-0.3, 1.1, 0.4], null] }, 'a hand that is not three numbers is not tracked');
   say(a, { t: 'pose', x: 1, z: 2, ry: 0.5, arms: [[9, 1, 0]] });
   assert.deepEqual(hub.game.astro.arms, [null, null], 'a hand out of reach of the body is dropped');
-  assert.equal(hub.game.astro.in, false);
+  assert.equal(hub.game.astro.inside, false);
 }
 
 console.log('all lobby and admin tests passed');

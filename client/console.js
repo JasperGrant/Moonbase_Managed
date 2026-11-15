@@ -23,7 +23,7 @@ const clock = s => `${Math.floor(Math.max(0, s) / 60)}:${String(Math.floor(Math.
 const C = { bg: PAL.consoleDeep, line: PAL.rule, ink: PAL.ink, dim: PAL.inkDim, green: PAL.green, amber: PAL.amber, red: PAL.red, blue: PAL.blue };
 
 const BRIEF = {
-  ops: '<b>You are the only voice the astronaut hears.</b> Hold SPACE to talk; it takes 1.3 s to reach the Moon. You see what is in each of their hands, what is lying out on the ground and what is left in the locker. Decide what they carry and what gets fixed first.',
+  ops: '<b>You are the only voice the astronaut hears.</b> Hold SPACE to talk. The astronaut holds one tool in each hand: your HANDS panel shows which. Your TOOL LOG says roughly where each one lies: tell them where to look, and what to fix first. When they are suited up, you call them GO.',
   tech: '<b>You know WHERE and WHEN.</b> The radar map and the rover camera. The radar is on the rover. Arrow keys drive.',
   sci: '<b>You know WHAT is wrong.</b> Two screens of gauges: POWER and AIR. Read them and work out the cause.',
 };
@@ -31,6 +31,9 @@ const BRIEF = {
 const net = connect(role);
 const radio = has('ops') ? new Radio(net) : null;
 let state = null, lastEv = 0, rx = false, talking = false, shown = '', planKey = '', resultKey = '';
+// This seat's copy of the results, from the moment the mission ended until this seat presses BACK TO
+// LOBBY (or the next run starts). Someone else going back first does not pull it away.
+let debrief = null;
 
 $('roleName').textContent = ROLES[role];
 document.title = `Moonbase: ${ROLES[role]}`;
@@ -46,6 +49,8 @@ const firstMine = role === 'all' ? 'ops' : role;
 const lobby = createLobby($('lobbyView'), {
   mine: role,
   onReady: on => { radio?.init(); net.send({ t: 'ready', on }); },
+  // Mission Ops (or the one player at all three consoles) calls the astronaut GO.
+  onReadyFor: has('ops') ? (who, on) => { radio?.init(); net.send({ t: 'ready', for: who, on }); } : null,
   extraEl: r => {
     if (r !== firstMine) return null;
     const b = document.createElement('button');
@@ -60,11 +65,11 @@ const tabs = (id, names) => `<div class="tabs" data-tabs="${id}">${names.map((n,
 $('run').innerHTML = [
   has('ops') && `<div class="panel"><h3>Mission Ops</h3>
     <button id="ptt">HOLD SPACE TO TALK TO THE ASTRONAUT</button>
-    <h2>Hands</h2><canvas id="handsCv" class="pic" width="560" height="170"></canvas>
-    <h2>Locker</h2><canvas id="lockerCv" class="pic" width="560" height="150"></canvas></div>`,
+    <h2>Hands</h2><canvas id="handsCv" class="pic" width="560" height="150"></canvas>
+    <h2>Tool log</h2><canvas id="toolCv" class="pic" width="560" height="330"></canvas></div>`,
   has('tech') && `<div class="panel"><h3>Technician</h3>
     ${tabs('tech', ['RADAR', 'ROVER CAM'])}
-    <div data-pane="tech0"><canvas id="map" width="460" height="460"></canvas></div>
+    <div data-pane="tech0"><canvas id="map" width="640" height="640"></canvas></div>
     <div data-pane="tech1" hidden><canvas id="cam"></canvas><p class="hint" id="camHint">Arrow keys drive.</p></div></div>`,
   has('sci') && `<div class="panel"><h3>Scientist</h3>
     ${tabs('sci', ['POWER', 'AIR'])}
@@ -112,23 +117,27 @@ function render() {
     lastEv = s.ev.n;
     const k = s.ev.kind, t = $('toast');
     if (TOAST[k]) { t.className = k; t.textContent = TOAST[k] + (s.ev.pts ? `  +${s.ev.pts}` : ''); }
-    if (k !== 'meteor') radio?.sfx(k);
+    if (k === 'end') radio?.sfx(s.result && s.result.won ? 'won' : 'lost');
+    else if (k !== 'meteor') radio?.sfx(k);
   }
 
-  if (s.phase !== shown) {
-    shown = s.phase;
-    music.mood(s.phase === 'run' ? 'run' : 'calm');
-    lobby.show(s.phase === 'lobby');
-    if (s.phase !== 'lobby') $('planSheet').hidden = true;
-    for (const id of ['run', 'results']) $(id).hidden = id !== s.phase;
-    if (s.phase === 'lobby') { $('toast').textContent = ''; $('toast').className = ''; }
+  if (s.phase === 'run') debrief = null;
+  if (s.phase === 'results' && s.result && !debrief) debrief = { result: s.result, score: s.score, log: s.log || [] };
+  const view = debrief ? 'results' : s.phase;
+  if (view !== shown) {
+    shown = view;
+    music.mood(view === 'run' ? 'run' : 'calm');
+    lobby.show(view === 'lobby');
+    if (view !== 'lobby') $('planSheet').hidden = true;
+    for (const id of ['run', 'results']) $(id).hidden = id !== view;
+    if (view === 'lobby') { $('toast').textContent = ''; $('toast').className = ''; }
   }
   lobby.update(s);
   $('static').hidden = !dark;
   if (dark) { $('toast').textContent = ''; if (talking) { talking = false; radio.setTalking(false); paintPtt(); } }
   if (s.phase === 'lobby') renderPlan(s);
-  if (s.phase === 'run' && !dark) renderRun(s);
-  if (s.phase === 'results') renderResults(s);
+  if (view === 'run' && !dark) renderRun(s);
+  if (view === 'results') renderResults(s);
 }
 
 function renderPlan(s) {
@@ -164,22 +173,47 @@ let lastFrame = 0, swinging = 0; // swinging: when a needle last moved
 })(0);
 fontsReady.then(() => { if (state) render(); });
 
+// The debrief. Every seat has its own way back to the lobby, and a lamp that lights once the crew is
+// there (someone else went first, or the debrief timed out), with the seconds left until it does.
 function renderResults(s) {
-  const key = JSON.stringify(s.result) + s.score;
-  if (key === resultKey || !s.result) return;
-  resultKey = key;
-  const r = s.result;
-  $('results').innerHTML = `<div class="panel">
+  const d = debrief;
+  const key = JSON.stringify(d.result) + d.score;
+  if (key !== resultKey) {
+    resultKey = key;
+    const r = d.result;
+    $('results').innerHTML = `<div class="panel">
     <div class="verdict ${r.won ? 'won' : 'lost'}">${r.won ? 'MISSION COMPLETE' : 'MISSION FAILED'}</div>
     <p>${esc(r.reason)}</p>
-    <p><b>Score ${s.score}</b> &nbsp;|&nbsp; fixed ${r.fixed} &nbsp;|&nbsp; blackouts ${r.blackouts} &nbsp;|&nbsp; meteor hits ${r.hits} &nbsp;|&nbsp; wrong plugs ${r.mistakes}${r.won ? ` &nbsp;|&nbsp; oxygen bonus +${r.bonus}` : ''}</p>
+    <p><b>Score ${d.score}</b> &nbsp;|&nbsp; fixed ${r.fixed} &nbsp;|&nbsp; blackouts ${r.blackouts} &nbsp;|&nbsp; meteor hits ${r.hits} &nbsp;|&nbsp; wrong plugs ${r.mistakes}${r.won ? ` &nbsp;|&nbsp; oxygen bonus +${r.bonus}` : ''}</p>
     <h2>What happened</h2>
-    <ul class="log">${(s.log || []).filter(l => l.kind !== 'start').map(l =>
+    <ul class="log">${d.log.filter(l => l.kind !== 'start').map(l =>
       `<li class="${l.kind}"><span class="at">${clock(l.at)}</span><span>${esc(l.text)}</span><span class="d">${l.pts ? '+' + l.pts : ''}${l.o2 ? l.o2 + ' O2' : ''}</span></li>`).join('')}</ul>
-    ${has('ops') ? '<button class="big" data-again>Fly again</button> <span class="hint">Everyone goes back to the start, to choose 2 or 4 players and ready up again.</span>' : '<p class="hint">Mission Ops can send the crew back to the start for another run.</p>'}
+    <div class="debrief-out">
+      <button class="big" data-lobby type="button">Back to lobby</button>
+      <span class="engraved">Your seat returns. The crew can keep reading.</span>
+      <span class="crew-lamp" id="crewLamp"><i></i>Crew in lobby</span>
+      <b class="nixie" id="debriefLeft"></b>
+    </div>
+    ${has('ops') ? '<p class="hint"><button data-again type="button">Start over</button> Everyone goes back to the start, to choose 2 or 4 players again.</p>' : ''}
   </div>`;
+  }
+  const inLobby = s.phase !== 'results';
+  $('crewLamp').classList.toggle('on', inLobby);
+  $('debriefLeft').hidden = inLobby;
+  if (!inLobby) $('debriefLeft').textContent = String(s.debriefLeft ?? '').padStart(2, '0');
 }
-$('results').addEventListener('click', e => { if (e.target.closest('[data-again]')) { resultKey = ''; net.send({ t: 'reset' }); } });
+function backToLobby() {
+  if (!debrief) return;
+  if (state && state.phase === 'results') net.send({ t: 'lobby' });
+  radio?.sfx('relay');
+  debrief = null; resultKey = '';
+  if (state) render();
+}
+$('results').addEventListener('click', e => {
+  if (e.target.closest('[data-lobby]')) backToLobby();
+  else if (e.target.closest('[data-again]')) { debrief = null; resultKey = ''; net.send({ t: 'reset' }); if (state) render(); }
+});
+addEventListener('keydown', e => { if (e.key === 'Enter' && debrief && !e.repeat && !e.target.closest?.('button, a, input')) { e.preventDefault(); backToLobby(); } });
 
 // ---------- drawing helpers ----------
 const blinkOn = () => Math.floor(Date.now() / 333) % 2 === 0; // 1.5 Hz: an alarm lamp, not a strobe
@@ -233,40 +267,42 @@ function dial(g, x, y, r, value, max, name, { redBelow = 0, redAbove = Infinity,
   plate(g, name, x, y + r * 0.8, r * 1.4, r * 0.11);
 }
 
-// ---------- Mission Ops: the hands, what is lying out, and the locker ----------
+// ---------- Mission Ops: the tool log ----------
+// One row per tool: its silhouette, a jewel lamp (green in the astronaut's hand, amber lying somewhere,
+// dark used up), and where it lies, engraved. Ops knows roughly where; the astronaut has to look.
 function drawKit(s) {
-  {
-    const cv = $('handsCv'), g = cv.getContext('2d'), W = cv.width, H = cv.height;
-    panelBg(g, W, H);
-    // A recessed bay for each hand, left and right, a lamp under each lit while it holds a tool.
-    const u = 104, y0 = 14;
-    s.hands.forEach((t, i) => {
-      const x = 30 + i * (u + 26);
-      g.fillStyle = PAL.bakelite; g.fillRect(x, y0, u, u);
-      g.strokeStyle = PAL.bezel; g.lineWidth = 2; g.strokeRect(x + 1, y0 + 1, u - 2, u - 2);
-      if (t) drawTool(g, t, x + u / 2, y0 + u / 2, u - 26, C.ink);
-      jewel(g, x + u / 2 - 14, y0 + u + 20, 6, 'green', !!t);
-      label(g, i ? 'R' : 'L', x + u / 2 + 8, y0 + u + 21, 13, C.dim, 'left');
-    });
-    // Lying out on the ground: what the astronaut has put down or thrown, and will have to go back for.
-    const out = Object.keys(s.ground || {}), x1 = 300;
-    label(g, 'ON THE GROUND', x1, 26, 12, C.dim, 'left');
-    out.forEach((t, k) => drawTool(g, t, x1 + 34 + (k % 3) * 74, 72 + Math.floor(k / 3) * 60, 52, C.amber));
-    jewel(g, x1 + 8, H - 18, 7, 'amber', out.length > 0);
-    label(g, 'TOOLS OUT', x1 + 24, H - 18, 12, C.dim, 'left');
-  }
-  {
-    const cv = $('lockerCv'), g = cv.getContext('2d'), W = cv.width, H = cv.height;
-    panelBg(g, W, H);
-    const ids = Object.keys(TOOLS), cell = W / ids.length;
-    ids.forEach((t, i) => {
-      const here = s.locker.includes(t), cx = cell * i + cell / 2;
-      g.globalAlpha = here ? 1 : 0.18;
-      drawTool(g, t, cx, 56, 78, C.ink);
-      g.globalAlpha = 1;
-      jewel(g, cx, 124, 5, 'amber', here); // lit while it still hangs on the rack
-    });
-  }
+  drawHands(s);
+  const cv = $('toolCv'), g = cv.getContext('2d'), W = cv.width, H = cv.height;
+  panelBg(g, W, H);
+  const ids = Object.keys(TOOLS), row = (H - 20) / ids.length;
+  ids.forEach((t, i) => {
+    const y = 10 + row * i + row / 2, info = s.tools?.[t], at = info?.at || 'gone';
+    if (i) { g.strokeStyle = PAL.rule; g.lineWidth = 1; g.beginPath(); g.moveTo(16, y - row / 2); g.lineTo(W - 16, y - row / 2); g.stroke(); }
+    g.fillStyle = PAL.bakelite; g.fillRect(18, y - row / 2 + 6, row - 12, row - 12);
+    g.globalAlpha = at === 'gone' ? 0.25 : 1;
+    drawTool(g, t, 18 + (row - 12) / 2, y, row - 22, C.ink);
+    g.globalAlpha = 1;
+    jewel(g, row + 34, y, 8, at === 'hand' ? 'green' : 'amber', at !== 'gone');
+    label(g, TOOLS[t].name.toUpperCase(), row + 56, y - 11, 13, C.dim, 'left');
+    const hand = (s.hands || []).indexOf(t), where = at === 'hand' ? (hand === 0 ? 'LEFT HAND' : hand === 1 ? 'RIGHT HAND' : 'IN HAND') : at === 'gone' ? (t === 'tire' ? 'FITTED' : 'USED') : info.area || '';
+    label(g, where, row + 56, y + 11, 17, at === 'gone' ? C.dim : C.ink, 'left');
+  });
+}
+
+// The astronaut's two hands, left and right: a recessed bay each with the tool in it, a lamp under each lit
+// while it holds one. (A decoy fills a hand on the astronaut's page but the server does not hear of it.)
+function drawHands(s) {
+  const cv = $('handsCv'), g = cv.getContext('2d'), W = cv.width, H = cv.height;
+  panelBg(g, W, H);
+  const u = 96, gap = 60, x0 = (W - (2 * u + gap)) / 2, y0 = 12;
+  (s.hands || [null, null]).forEach((t, i) => {
+    const x = x0 + i * (u + gap);
+    g.fillStyle = PAL.bakelite; g.fillRect(x, y0, u, u);
+    g.strokeStyle = PAL.bezel; g.lineWidth = 2; g.strokeRect(x + 1, y0 + 1, u - 2, u - 2);
+    if (t) drawTool(g, t, x + u / 2, y0 + u / 2, u - 26, C.ink);
+    jewel(g, x + u / 2 - 14, y0 + u + 20, 6, 'green', !!t);
+    label(g, i ? 'R' : 'L', x + u / 2 + 6, y0 + u + 21, 13, C.dim, 'left');
+  });
 }
 
 // ---------- Technician: the radar scope ----------
@@ -294,7 +330,8 @@ function drawMap(s) {
   glass.addColorStop(0, '#152015'); glass.addColorStop(1, PAL.glass);
   g.fillStyle = glass; g.fillRect(0, 0, W, W);
   g.strokeStyle = phos(0.13); g.lineWidth = 1;
-  for (let m = -20; m <= 20; m += 5) { g.beginPath(); g.moveTo(X(m), 0); g.lineTo(X(m), W); g.moveTo(0, Y(m)); g.lineTo(W, Y(m)); g.stroke(); }
+  const G = Math.ceil(CFG.bounds / 10) * 10; // a 10 m graticule out to the edge of the play area
+  for (let m = -G; m <= G; m += 10) { g.beginPath(); g.moveTo(X(m), 0); g.lineTo(X(m), W); g.moveTo(0, Y(m)); g.lineTo(W, Y(m)); g.stroke(); }
   g.strokeStyle = phos(0.35); g.beginPath(); g.arc(X(0), Y(0), CFG.bounds * k, 0, 7); g.stroke();
   // the sweep, with an afterglow behind it
   const sweep = (Date.now() / 1000 * 1.6) % (Math.PI * 2);
@@ -303,16 +340,18 @@ function drawMap(s) {
     g.arc(W / 2, W / 2, R, sweep - (i + 1) * 0.03, sweep - i * 0.03); g.closePath(); g.fill();
   }
   label(g, 'N', W / 2, 26, 12, phos(0.7));
-  // The base, in phosphor outline: habitat, canopy, and the places the astronaut works.
-  const cn = PLACES.canopy;
+  // The base, in phosphor outline: the habitat, its side modules, its four airlocks (inside is cover),
+  // and the places the astronaut works.
   g.strokeStyle = phos(0.7); g.lineWidth = 1.5;
-  g.strokeRect(X(cn.x0), Y(cn.z0), (cn.x1 - cn.x0) * k, (cn.z1 - cn.z0) * k);
-  for (let i = 1; i < 5; i++) { g.beginPath(); g.moveTo(X(cn.x0) + i * (cn.x1 - cn.x0) * k / 5, Y(cn.z0)); g.lineTo(X(cn.x0) + (i - 1) * (cn.x1 - cn.x0) * k / 5, Y(cn.z1)); g.stroke(); }
   g.beginPath(); g.arc(X(0), Y(0), CFG.habRadius * k, 0, 7); g.stroke();
+  g.strokeRect(X(2.2), Y(-1.45), 5.4 * k, 2.9 * k); g.strokeRect(X(-4.6), Y(-1.35), 2.4 * k, 2.7 * k);
   label(g, 'HAB', X(0), Y(0) + 3, 10, phos(0.9));
-  label(g, 'COVER', X(0), Y(cn.z1) + 10, 9, phos(0.6));
+  for (const [id, d] of Object.entries(PLACES.doors)) { // a short tick out from each hatch, and its letter
+    const ox = Math.sin(d.ry), oz = Math.cos(d.ry);
+    g.beginPath(); g.moveTo(X(d.x), Y(d.z)); g.lineTo(X(d.x + ox * 1.3), Y(d.z + oz * 1.3)); g.stroke();
+    label(g, id, X(d.x + ox * 2.1), Y(d.z + oz * 2.1) + 3, 9, phos(0.75));
+  }
   const mark = (p, name, w = 10, h = 10) => { g.strokeStyle = phos(0.9); g.strokeRect(X(p.x) - w / 2, Y(p.z) - h / 2, w, h); if (name) label(g, name, X(p.x), Y(p.z) - h / 2 - 9, 9, phos(0.75)); };
-  mark(PLACES.locker, 'LOCKER');
   g.fillStyle = phos(0.9); g.fillRect(X(0) - 4, Y(-1.5) - 4, 8, 8); // the switchboard is inside the habitat
   label(g, 'BOARD', X(0), Y(0) - CFG.habRadius * k - 9, 9, phos(0.75));
   PLACES.panels.forEach((p, i) => mark(p, i === 0 ? 'SOLAR' : '', 6, 22));
@@ -324,7 +363,9 @@ function drawMap(s) {
     g.beginPath(); g.moveTo(0, -9); g.lineTo(6, 7); g.lineTo(-6, 7); g.closePath(); g.fill(); g.restore();
   };
   blip(s.rover.x, s.rover.z, s.rover.ry, C.amber, 'ROVER');
-  if (s.astro && s.crew.includes('astronaut')) blip(s.astro.x, s.astro.z, s.astro.ry, C.blue, 'ASTRONAUT');
+  if (s.astro && s.crew.includes('astronaut')) blip(s.astro.x, s.astro.z, s.astro.ry, C.blue, s.astro.inside ? 'INSIDE' : 'ASTRONAUT');
+  // Tools left out on the Moon: tiny amber dots, so one dropped in the field can be found again.
+  for (const t of Object.values(s.tools || {})) if (t.at === 'loose' && !t.inside) { g.fillStyle = C.amber; g.beginPath(); g.arc(X(t.x), Y(t.z), 2.5, 0, 7); g.fill(); }
   // Meteors: amber blips closing on the base and a ring that shrinks to nothing at the first impact.
   if (s.meteor) {
     const m = s.meteor, f = m.eta / CFG.meteorWarnSeconds;
@@ -428,7 +469,7 @@ if (has('tech')) {
 function paintPtt() {
   const b = $('ptt'); if (!b) return;
   b.className = talking ? 'tx' : rx ? 'rx' : '';
-  b.textContent = talking ? 'TRANSMITTING... (1.3 s to the Moon)' : rx ? 'ASTRONAUT IS TRANSMITTING' : 'HOLD SPACE TO TALK TO THE ASTRONAUT';
+  b.textContent = talking ? 'TRANSMITTING...' : rx ? 'ASTRONAUT IS TRANSMITTING' : 'HOLD SPACE TO TALK TO THE ASTRONAUT';
 }
 if (has('ops')) {
   const rb = $('radioBtn');
@@ -457,4 +498,4 @@ if (has('ops')) {
 }
 
 // For debugging from the browser console.
-window.moonbase = { state: () => state, radio, net, role };
+window.moonbase = { state: () => state, radio, net, role, debrief: () => debrief };

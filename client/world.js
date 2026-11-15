@@ -8,6 +8,7 @@ import { HORIZON, TERRAIN, SUN_AZ_DEG } from '/shared/horizon.js';
 import { PAL, CABLE_HEX } from '/shared/palette.js';
 import { loadPeriod, loadModel } from '/shared/assets.js';
 import { buildAvatar } from '/avatar.js';
+import { buildAirlock, CHAMBER } from '/airlock.js';
 
 // The base sits on the Connecting Ridge between Shackleton and de Gerlache craters at the lunar
 // south pole (89.45 S, 222.69 E), an Artemis III candidate region. The ground beyond the pad and
@@ -209,7 +210,6 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
   const orange = new THREE.MeshStandardMaterial({ color: PAL.hex.orange, roughness: 0.75 });
   const warmGlow = new THREE.MeshBasicMaterial({ color: 0xe8b872, toneMapped: false });
   const windowGlow = new THREE.MeshBasicMaterial({ color: 0xe8b872, toneMapped: false });
-  const shadowPaint = new THREE.MeshLambertMaterial({ color: PAL.hex.consoleDeep }); // tool outlines on the rack
 
   const mesh = (geo, mat, x = 0, y = 0, z = 0, parent = scene) => {
     const m = new THREE.Mesh(geo, mat);
@@ -258,7 +258,7 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
   }
   addCraters(0, 130, 3, 100);      // the mesh is fine enough for 3 m craters near the base
   addCraters(130, 1080, 10, 100);  // further out, 10 m and up; anything over 100 m is already in the DEM
-  const r0 = Math.hypot(CFG.spawn.x, CFG.spawn.z);
+  const r0 = 7.9; // the graded pad round the base, metres
   function craterHeight(x, z, r) {
     const gx = Math.floor((x + FIELD) / CELL), gz = Math.floor((z + FIELD) / CELL);
     if (gx < 0 || gz < 0 || gx >= NC || gz >= NC) return 0;
@@ -271,23 +271,34 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
     }
     return h * ramp(r, r0 + 3, r0 + 14); // the pad around the habitat and stations was graded
   }
+  // Under and round each airlock chamber the ground is dug a few centimetres below its grate floor
+  // (y = 0.004): the fine undulation used to come up through the floor in patches of regolith.
+  const chamberMid = Object.values(PLACES.doors).map(d => { const k = CHAMBER.outset + CHAMBER.depth / 2; return { x: d.x + Math.sin(d.ry) * k, z: d.z + Math.cos(d.ry) * k }; });
   function height(x, z) {
     const r = Math.hypot(x, z);
     let h = ramp(r, 18, 70) * demAt(x, z);                      // real ground, blended in past the pad
     h += (0.03 + 0.17 * ramp(r, 15, 40)) * N.fbm(x * 0.6, z * 0.6, 2, 3); // fine undulation
-    return h + craterHeight(x, z, r);
+    h += craterHeight(x, z, r);
+    let near = Infinity;
+    for (const c of chamberMid) near = Math.min(near, Math.hypot(x - c.x, z - c.z));
+    const k = ramp(near, 1.4, 3.0);
+    return h * k - 0.05 * (1 - k);
   }
   void craters;
-  const SIZE = 1500, SEG = 230;
+  // Vertices are packed toward the base with a power curve: about 0.4 m apart at the habitat,
+  // 1 m at 10 m out and 2.4 m at the edge of the 45 m play area.
+  const SIZE = 1500, SEG = 300, POW = 2.2, HALF = SIZE / 2, ROW = SEG + 1;
+  const remap = t => Math.sign(t) * Math.pow(Math.abs(t), POW) * HALF; // grid coordinate (-1..1) -> metres
+  const gridX = Float32Array.from({ length: ROW }, (_, i) => remap(2 * i / SEG - 1));
+  const hgrid = new Float32Array(ROW * ROW);
   const groundGeo = new THREE.PlaneGeometry(SIZE, SIZE, SEG, SEG);
   groundGeo.rotateX(-Math.PI / 2);
   {
     const gp = groundGeo.attributes.position, col = new Float32Array(gp.count * 3), uv = groundGeo.attributes.uv;
     for (let i = 0; i < gp.count; i++) {
-      // Denser vertices near the base: remap the regular grid with a power curve.
-      const u = gp.getX(i) / (SIZE / 2), v = gp.getZ(i) / (SIZE / 2);
-      const x = Math.sign(u) * Math.pow(Math.abs(u), 2.0) * (SIZE / 2), z = Math.sign(v) * Math.pow(Math.abs(v), 2.0) * (SIZE / 2);
+      const x = gridX[i % ROW], z = gridX[Math.floor(i / ROW)];
       const h = height(x, z);
+      hgrid[i] = h;
       gp.setXYZ(i, x, h, z);
       uv.setXY(i, x / SIZE + 0.5, z / SIZE + 0.5);
       // Vertex colour breaks up texture tiling: broad bright/dark patches.
@@ -300,6 +311,17 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
   const ground = new THREE.Mesh(groundGeo, regolithMat);
   ground.receiveShadow = true;
   scene.add(ground);
+  // The height of the ground as drawn (the mesh, not the formula behind it), so feet, wheels and tools
+  // sit on what you see even where a crater is smaller than the mesh spacing.
+  const cellOf = v => { // index of the grid cell holding v, and how far across it
+    const t = Math.sign(v) * Math.pow(Math.min(1, Math.abs(v) / HALF), 1 / POW);
+    const i = Math.min(SEG - 1, Math.max(0, Math.floor((t + 1) / 2 * SEG)));
+    return [i, Math.min(1, Math.max(0, (v - gridX[i]) / (gridX[i + 1] - gridX[i])))];
+  };
+  function groundAt(x, z) {
+    const [i, fx] = cellOf(x), [j, fz] = cellOf(z), a = j * ROW + i;
+    return (hgrid[a] * (1 - fx) + hgrid[a + 1] * fx) * (1 - fz) + (hgrid[a + ROW] * (1 - fx) + hgrid[a + ROW + 1] * fx) * fz;
+  }
 
   // The skyline: the real 360-degree horizon seen from the site (LOLA, out to 290 km, with the
   // Moon's curvature). A band of ground runs from the edge of the terrain mesh out to a ring at
@@ -328,10 +350,13 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
 
   // ---------- rocks ----------
   // Two shapes (jagged, rounded), each displaced by noise, instanced many times.
-  const SITES = [PLACES.locker, ...PLACES.panels, PLACES.rover, PLACES.depot, PLACES.dish, PLACES.drill, CFG.spawn];
+  const SITES = [...Object.values(PLACES.doors).map(d => ({ x: d.x + Math.sin(d.ry) * 2, z: d.z + Math.cos(d.ry) * 2 })), ...PLACES.panels, PLACES.rover, PLACES.depot, PLACES.dish, PLACES.drill];
   const keepClear = (x, z, m) => Math.hypot(x, z) > 4.5 + m && SITES.every(s => Math.hypot(x - s.x, z - s.z) > 2.8 + m);
-  function rockGeo(detail, amp, seed) {
-    // Icosahedron geometry is unindexed (flat shaded); weld shared vertices first so normals smooth.
+  // A rock: a sphere pushed about by noise (low-frequency lumps plus ridged creases), stretched to its
+  // own proportions, then cut by random fracture planes so it has flat broken faces like a boulder
+  // that spalled off a crater rim. Normalised to a radius of about 1, centred.
+  function rockGeo(detail, seed, { amp = 0.3, cuts = 6, depth = [0.5, 0.85], squash = [1, 0.75, 1], ridged = 1 } = {}) {
+    // Icosahedron geometry is unindexed; weld shared vertices so the noise moves them together.
     const raw = new THREE.IcosahedronGeometry(1, detail), rp = raw.attributes.position;
     const index = [], verts = [], seen = new Map();
     for (let i = 0; i < rp.count; i++) {
@@ -343,38 +368,70 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3));
     g.setIndex(index);
-    const p = g.attributes.position, v = new THREE.Vector3(), uv = new Float32Array(p.count * 2);
+    const planes = Array.from({ length: cuts }, () => {
+      const u = rnd() * 2 - 1, a = rnd() * Math.PI * 2, r = Math.sqrt(1 - u * u);
+      return { n: new THREE.Vector3(r * Math.cos(a), u, r * Math.sin(a)), d: depth[0] + rnd() * (depth[1] - depth[0]) };
+    });
+    const p = g.attributes.position, v = new THREE.Vector3();
+    const box = new THREE.Box3();
     for (let i = 0; i < p.count; i++) {
       v.fromBufferAttribute(p, i);
-      const n = N.fbm(v.x * 1.6 + seed, v.y * 1.6, v.z * 1.6, 3) + 0.35 * N.fbm(v.x * 5 + seed, v.y * 5, v.z * 5, 2);
-      uv[i * 2] = Math.atan2(v.z, v.x) / Math.PI; uv[i * 2 + 1] = v.y;
-      v.multiplyScalar(1 + n * amp).multiply(new THREE.Vector3(1, 0.72, 1));
+      const lump = N.fbm(v.x * 1.3 + seed, v.y * 1.3 + seed * 0.7, v.z * 1.3, 4);
+      const crease = 1 - Math.abs(N.noise3(v.x * 3.1 + seed, v.y * 3.1, v.z * 3.1 - seed));
+      v.multiplyScalar(1 + amp * (lump + ridged * 0.45 * (crease - 0.5)));
+      v.set(v.x * squash[0], v.y * squash[1], v.z * squash[2]);
+      for (const pl of planes) { const out = v.dot(pl.n) - pl.d; if (out > 0) v.addScaledVector(pl.n, -out); }
       p.setXYZ(i, v.x, v.y, v.z);
+      box.expandByPoint(v);
+    }
+    const c = box.getCenter(new THREE.Vector3()), size = box.getSize(new THREE.Vector3()), k = 2 / Math.max(size.x, size.y, size.z);
+    const uv = new Float32Array(p.count * 2);
+    for (let i = 0; i < p.count; i++) {
+      v.fromBufferAttribute(p, i).sub(c).multiplyScalar(k);
+      p.setXYZ(i, v.x, v.y, v.z);
+      uv[i * 2] = Math.atan2(v.z, v.x) / Math.PI; uv[i * 2 + 1] = v.y;
     }
     g.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
     g.computeVertexNormals();
+    g.computeBoundingBox();
+    g.userData.bottom = g.boundingBox.min.y; // how far the base sits below the centre, in unit scale
     return g;
   }
   const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler(), v3 = new THREE.Vector3(), sc = new THREE.Vector3(), c3 = new THREE.Color();
-  function scatter(geo, count, rMin, rMax, sMin, sMax, bury) {
+  // Scatter `count` copies of one shape. Each copy gets its own stretch, turn and tilt, so no two match.
+  function scatter(geo, count, rMin, rMax, sMin, sMax, { bury = 0.25, tilt = 0.5 } = {}) {
     const im = new THREE.InstancedMesh(geo, rockMat, count);
     for (let i = 0; i < count; i++) {
       let x, z, s;
       do { const a = rnd() * Math.PI * 2, r = rMin + Math.pow(rnd(), 1.4) * (rMax - rMin); x = Math.cos(a) * r; z = Math.sin(a) * r; s = sMin + rnd() * rnd() * (sMax - sMin); } while (!keepClear(x, z, s) || (s > 0.6 && Math.hypot(x, z) < CFG.bounds + 1)); // nothing you could walk through inside the play area
-      e.set(rnd() * 0.5, rnd() * Math.PI * 2, rnd() * 0.5);
-      m4.compose(v3.set(x, height(x, z) + s * (0.55 - bury), z), q.setFromEuler(e), sc.set(s * (0.8 + rnd() * 0.5), s, s * (0.8 + rnd() * 0.5)));
+      e.set((rnd() - 0.5) * 2 * tilt, rnd() * Math.PI * 2, (rnd() - 0.5) * 2 * tilt, 'YXZ');
+      sc.set(s * (0.65 + rnd() * 0.75), s * (0.55 + rnd() * 0.6), s * (0.65 + rnd() * 0.75));
+      m4.compose(v3.set(x, groundAt(x, z) - geo.userData.bottom * sc.y * (1 - bury), z), q.setFromEuler(e), sc);
       im.setMatrixAt(i, m4);
-      const t = 0.75 + rnd() * 0.4;
-      im.setColorAt(i, c3.setRGB(t, t * (0.98 + rnd() * 0.03), t * 0.95));
+      const t = 0.72 + rnd() * 0.42;
+      im.setColorAt(i, c3.setRGB(t, t * (0.97 + rnd() * 0.04), t * (0.93 + rnd() * 0.04)));
     }
     im.castShadow = im.receiveShadow = true;
     scene.add(im);
     return im;
   }
-  const jagged = rockGeo(3, 0.4, 3), rounded = rockGeo(2, 0.22, 11);
-  scatter(jagged, 70, 6, 120, 0.3, 2.6, 0.25);
-  scatter(rounded, 90, 5, 90, 0.25, 1.6, 0.3);
-  scatter(rounded, 500, 2.5, 60, 0.05, 0.3, 0.2);
+  // Eight shapes. Boulders (outside the play area): angular blocks, slabs, many-faceted chunks, knobbly
+  // breccia and two weathered rounded ones. Pebbles (everywhere): three small, sharp shapes.
+  const BOULDERS = [
+    rockGeo(3, 101, { amp: 0.30, cuts: 9, squash: [1.25, 0.80, 0.90] }),
+    rockGeo(3, 202, { amp: 0.32, cuts: 6, squash: [1.60, 0.55, 0.90] }),
+    rockGeo(3, 303, { amp: 0.26, cuts: 13, depth: [0.45, 0.75], squash: [0.95, 1.00, 1.10] }),
+    rockGeo(3, 404, { amp: 0.50, cuts: 4, squash: [1.10, 0.75, 1.35], ridged: 1.6 }),
+    rockGeo(2, 505, { amp: 0.24, cuts: 2, depth: [0.7, 0.9], squash: [1.00, 0.70, 1.15], ridged: 0.3 }),
+  ];
+  const PEBBLES = [
+    rockGeo(1, 606, { amp: 0.30, cuts: 5, squash: [1.30, 0.70, 0.90] }),
+    rockGeo(1, 707, { amp: 0.35, cuts: 4, squash: [0.90, 0.60, 1.20] }),
+    rockGeo(1, 808, { amp: 0.25, cuts: 7, squash: [1.10, 0.85, 1.00] }),
+  ];
+  [24, 18, 18, 16, 0].forEach((n, i) => n && scatter(BOULDERS[i], n, 6, 120, 0.3, 2.6, { bury: 0.3, tilt: 0.45 }));     // big, mostly far
+  [20, 14, 16, 18, 22].forEach((n, i) => scatter(BOULDERS[i], n, 5, 90, 0.25, 1.6, { bury: 0.35, tilt: 0.6 }));        // medium
+  [240, 230, 230].forEach((n, i) => scatter(PEBBLES[i], n, 2.5, 80, 0.05, 0.3, { bury: 0.2, tilt: Math.PI }));          // small, any way up
 
   // ---------- sky ----------
   {
@@ -450,6 +507,7 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
   // swung open so you can look inside, and a porthole in the inner hatch that shows the hall itself
   // (astronaut.js renders the hall into it with a second camera).
   const hab = new THREE.Group();
+  const doors = {}, floods = [];
   {
     const CORE_X = 1.5; // the model's core is 1.5 m off its bounding-box centre
     loadModel(THREE, 'hab-module').then(m => {
@@ -474,55 +532,46 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
       return t;
     }
 
-    // The airlock vestibule: a painted steel box on the core's door, open at the front.
-    const AZ0 = 2.62, AZ1 = 3.45, AW = 1.5, AH = 2.4, FLOOR = 0.36; // back (in the core wall), front, width, height, floor
-    const vest = new THREE.Group(); vest.name = 'Airlock'; hab.add(vest);
-    const inside = new THREE.MeshStandardMaterial({ map: panelTex, color: PAL.hex.enamel, roughness: 0.8, metalness: 0.1, emissive: 0x4a3f2c }); // lit by its own lamp
-    const shell = new THREE.MeshStandardMaterial({ map: panelTex, color: PAL.hex.enamel, roughness: 0.8, metalness: 0.1 });
-    const D = AZ1 - AZ0, zc = (AZ0 + AZ1) / 2;
-    for (const sx of [-1, 1]) mesh(new THREE.BoxGeometry(0.08, AH, D), shell, sx * (AW / 2 + 0.04), FLOOR + AH / 2 - 0.1, zc, vest); // side walls
-    for (const sx of [-1, 1]) mesh(new THREE.PlaneGeometry(D, AH - 0.1), inside, sx * (AW / 2 - 0.001), FLOOR + AH / 2 - 0.1, zc, vest).rotation.y = -sx * Math.PI / 2;
-    mesh(new THREE.BoxGeometry(AW + 0.16, 0.1, D + 0.05), shell, 0, FLOOR + AH - 0.05, zc, vest);                  // roof
-    mesh(new THREE.PlaneGeometry(AW, D), inside, 0, FLOOR + AH - 0.101, zc, vest).rotation.x = Math.PI / 2;
-    mesh(new THREE.BoxGeometry(AW + 0.16, FLOOR, D + 0.05), grey, 0, FLOOR / 2, zc, vest);                         // floor plinth
-    const grate = canvasTexture(THREE, 128, 128, (d, w, h, g) => { g.fillStyle = PAL.consoleDeep; g.fillRect(0, 0, w, h); g.strokeStyle = PAL.bezel; g.lineWidth = 3; for (let i = 0; i <= w; i += 16) { g.beginPath(); g.moveTo(i, 0); g.lineTo(i, h); g.stroke(); g.beginPath(); g.moveTo(0, i); g.lineTo(w, i); g.stroke(); } });
-    mesh(new THREE.PlaneGeometry(AW, D), new THREE.MeshStandardMaterial({ map: grate, roughness: 0.7, metalness: 0.5 }), 0, FLOOR + 0.002, zc, vest).rotation.x = -Math.PI / 2;
-    // The front frame, bevelled, round the open doorway.
-    {
-      const fr = new THREE.Shape(); fr.moveTo(-AW / 2 - 0.12, 0); fr.lineTo(AW / 2 + 0.12, 0); fr.lineTo(AW / 2 + 0.12, AH + 0.1); fr.lineTo(-AW / 2 - 0.12, AH + 0.1); fr.closePath();
-      const hole = new THREE.Path(), hw = 0.55, hh = 1.85, hr = 0.18; // a rounded door opening
-      hole.moveTo(-hw + hr, 0.1); hole.lineTo(hw - hr, 0.1); hole.quadraticCurveTo(hw, 0.1, hw, 0.1 + hr); hole.lineTo(hw, 0.1 + hh - hr); hole.quadraticCurveTo(hw, 0.1 + hh, hw - hr, 0.1 + hh);
-      hole.lineTo(-hw + hr, 0.1 + hh); hole.quadraticCurveTo(-hw, 0.1 + hh, -hw, 0.1 + hh - hr); hole.lineTo(-hw, 0.1 + hr); hole.quadraticCurveTo(-hw, 0.1, -hw + hr, 0.1);
-      fr.holes.push(hole);
-      const frame = mesh(new THREE.ExtrudeGeometry(fr, { depth: 0.08, bevelEnabled: true, bevelSize: 0.015, bevelThickness: 0.015, bevelSegments: 2 }), grey, 0, FLOOR - 0.1, AZ1 - 0.04, vest);
-      frame.name = 'Doorway';
-      // The outer hatch, swung open on its hinge to the right, porthole and wheel on it.
-      const hinge = new THREE.Group(); hinge.position.set(hw + 0.02, FLOOR, AZ1 + 0.06); hinge.rotation.y = 1.9; vest.add(hinge);
-      const leaf = new THREE.Shape(); leaf.moveTo(0, 0); leaf.lineTo(-2 * hw, 0); leaf.lineTo(-2 * hw, hh); leaf.lineTo(0, hh); leaf.closePath();
-      const port = new THREE.Path(); port.absarc(-hw, 1.35, 0.17, 0, Math.PI * 2, true); leaf.holes.push(port);
-      const door = mesh(new THREE.ExtrudeGeometry(leaf, { depth: 0.07, bevelEnabled: true, bevelSize: 0.012, bevelThickness: 0.012, bevelSegments: 2 }), grey, 0, 0.1, 0, hinge);
-      door.name = 'Hatch_Outer';
-      mesh(new THREE.TorusGeometry(0.19, 0.03, 8, 24), steel, -hw, 1.45, 0.09, hinge);
-      mesh(new THREE.TorusGeometry(0.16, 0.025, 8, 20), steel, -hw, 0.95, 0.1, hinge).name = 'Wheel';
+    // The four airlocks: a walk-in chamber on each of the model's hatches (client/airlock.js), outer hatch
+    // standing open, a floodlight over it and a hazard-striped apron in front. Their twins are in the hall.
+    const apronTex = canvasTexture(THREE, 256, 128, (d, w2, h2, g) => {
+      g.fillStyle = PAL.hazard; g.fillRect(0, 0, w2, h2);
+      g.strokeStyle = '#2b2a26'; g.lineWidth = 22;
+      for (let i = -256; i < 512; i += 64) { g.beginPath(); g.moveTo(i, 0); g.lineTo(i + 128, 128); g.stroke(); }
+      g.fillStyle = '#35393f'; g.fillRect(16, 16, w2 - 32, h2 - 32);
+    });
+    const apronMat = new THREE.MeshStandardMaterial({ map: apronTex, roughness: 0.9, metalness: 0.05 });
+    for (const [id, d] of Object.entries(PLACES.doors)) {
+      const a = buildAirlock(THREE, { id, shell: true, castShadow: shadows });
+      a.root.position.set(d.x, 0, d.z); a.root.rotation.y = d.ry; a.root.translateZ(CHAMBER.outset); // clear of the model's skin
+      a.setOuter(1); a.setInner(0); a.setLamp('green'); a.setPressure(0);
+      hab.add(a.root);
+      doors[id] = a;
+      const D = CHAMBER.depth, H = CHAMBER.height;
+      mesh(new THREE.BoxGeometry(0.3, 0.12, 0.2), dark, 0, H + 0.2, D + 0.12, a.root);
+      mesh(new THREE.CircleGeometry(0.06, 12), warmGlow, 0, H + 0.139, D + 0.15, a.root).rotation.x = -Math.PI / 2;
+      // A real light over the main door only: every light costs the Quest on every pixel outside. The
+      // others have their lamp glowing and no light.
+      if (id === 'S') {
+        const flood = new THREE.SpotLight(PAL.hex.incandescent, 25, 10, 0.7, 0.6, 1.2);
+        flood.position.set(0, H + 0.1, D + 0.2); flood.target.position.set(0, 0, D + 3);
+        a.root.add(flood, flood.target);
+        floods.push(flood);
+      }
+      const apron = new THREE.Mesh(new THREE.PlaneGeometry(1.5, 0.9), apronMat);
+      apron.rotation.x = -Math.PI / 2; apron.position.set(0, 0.012, D + 0.5); apron.receiveShadow = true; a.root.add(apron);
     }
-    // Inside: a warm lamp in the roof, handrails, a status lamp, and the inner hatch with its porthole.
-    mesh(new THREE.BoxGeometry(0.5, 0.04, 0.16), warmGlow, 0, FLOOR + AH - 0.13, zc, vest);
-    for (const sx of [-1, 1]) tube(steel, [sx * 0.62, FLOOR + 0.8, AZ0 + 0.2], [sx * 0.62, FLOOR + 0.8, AZ1 - 0.15], 0.02, vest);
-    mesh(new THREE.BoxGeometry(1.2, 2.0, 0.08), inside, 0, FLOOR + 1.0, AZ0 + 0.04, vest);                          // inner hatch
-    mesh(new THREE.TorusGeometry(0.2, 0.035, 8, 24), steel, 0, FLOOR + 1.35, AZ0 + 0.09, vest);
-    const portal = mesh(new THREE.CircleGeometry(0.2, 32), new THREE.MeshBasicMaterial({ color: 0xe8b872, toneMapped: false }), 0, FLOOR + 1.35, AZ0 + 0.085, vest);
-    portal.name = 'Porthole_Inner'; portal.castShadow = false;
-    hab.userData.portal = portal; // astronaut.js draws the hall into it
-    const status = mesh(new THREE.SphereGeometry(0.035, 12, 8), new THREE.MeshBasicMaterial({ color: PAL.hex.green, toneMapped: false }), 0.48, FLOOR + 1.9, AZ0 + 0.1, vest);
-    status.name = 'Lamp_Status';
-    // The floodlight over the door, and the steps up to it.
-    mesh(new THREE.BoxGeometry(0.3, 0.12, 0.2), dark, 0, FLOOR + AH + 0.12, AZ1 + 0.1, hab);
-    mesh(new THREE.CircleGeometry(0.06, 12), warmGlow, 0, FLOOR + AH + 0.06, AZ1 + 0.15, hab).rotation.x = -Math.PI / 2;
-    const flood = new THREE.SpotLight(PAL.hex.incandescent, 25, 12, 0.7, 0.6, 1.2);
-    flood.position.set(0, 2.8, 3.55); flood.target.position.set(0, 0, 6);
-    hab.add(flood, flood.target);
-    hab.userData.flood = flood;
-    mesh(new THREE.BoxGeometry(1.4, 0.18, 0.4), grey, 0, 0.09, 3.7, hab); // a step up to the airlock floor
+    hab.userData.flood = floods[0];
+    // The habitat's painted windows get dark glass over them, so they read as windows and not stickers.
+    // The one on Segment C is the outside of the hall's window.
+    {
+      const W = PLACES.window.out;
+      const glass = mesh(new THREE.CircleGeometry(0.2, 24), new THREE.MeshStandardMaterial({ color: PAL.hex.whiteOff, roughness: 0.15, metalness: 0.4, emissive: 0x2a1e10 }), W.x, W.y, W.z, hab);
+      glass.rotation.y = W.ry; glass.position.x += Math.sin(W.ry) * 0.03; glass.position.z += Math.cos(W.ry) * 0.03; glass.castShadow = false;
+      glass.name = 'Window_SegmentC';
+      const ring = mesh(new THREE.TorusGeometry(0.21, 0.025, 8, 24), steel, glass.position.x, W.y, glass.position.z, hab);
+      ring.rotation.y = W.ry;
+    }
     // Mast on the dome with the tracking mount and its dish.
     tube(steel, [1.2, 5.6, 0], [1.2, 7.2, 0], 0.035, hab);
     const dish = mesh(new THREE.LatheGeometry(Array.from({ length: 12 }, (_, i) => new THREE.Vector2(i * 0.05, (i * 0.05) ** 2 * 0.5)), 24), whitePlain, 1.2, 7.3, 0, hab);
@@ -682,59 +731,6 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
     board.userData.lamp = lamp;
   }
 
-  // ---------- tool locker: an open rack beside the airlock. The tools themselves are added by stations.js ----------
-  const locker = fixture(PLACES.locker);
-  // Everything hangs between waist and shoulder height, so nothing has to be picked up off the floor:
-  // the tire on the left, the hand tools in the middle, the generator on its shelf on the right.
-  const lockerSlots = {
-    tire:   new THREE.Vector3(-0.85, 1.12, 0.2),
-    brush:  new THREE.Vector3(-0.2, 1.3, 0.14),
-    patch:  new THREE.Vector3(0.14, 1.46, 0.2),
-    welder: new THREE.Vector3(0.52, 1.5, 0.14),
-    gen:    new THREE.Vector3(0.98, 1.08, 0.22),
-  };
-  {
-    mesh(new THREE.BoxGeometry(2.7, 1.9, 0.08), whitePlain, 0, 1.0, 0, locker);
-    mesh(new THREE.BoxGeometry(2.8, 0.08, 0.5), orange, 0, 1.98, 0.2, locker);
-    mesh(new THREE.BoxGeometry(2.7, 0.08, 0.5), grey, 0, 0.1, 0.22, locker);        // floor
-    mesh(new THREE.BoxGeometry(0.6, 0.05, 0.45), grey, 1.03, 0.88, 0.22, locker);   // the generator's shelf
-    tube(steel, [-0.85, 1.12, 0.04], [-0.85, 1.12, 0.3], 0.03, locker);             // the peg the tire hangs on
-    for (const x of [-1.35, 1.35]) mesh(new THREE.BoxGeometry(0.06, 1.95, 0.5), grey, x, 1.0, 0.22, locker);
-  }
-  // Shadow board along the top of the rack: four NASA hand tools (docs/ASSETS.md), each on a peg over its
-  // painted outline. Scenery: they are not game tools, nothing picks them up.
-  for (const [id, x, rot] of [['wrench', -0.95, [Math.PI / 2, 0, Math.PI / 2, 'ZXY']], ['ratchet', -0.5, [Math.PI / 2, 0, Math.PI / 2, 'ZXY']],
-    ['hammer', 0.0, [Math.PI / 2, 0, Math.PI / 2, 'ZXY']], ['grease-gun', 0.62, [0, Math.PI / 2, 0, 'XYZ']]]) {
-    loadPeriod(THREE, id, { rough: 0.55, metal: 0.6, merge: true }).then(m => {
-      m.rotation.set(...rot); m.updateMatrix();
-      const depth = new THREE.Box3().setFromObject(m).getSize(new THREE.Vector3()).z;
-      m.position.set(x, 1.82, 0.046 + depth / 2);
-      const sil = m.clone(); sil.position.set(0, 0, 0); // the painted silhouette: the tool's own shape, flat, a little larger
-      sil.traverse(o => { if (o.isMesh) { o.material = shadowPaint; o.castShadow = false; } });
-      const outline = new THREE.Group(); outline.add(sil);
-      outline.position.set(x, 1.82, 0.041); outline.scale.set(1.1, 1.1, 0.02);
-      tube(steel, [x, 1.82, 0.04], [x, 1.82, 0.05 + depth], 0.006, locker);
-      locker.add(outline, m);
-    }).catch(e => console.warn(id, e));
-  }
-
-  // ---------- airlock canopy: the one roof on the base. Stand under it in a meteor shower. ----------
-  {
-    const c = PLACES.canopy, w = c.x1 - c.x0, z0 = 3.25, len = c.z1 - z0;
-    mesh(new THREE.BoxGeometry(w + 0.2, 0.1, len), whitePlain, 0, 2.62, z0 + len / 2);
-    mesh(new THREE.BoxGeometry(w + 0.2, 0.14, 0.08), orange, 0, 2.6, c.z1);
-    for (const x of [c.x0, c.x1]) tube(steel, [x, 0, c.z1 - 0.1], [x, 2.6, c.z1 - 0.1], 0.05);
-    const stripeTex = canvasTexture(THREE, 256, 256, (d, w2, h2, g) => {
-      g.fillStyle = PAL.hazard; g.fillRect(0, 0, w2, h2);
-      g.strokeStyle = '#2b2a26'; g.lineWidth = 26;
-      for (let i = -256; i < 512; i += 72) { g.beginPath(); g.moveTo(i, 0); g.lineTo(i + 256, 256); g.stroke(); }
-      g.fillStyle = '#35393f'; g.fillRect(22, 22, w2 - 44, h2 - 44);
-    });
-    const pad = new THREE.Mesh(new THREE.PlaneGeometry(w, len - 0.6), new THREE.MeshStandardMaterial({ map: stripeTex, roughness: 0.9 }));
-    pad.rotation.x = -Math.PI / 2; pad.position.set(0, 0.015, z0 + 0.6 + (len - 0.6) / 2); pad.receiveShadow = true;
-    scene.add(pad);
-  }
-
   // ---------- hull crack: one crack, moved to whichever of the six spots is breached ----------
   // The habitat model's drum is faceted: find its surface at an angle by casting a ray in from outside.
   const hullRay = new THREE.Raycaster(), hullFrom = new THREE.Vector3(), hullDir = new THREE.Vector3();
@@ -873,7 +869,7 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
   }
 
   // ---------- astronaut figure, shown in the rover camera: it walks, crouches and reaches (client/avatar.js) ----------
-  const figure = buildAvatar(THREE, { shadows, ground: height });
+  const figure = buildAvatar(THREE, { shadows, ground: (x, z) => groundAt(x, z) });
   const avatar = figure.group;
   avatar.visible = false;
   scene.add(avatar);
@@ -889,9 +885,10 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
   prop('support-cradle', depot, -2.6, -1.0, -0.2, { by: { spstob_fss_1: { rough: 0.7 } } });
 
   return {
-    rover, avatar, figure, sun, height, hab,
+    rover, avatar, figure, sun, height, hab, ground: groundAt, // ground(x, z): the height of the ground as drawn
     // Handles for the astronaut's hands (stations.js). Vectors are local to their fixture group.
-    fixtures: { locker, lockerSlots, board, sockets, plugs, plugRest, dustCells, crack, crackPts, wheel: rover.userData.wheel, hub: rover.userData.hub },
+    doors, height,
+    fixtures: { board, sockets, plugs, plugRest, dustCells, crack, crackPts, wheel: rover.userData.wheel, hub: rover.userData.hub },
     // Call every frame.
     update(time) {
       earth.userData.clouds.rotation.y = time * 0.004;
@@ -905,7 +902,7 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
       // The habitat's own power shows from outside: with the switchboard tripped it is on red backup
       // lights, and in a blackout there is nothing at all. The floodlight is off in both.
       const backup = !!s.board && !s.dark;
-      hab.userData.flood.intensity = s.dark || s.board ? 0 : 25;
+      floods.forEach(f => { f.intensity = s.dark || s.board ? 0 : 25; });
       warmGlow.color.setHex(s.dark ? 0x120d05 : backup ? 0x3d1a14 : 0xe8b872);
       windowGlow.color.setHex(s.dark ? 0x120d05 : backup ? 0x5a2418 : 0xe8b872);
 
@@ -988,6 +985,7 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
     moveRover(r, k = 0.2) {
       rover.position.x += (r.x - rover.position.x) * k;
       rover.position.z += (r.z - rover.position.z) * k;
+      rover.position.y = groundAt(rover.position.x, rover.position.z);
       let d = r.ry - rover.rotation.y;
       d = Math.atan2(Math.sin(d), Math.cos(d));
       rover.rotation.y += d * k;

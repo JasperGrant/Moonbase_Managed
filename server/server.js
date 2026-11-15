@@ -1,5 +1,5 @@
 // Moonbase server for a laptop: serves the pages and runs the game over one WebSocket.
-// The game rules and the 1.3 s delay are in hub.js, shared with the Cloudflare worker.
+// The game rules are in hub.js, shared with the Cloudflare worker.
 import http from 'node:http';
 import https from 'node:https';
 import fs from 'node:fs';
@@ -19,7 +19,7 @@ const MIME = {
 };
 const WEB = path.join(ROOT, 'client'); // everything the pages need is in here, three.js included
 
-const hub = new Hub(undefined, { requireFullCrew: process.env.SOLO ? false : undefined, adminKey: process.env.ADMIN_KEY }); // SOLO=1: ready up alone. ADMIN_KEY=x: lock /admin
+const hub = new Hub(undefined, { requireFullCrew: process.env.SOLO ? false : undefined, adminKey: process.env.ADMIN_KEY, timeScale: Number(process.env.TIME_SCALE) || 1 }); // SOLO=1: ready up alone. ADMIN_KEY=x: lock /admin. TIME_SCALE=0.5: a half-speed mission clock, for tests
 
 function serve(req, res) {
   let url;

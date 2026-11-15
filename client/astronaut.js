@@ -6,20 +6,21 @@ import { Radio } from '/voice.js';
 import { buildWorld } from '/world.js';
 import { buildFixtures } from '/stations.js';
 import { buildInterior, ROOM } from '/interior.js';
-import { CFG, PLACES } from '/shared/config.js';
+import { buildPhysics } from '/physics.js';
+import { CHAMBER } from '/airlock.js';
+import { CFG, CREW, ROLES, PLACES, covers } from '/shared/config.js';
 import { sheltered } from '/shared/rules.js';
 import { seatRefused, seatTaken, kicked } from '/seat.js';
 import { buildArm } from '/arm.js';
-import { PAL } from '/shared/palette.js';
+import { PAL, FONT, nixie, fontsReady } from '/shared/palette.js';
 import { createLobby } from '/lobby.js';
-import { buildWaitingRoom } from '/waitingroom.js';
 import { isHeadset } from '/device.js';
 import { music } from '/music.js';
 
 const REACH = 3.2;        // metres: how far away the mouse can work something
 const REACH_VR = 1.6;     // metres: pointing in VR is a fallback for grabbing, so it only works close up
 const CROUCH = 0.9;       // metres: eye height while C is held on a laptop
-const WALK = 2.4;         // m/s
+const WALK = 4.0;         // m/s: a brisk lunar lope (the play area is 45 m in every direction)
 const GRAVITY = 1.62;     // m/s^2, lunar
 
 const net = connect('astronaut');
@@ -27,9 +28,14 @@ const radio = new Radio(net);
 let state = null, lastEv = 0, rx = false, talking = false, mode = null; // mode: 'vr' | 'desk'
 let flash = '', flashUntil = 0, lastPhase = ''; // flash: 'ok' or 'bad', shown on the gauges for a few seconds
 let nextThump = 0, covered = false;
+// The debrief: set when a mission ends, cleared when the astronaut presses EXIT or the next run starts.
+// It outlives the server's results phase, so nobody else going back to the lobby pulls it away.
+// { won, score, reason, read, readFor, beepAt }
+let debrief = null;
 
 // ---------- scene ----------
-const renderer = new THREE.WebGLRenderer({ antialias: true });
+// stencil: the portholes and the hall's window are drawn with a stencil mask (see "portholes" below).
+const renderer = new THREE.WebGLRenderer({ antialias: true, stencil: true });
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 renderer.setSize(innerWidth, innerHeight);
 renderer.shadowMap.enabled = true;
@@ -45,7 +51,6 @@ const camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.05, 2
 camera.rotation.order = 'YXZ';
 camera.position.y = 1.65; // desktop eye height; the headset overrides this
 const rig = new THREE.Group(); // move this to move the player
-rig.position.set(CFG.spawn.x, 0, CFG.spawn.z);
 rig.add(camera);
 scene.add(rig);
 
@@ -58,6 +63,7 @@ const interior = buildInterior(THREE, scene, { sfx: k => radio.sfx(k) });
 interior.group.visible = false;
 interior.mount.add(world.fixtures.board); // the switchboard hangs on the interior wall
 let where = 'out';                        // 'out' on the surface, 'in' inside the habitat
+let door = CFG.spawn.door;                // the airlock last come through: indoors, the map shows you there
 
 // Haptics: a short buzz on the controller in hand i (0 or 1). Bare hands have nothing to buzz.
 function pulse(i, strength = 0.5, ms = 40) {
@@ -65,46 +71,14 @@ function pulse(i, strength = 0.5, ms = 40) {
   const src = session && [...session.inputSources].find(x => x.handedness === controllers[i]?.userData.hand);
   src?.gamepad?.hapticActuators?.[0]?.pulse?.(strength, ms)?.catch?.(() => {});
 }
-// The ground under a point, for a tool that has been let go: the hall floor inside its walls, or the
-// regolith outside the habitat and inside the play area. { x, z } come back moved if they were not allowed.
-function floor(x, z) {
-  if (x > ROOM.origin.x / 2) {
-    const l = interior.toLocal(x, z), c = interior.clamp(l.x, l.z), w = interior.toWorld(c.x, c.z);
-    return { x: w.x, z: w.z, y: 0, in: true };
-  }
-  const d = Math.hypot(x, z), out = CFG.habRadius + 0.2;
-  if (d > CFG.bounds) { x *= CFG.bounds / d; z *= CFG.bounds / d; }
-  else if (d < out) { const k = out / Math.max(d, 0.01); x *= k; z *= k; }
-  const m = inModule(x, z);
-  if (m) { x += m.x; z += m.z; }
-  return { x, z, y: world.height(x, z), in: false };
-}
-const fx = buildFixtures(THREE, world, { rig, camera, send: a => net.send({ t: 'do', a }), sfx: k => radio.sfx(k), pulse, floor, place: () => where });
+const phys = buildPhysics();
+const fx = buildFixtures(THREE, world, { rig, camera, send: a => net.send({ t: 'do', a }), sfx: k => radio.sfx(k), sfxAt: (k, p, g, o) => radio.sfxAt(k, p, g, o), pulse, phys, interior, where: () => where });
+outdoors.push(fx.outside); // tools lying on the Moon are hidden with the rest of the surface
 
 const lamp = new THREE.SpotLight(PAL.hex.incandescent, 14, 16, 0.65, 0.7, 1.4); // candela; 40 blew out panels at arm's length
 lamp.target.position.set(0, -0.15, -1);
 camera.add(lamp, lamp.target);
 lamp.intensity = 14; // always on: the shadow side of the dome is black, and that is where cracks hide
-
-// Going through the airlock: a pad over the outside hatch to point at, a sign on it, and a black
-// card in front of the eyes that fades in, hides the move, and fades out.
-const hatchOut = new THREE.Mesh(new THREE.BoxGeometry(1.3, 2.0, 0.4), new THREE.MeshBasicMaterial());
-hatchOut.position.set(0, 1.05, 3.5); hatchOut.visible = false; // unseen, but the pointer still hits it
-scene.add(hatchOut);
-{
-  const c = document.createElement('canvas'); c.width = 384; c.height = 96;
-  const g = c.getContext('2d');
-  g.fillStyle = PAL.console; g.fillRect(0, 0, 384, 96); g.strokeStyle = PAL.bezel; g.lineWidth = 6; g.strokeRect(3, 3, 378, 90);
-  g.textAlign = 'center'; g.fillStyle = PAL.dial; g.font = 'bold 40px monospace'; g.fillText('AIRLOCK', 192, 44);
-  g.fillStyle = PAL.ink; g.font = 'bold 20px monospace'; g.fillText('POINT AND SELECT TO ENTER', 192, 78);
-  const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace;
-  const sign = new THREE.Mesh(new THREE.PlaneGeometry(0.72, 0.18), new THREE.MeshBasicMaterial({ map: tex, toneMapped: false }));
-  sign.position.set(0, 2.42, 3.53); // over the open airlock door
-  scene.add(sign); outdoors.push(sign);
-}
-const shade = new THREE.Mesh(new THREE.PlaneGeometry(4, 4), new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0, depthTest: false, depthWrite: false }));
-shade.position.z = -0.12; shade.renderOrder = 20; shade.visible = false;
-camera.add(shade);
 
 addEventListener('resize', () => {
   camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix();
@@ -127,6 +101,7 @@ let keyed = false; // the radio is keyed, whether or not there is a microphone
 // for the thing that just happened, and a dark hourglass while waiting in the lobby.
 function status(now) {
   const s = state;
+  if (debrief) return debrief.won ? 'won' : 'lost';
   if (!s || s.phase === 'lobby') return 'standby';
   if (s.phase === 'results') return s.result.won ? 'won' : 'lost';
   return now < flashUntil ? flash : '';
@@ -142,43 +117,134 @@ function alarms() {
   return (sc.dust ? 1 : 0) + (sc.board ? 1 : 0) + (sc.wheel ? 1 : 0) + (sc.hull ? 1 : 0) + (state.suit ? 1 : 0);
 }
 function drawGauges(now) {
-  arm.draw({ state, status: status(now), zoom: scopeOn() ? zoom : 1, total: CFG.roundSeconds, radio: radioState(),
-    alarms: alarms(), held: running() ? state.hands.map(Boolean) : [false, false] });
+  arm.draw({ state, status: status(now), debrief: !!debrief, zoom: scopeOn() ? zoom : 1, total: CFG.roundSeconds, radio: radioState(),
+    alarms: alarms(), held: running() ? fx.hands : [null, null] });
   arm.signal(radioState(), now);
 }
 function show(what, seconds) { flash = what; flashUntil = performance.now() / 1000 + seconds; }
 
-// ---------- the waiting room: how the astronaut readies up, from inside the headset ----------
-// A card per seat stands in an arc in front of the spawn point while the crew is in the lobby
-// (client/waitingroom.js), so the mission can never start while the headset is still in someone's
-// hand. Only the Astronaut's own card can be used: point at it and pull the trigger to ready up.
-const room = buildWaitingRoom(THREE, scene, { at: CFG.spawn, facing: 0 });
+// ---------- the status board: the countdown to GO, in the hall where the astronaut starts ----------
+// The astronaut does not ready themselves: Mission Ops calls them GO from the ground (client/console.js,
+// client/lobby.js). This board only shows it: a jewel lamp per seat, Nixie digits for the countdown, and
+// one engraved line. Nothing on it is pointed at. It stands on a post in front of the spawn point.
+const boardCanvas = document.createElement('canvas');
+boardCanvas.width = 768; boardCanvas.height = 480;
+const board2d = boardCanvas.getContext('2d');
+const boardTex = new THREE.CanvasTexture(boardCanvas);
+boardTex.colorSpace = THREE.SRGBColorSpace;
+const board = new THREE.Group(); board.name = 'Board_Status';
+{
+  const face = new THREE.Mesh(new THREE.PlaneGeometry(1.0, 0.625), new THREE.MeshBasicMaterial({ map: boardTex, toneMapped: false }));
+  face.name = 'Face'; face.position.set(0, 1.62, 0.031); board.add(face);
+  const steel = new THREE.MeshStandardMaterial({ color: PAL.hex.console, roughness: 0.7, metalness: 0.35 });
+  const back = new THREE.Mesh(new THREE.BoxGeometry(1.06, 0.69, 0.06), steel); back.position.set(0, 1.62, 0); board.add(back);
+  const post = new THREE.Mesh(new THREE.LatheGeometry([[0.0, 0], [0.18, 0], [0.18, 0.03], [0.04, 0.06], [0.03, 1.3], [0.0, 1.3]].map(([x, y]) => new THREE.Vector2(x, y)), 16), steel);
+  post.name = 'Post'; board.add(post);
+}
+const boardAt = interior.toWorld(ROOM.arrive.x, ROOM.arrive.z - 1.9);
+board.position.set(boardAt.x, 0, boardAt.z); board.rotation.y = 0; // faces +z, toward the astronaut
+scene.add(board);
+let boardKey = '', wasGo = false;
 const iAmReady = () => !!state && (state.ready || []).includes('astronaut');
-function useBoard(controller) {
-  if (!room.group.visible) return false;
-  aim(controller);
-  if (!raycaster.intersectObject(room.own, false).length) return false;
-  setReady(!iAmReady());
-  return true;
-}
-function setReady(on) {
-  if (on === iAmReady()) return;
-  net.send({ t: 'ready', on });
-  radio.sfx(on ? 'solve' : 'mistake');
-}
-// For a laptop player and the tests: turn to face your own card, then use it as a click would.
-function faceOwnCard() {
-  rig.updateMatrixWorld(true);
-  const at = room.own.getWorldPosition(new THREE.Vector3()), head = camera.getWorldPosition(new THREE.Vector3());
-  rig.rotation.y = Math.atan2(-(at.x - head.x), -(at.z - head.z));
-  camera.rotation.x = Math.atan2(at.y - head.y, Math.hypot(at.x - head.x, at.z - head.z));
-  rig.updateMatrixWorld(true);
+function drawBoard() {
+  const s = state;
+  board.visible = !!s && s.phase === 'lobby' && where === 'in';
+  if (!s) return;
+  // The moment Mission Ops calls GO: a two-note chime and a pulse in both hands.
+  const go = s.phase === 'lobby' && iAmReady();
+  if (go && !wasGo) { radio.sfx('go'); pulse(0, 0.8, 120); pulse(1, 0.8, 120); }
+  wasGo = go;
+  if (!board.visible) return;
+  const n = s.countdown == null ? null : Math.max(1, Math.ceil(s.countdown));
+  const lamps = CREW.map(r => (s.ready || []).some(h => covers(h, r)) ? 'go' : s.crew.some(h => covers(h, r)) ? 'seat' : 'off');
+  const key = [lamps, n, go, s.suited].join('|');
+  if (key === boardKey) return;
+  boardKey = key;
+  const g = board2d, W = boardCanvas.width, H = boardCanvas.height;
+  g.fillStyle = PAL.console; g.fillRect(0, 0, W, H);
+  g.strokeStyle = PAL.bezel; g.lineWidth = 16; g.strokeRect(8, 8, W - 16, H - 16);
+  g.strokeStyle = PAL.bakelite; g.lineWidth = 3; g.strokeRect(20, 20, W - 40, H - 40);
+  for (const [x, y] of [[34, 34], [W - 34, 34], [34, H - 34], [W - 34, H - 34]]) { g.fillStyle = PAL.bezel; g.beginPath(); g.arc(x, y, 8, 0, 7); g.fill(); }
+  g.textAlign = 'center'; g.textBaseline = 'middle';
+  g.fillStyle = PAL.ink; g.font = 'bold 30px "Michroma", "Arial Narrow", sans-serif';
+  g.fillText('FLIGHT STATUS', W / 2, 66);
+  // One jewel lamp per seat: dark empty, amber taken, green GO.
+  const names = { astronaut: 'ASTRO', ops: 'OPS', sci: 'SCI', tech: 'TECH' };
+  CREW.forEach((r, i) => {
+    const x = 132 + i * 168, y = 150, st = lamps[i];
+    g.fillStyle = PAL.bakelite; g.beginPath(); g.arc(x, y, 30, 0, 7); g.fill();
+    g.fillStyle = st === 'go' ? PAL.green : st === 'seat' ? PAL.amber : PAL.greenOff; g.beginPath(); g.arc(x, y, 22, 0, 7); g.fill();
+    if (st !== 'off') { g.fillStyle = 'rgba(255,240,210,0.35)'; g.beginPath(); g.arc(x - 7, y - 7, 7, 0, 7); g.fill(); }
+    g.fillStyle = PAL.ink; g.font = 'bold 22px "Courier Prime", monospace'; g.fillText(names[r], x, y + 50);
+  });
+  // The countdown in Nixie digits: dark tubes until there is one.
+  g.fillStyle = PAL.bakelite; g.fillRect(W / 2 - 110, 236, 220, 132);
+  for (let k = 0; k < 2; k++) {
+    const x = W / 2 - 52 + k * 104;
+    g.fillStyle = PAL.nixieOff; g.font = 'bold 108px "Courier Prime", monospace'; g.fillText('8', x, 304);
+    const d = n == null ? null : String(n).padStart(2, '0')[k];
+    if (d != null) { g.shadowColor = PAL.nixie; g.shadowBlur = 18; g.fillStyle = PAL.nixie; g.fillText(d, x, 304); g.shadowBlur = 0; }
+  }
+  g.fillStyle = go ? PAL.green : PAL.ink; g.font = 'bold 28px "Courier Prime", monospace';
+  g.fillText(n != null ? 'LAUNCH' : go ? 'GO FOR EVA' : s.suited ? 'AWAIT GO FROM MISSION OPS' : 'NOT SUITED', W / 2, 412);
+  boardTex.needsUpdate = true;
 }
 
+let fontsLoaded = false;
+fontsReady.then(() => { fontsLoaded = true; }); // the result board redraws in its own type
+// ---------- the RESULT board: how the astronaut is told the mission is over ----------
+// A placard that appears in the world, in front of the astronaut, the moment the mission ends, and stays
+// where it appeared (it is not on the visor) until they press EXIT. The wrist says the same in icons.
+const resultCanvas = document.createElement('canvas');
+resultCanvas.width = 768; resultCanvas.height = 480;
+const result2d = resultCanvas.getContext('2d');
+const resultTex = new THREE.CanvasTexture(resultCanvas);
+resultTex.colorSpace = THREE.SRGBColorSpace;
+const resultBoard = new THREE.Mesh(new THREE.PlaneGeometry(1.2, 0.75), new THREE.MeshBasicMaterial({ map: resultTex, toneMapped: false, depthTest: false, transparent: true }));
+resultBoard.renderOrder = 30; resultBoard.visible = false; // always drawn: it is a message, not a prop
+scene.add(resultBoard);
+let resultKey = '';
+function drawResultBoard() {
+  resultBoard.visible = !!debrief;
+  if (!debrief) { resultKey = ''; return; }
+  const key = [debrief.won, debrief.score, debrief.reason, fontsLoaded].join('|');
+  if (key === resultKey) return;
+  resultKey = key;
+  const g = result2d, W = resultCanvas.width, H = resultCanvas.height, lamp = debrief.won ? PAL.green : PAL.red;
+  g.fillStyle = PAL.bakelite; g.fillRect(0, 0, W, H);
+  g.strokeStyle = PAL.bezel; g.lineWidth = 6; g.strokeRect(3, 3, W - 6, H - 6);
+  g.strokeStyle = lamp; g.lineWidth = 10; g.strokeRect(14, 14, W - 28, H - 28);
+  // A tick or a cross, in the same strokes as the wrist.
+  g.lineCap = 'round'; g.lineJoin = 'round';
+  for (const [c, w] of [[PAL.inkDial, 30], [lamp, 19]]) {
+    g.strokeStyle = c; g.lineWidth = w; g.beginPath();
+    if (debrief.won) { g.moveTo(W / 2 - 42, 112); g.lineTo(W / 2 - 14, 142); g.lineTo(W / 2 + 44, 76); }
+    else { g.moveTo(W / 2 - 38, 74); g.lineTo(W / 2 + 38, 146); g.moveTo(W / 2 + 38, 74); g.lineTo(W / 2 - 38, 146); }
+    g.stroke();
+  }
+  g.textAlign = 'center'; g.textBaseline = 'middle';
+  g.fillStyle = lamp; g.font = `46px ${FONT.label}`;
+  g.fillText(debrief.won ? 'MISSION COMPLETE' : 'MISSION FAILED', W / 2, 222);
+  g.fillStyle = PAL.ink; g.font = `bold 28px ${FONT.type}`;
+  g.fillText(debrief.reason || '', W / 2, 288);
+  g.fillStyle = PAL.inkDim; g.font = `16px ${FONT.label}`;
+  g.fillText('SCORE', W / 2 - 74, 352);
+  nixie(g, String(debrief.score), W / 2 + 18, 352, 40, { align: 'left' });
+  g.fillStyle = PAL.amber; g.font = `15px ${FONT.label}`;
+  g.fillText('EXIT ON YOUR WRIST: BACK TO THE READY BOARD', W / 2, 424);
+  resultTex.needsUpdate = true;
+}
 // ---------- network ----------
 // Take the server's word as it arrives, not once per frame: what can be grabbed must never lag behind what exists.
-const NOTHING = { hands: [null, null], ground: {}, locker: [], scene: null, suit: false };
-net.onState = s => { state = s; if (waitNote) { waitNote.remove(); waitNote = null; } lobby.update(s); fx.sync(s.phase === 'run' ? s : NOTHING); };
+const NOTHING = { held: null, tools: null, scene: null, suit: false };
+let suitedSent = 0;
+net.onState = s => {
+  state = s; if (waitNote) { waitNote.remove(); waitNote = null; } lobby.update(s); fx.sync(s.phase === 'run' ? s : NOTHING);
+  // Suited is the server's to forget (a reconnect, a restart): say it again while it is true here.
+  const now = performance.now();
+  if (mode && s.phase === 'lobby' && !s.suited && now - suitedSent > 2000) { suitedSent = now; net.send({ t: 'suited', on: true }); }
+};
+function suited(on) { suitedSent = performance.now(); net.send({ t: 'suited', on }); }
 // A headset can only ever be the Astronaut: if the seat is held, it waits for it instead of being sent away.
 let headset = false, waitNote = null;
 net.onTaken = role => {
@@ -206,7 +272,7 @@ addEventListener('keydown', e => {
   if (e.key === ' ' || (e.key === 'Tab' && mode === 'desk')) e.preventDefault();
   if (e.key.toLowerCase() === 'l' && mode === 'desk' && !e.repeat) debugOutage = !debugOutage;
   if (e.key.toLowerCase() === 'k' && mode === 'desk' && !e.repeat) debugDamage = !debugDamage;
-  if (e.key.toLowerCase() === 'q' && mode === 'desk' && !e.repeat && running()) fx.drop(); // toss what is in your hand
+  if (e.key.toLowerCase() === 'q' && mode === 'desk' && !e.repeat) fx.dropHeld();
 });
 addEventListener('keyup', e => { keys[e.key.toLowerCase()] = false; });
 addEventListener('blur', () => { for (const k in keys) keys[k] = false; });
@@ -252,36 +318,26 @@ function targetInReach(controller) {
   raycaster.far = controller ? REACH_VR : REACH;
   return raycaster.intersectObjects(fx.targets(), false)[0] || null;
 }
-// Use the airlock hatch being pointed at: go in from the surface, or back out from the hall.
-function useHatch(controller) {
-  if (passage) return false;
-  aim(controller);
-  if (!raycaster.intersectObject(where === 'out' ? hatchOut : interior.hatch, false).length) return false;
-  go(where === 'out' ? 'in' : 'out');
-  return true;
-}
 // Use whatever tool, plug or broken thing is being pointed at. Returns true if there was something.
 // With `holding`, only things that work while held down (brushing dust, welding) are used again.
 function use(controller, holding = false) {
   const hit = targetInReach(controller);
   if (!hit || (holding && !hit.object.userData.hold)) return !!hit && !holding;
-  const hand = controller ? controllers.indexOf(controller) : -1;
-  fx.click(hit.object, hand >= 0 ? hand : null);
+  fx.click(hit.object);
   return true;
 }
-// Use whatever is being pointed at: the READY board, the airlock hatch, or something to fix.
-const useAny = controller => useBoard(controller) || useHatch(controller) || use(controller);
+// Use whatever is being pointed at: a loose tool, a plug, something to fix. (The airlocks are walked into.)
+const useAny = controller => use(controller);
 
 // ---------- hands and controllers ----------
-// Controllers: hold the trigger (or the grip) on something to take it in that hand (tools off the rack
-// or the ground, plugs, the wheel, the generator cord) and let go to drop it, or throw it. With nothing
-// in reach the right trigger points at things within arm's reach and the left trigger talks. Sticks walk
-// and turn, A hops.
+// Controllers: hold the trigger (or the grip) on something to take it in that hand (a loose tool, one in
+// each hand; plugs, the wheel, the generator cord) and let go to drop or throw it. With nothing in reach
+// the right trigger points at things within arm's reach and the left trigger talks. Sticks walk and turn, A hops.
 // Hand tracking (put the controllers down): pinch on something to grab it, point the right hand and
 // pinch to use the hatch or the READY board, pinch at the ground to teleport there, pinch the left
 // hand in empty air and drag it sideways to turn, hold the left hand up to your helmet to talk, and
 // pinch both empty hands and pull them apart to zoom the visor (push them together to zoom back out).
-const TELEPORT_MAX = 8;   // metres per hop
+const TELEPORT_MAX = 14;  // metres per hop
 const TURN_STEP = 0.1;    // metres of left-hand drag per 30-degree snap turn
 const HELMET = 0.22;      // metres from the head that counts as "hand on helmet"
 const ZOOM_MAX = 6;       // visor magnification with the hands pulled wide apart
@@ -308,8 +364,9 @@ function inModule(x, z) {
   return null;
 }
 function groundTarget(controller, out) {
-  if (mode === 'vr' && state?.phase === 'lobby') return null; // no teleporting out of the waiting room
+  if (mode === 'vr' && state?.phase === 'lobby') return null; // no teleporting about before the start
   aim(controller);
+  ground.constant = -rig.position.y; // the level the feet are on; the hop lands on the real ground
   const p = raycaster.ray.intersectPlane(ground, out);
   if (!p || p.distanceTo(raycaster.ray.origin) > TELEPORT_MAX) return null;
   if (where === 'in') { const l = interior.toLocal(p.x, p.z); return interior.walkable(l.x, l.z) ? p : null; }
@@ -368,7 +425,7 @@ for (const i of [0, 1]) {
   c.addEventListener('selectstart', () => {
     music.unlock(); // a trigger pull or a pinch is a gesture the browser counts, and the page's click listeners never see it
     const other = controllers[1 - i];
-    // A trigger pulled, or a bare hand pinched, on something in reach grabs it, and holds it until it lets
+    // A trigger pulled, or a bare hand pinched, on something in reach grabs it and holds it until it lets
     // go. That is not a zoom, a turn, a teleport, the radio or a point at the panel.
     if (c.userData.grabbed) return; // already holding on with the grip
     if (running() && fx.grab(i, handPoint(i, new THREE.Vector3()))) { c.userData.grabbed = 'select'; return; }
@@ -477,15 +534,19 @@ function followArm() {
   arm.aimUpper(arm.group.worldToLocal(shoulder));
   return true;
 }
-// The EXIT button on the cuff ends the headset session, back to the lobby. Hold the right index fingertip,
-// or the fingers of the right controller's glove, on the cap: it sinks, its lamp warms up, a click on
-// touch and a relay clunk when it goes. Holding for a moment means a brushing hand does not end the game.
+// The EXIT button on the cuff. In the debrief it takes the astronaut back to the READY board, still
+// in the headset; otherwise it ends the headset session, back to the lobby. Hold the right index
+// fingertip, or the fingers of the right controller's glove, on the cap: it sinks, its lamp warms up,
+// a click on touch and a relay clunk when it goes. Holding for a moment means a brushing hand does
+// not end the game, and after it goes it only works again once the finger has come off it.
+// In the debrief its lamp blinks amber, once a second, to say "press me".
 const EXIT = { reach: 0.028, hold: 0.6 };
 let exitHeld = 0, exitTouched = false, exitGone = false;
 const exitPos = new THREE.Vector3(), tipPos = new THREE.Vector3();
-function exitButton(dt, session) {
+const exitInvite = now => !!debrief && Math.floor(now * 2) % 2 === 0;
+function exitButton(dt, now, session) {
   let near = false, hand = -1;
-  if (arm.group.visible && !exitGone) {
+  if (arm.group.visible) {
     exitPos.copy(arm.EXIT_TOP).applyMatrix4(arm.group.matrixWorld);
     hand = controllers.findIndex(c => c.userData.hand === 'right');
     const c = controllers[hand];
@@ -498,15 +559,67 @@ function exitButton(dt, session) {
       near = have && tipPos.distanceTo(exitPos) < EXIT.reach;
     }
   }
+  if (exitGone) { if (!near) exitGone = false; near = false; } // re-arms once the finger is off it
   if (near && !exitTouched) { radio.sfx('click'); pulse(hand, 0.3, 25); }
   exitTouched = near;
   exitHeld = near ? exitHeld + dt : Math.max(0, exitHeld - dt * 3);
-  arm.pressExit(exitHeld / EXIT.hold);
+  arm.pressExit(exitHeld / EXIT.hold, exitInvite(now));
   if (exitHeld >= EXIT.hold && !exitGone) {
-    exitGone = true;
+    exitGone = true; exitHeld = 0;
     radio.sfx('relay'); pulse(hand, 1, 90);
-    session.end().catch(() => {});
+    if (debrief) leaveDebrief();
+    else session.end().catch(() => {});
   }
+}
+// On a laptop, hold X for the same moment.
+function deskExit(dt, now) {
+  const down = !!keys.x;
+  if (exitGone) { if (!down) exitGone = false; }
+  else exitHeld = down ? exitHeld + dt : 0;
+  arm.pressExit(exitGone ? 0 : exitHeld / EXIT.hold, exitInvite(now));
+  if (!exitGone && exitHeld >= EXIT.hold) {
+    exitGone = true; exitHeld = 0;
+    radio.sfx('relay');
+    if (debrief) leaveDebrief();
+    else leaveDesk();
+  }
+}
+function leaveDesk() {
+  mode = null; keyed = false; $('cross').hidden = true;
+  try { document.exitPointerLock?.(); } catch {}
+  lobby.show(true);
+}
+
+// ---------- the debrief: the mission is over ----------
+const leftHand = () => controllers.findIndex(c => c.userData.hand === 'left');
+function startDebrief(s, now) {
+  const won = !!s.result?.won;
+  debrief = { won, score: s.score, reason: s.result?.reason || '', read: false, readFor: 0, beepAt: now + 6 };
+  // The result board stands 1.4 m in front of the head at eye height, turned to face it, and stays put.
+  camera.getWorldPosition(headPos); camera.getWorldDirection(fwd); fwd.y = 0;
+  if (fwd.lengthSq() < 1e-4) fwd.set(0, 0, -1);
+  fwd.normalize();
+  resultBoard.position.set(headPos.x + fwd.x * 1.4, headPos.y - 0.05, headPos.z + fwd.z * 1.4);
+  resultBoard.rotation.set(0, Math.atan2(-fwd.x, -fwd.z), 0); // its front (+Z) turned back toward the head
+  // The sting comes with the 'end' event. The hands feel it too: three short taps on the cuff
+  // hand for a win, one long pull on both for a loss.
+  if (won) for (let k = 0; k < 3; k++) setTimeout(() => pulse(leftHand(), 0.6, 60), k * 180);
+  else { pulse(0, 0.9, 600); pulse(1, 0.9, 600); }
+}
+// Until the cuff has been read for a second, it beeps every few seconds, so they know where to look.
+function debriefStep(dt, now) {
+  if (!debrief || debrief.read) return;
+  const looking = mode === 'vr' ? reading : arm.raise > 0.9;
+  debrief.readFor = looking ? debrief.readFor + dt : 0;
+  if (debrief.readFor >= 1) debrief.read = true;
+  else if (now >= debrief.beepAt) { debrief.beepAt = now + 6; radio.sfx('watch'); pulse(leftHand(), 0.25, 30); }
+}
+// EXIT in the debrief: the crew goes back to the lobby (if nobody has taken it there already) and the
+// astronaut, wherever they were, fades out and back in facing the READY board.
+function leaveDebrief() {
+  if (state && state.phase === 'results') net.send({ t: 'lobby' });
+  debrief = null;
+  placeInside(); // back to the start in the hall, by the status board
 }
 
 // Can the gauges be read right now? Call once a frame, after followArm.
@@ -562,38 +675,151 @@ scopeMesh.renderOrder = 9;
 scopeMesh.visible = false;
 camera.add(scopeMesh);
 
-// ---------- the porthole into the hall ----------
-// The inner hatch of the airlock has a porthole, and through it you see the hall itself: a second camera
-// stands just inside the hall's airlock door and draws the interior (its real lights, red when the power
-// is out, panels hanging loose after a fault) into a small texture on the porthole. It follows the eye a
-// little, for parallax. Only outdoors, only near the airlock, and only every third frame: the Quest pays
-// for every extra draw.
-const portalRT = new THREE.WebGLRenderTarget(256, 256);
-portalRT.texture.colorSpace = THREE.SRGBColorSpace;
-const portalCam = new THREE.PerspectiveCamera(55, 1, 0.05, 30);
-const portal = world.hab?.userData.portal;
-if (portal) { portal.material = new THREE.MeshBasicMaterial({ map: portalRT.texture, toneMapped: false }); }
-let portalTick = 0;
-const portalAt = new THREE.Vector3();
-function renderPortal() {
-  if (!portal || where !== 'out' || passage) return;
-  portal.getWorldPosition(portalAt);
+// ---------- portholes: the other place, through the glass ----------
+// Each outdoor airlock's inner hatch has a porthole, and through it you see the hall itself; from the hall,
+// the window on the south wall and each chamber's outer porthole look out at the Moon. It is drawn in the
+// same pass as the eye's view, so a headset gets true stereo and parallax: the glass writes 1 into the
+// stencil buffer and pushes the depth there to the far plane, then the other place is drawn a second time
+// with every one of its materials testing for that 1, seen from where the eye would be if the two places
+// were joined at the glass (the rig is moved for the pass, which also moves the headset's eye cameras).
+// A clipping plane at the glass drops whatever is between the eye and it on the far side. Every material of
+// both places carries that one plane all the time (parked out of the way between passes): switching a
+// renderer-wide clipping plane on and off would make three.js swap, and rebuild, every shader twice a frame.
+// One porthole a frame at most, the nearest that can be seen, and none further than 10 m.
+const PORT_RANGE = 10;
+const maskMat = new THREE.MeshBasicMaterial({ colorWrite: false, depthWrite: false, stencilWrite: true, stencilRef: 1,
+  stencilFunc: THREE.AlwaysStencilFunc, stencilZPass: THREE.ReplaceStencilOp });
+const punchMat = new THREE.ShaderMaterial({
+  // The disc is drawn at the far plane (z = w), not with gl_FragDepth, which some drivers handle badly.
+  vertexShader: 'void main() { vec4 p = projectionMatrix * modelViewMatrix * vec4(position, 1.0); p.z = p.w * 0.99999; gl_Position = p; }',
+  fragmentShader: 'void main() { gl_FragColor = vec4(0.04, 0.04, 0.035, 1.0); }',
+  depthFunc: THREE.AlwaysDepth, stencilWrite: true, stencilRef: 1, stencilFunc: THREE.EqualStencilFunc,
+  stencilFail: THREE.KeepStencilOp, stencilZFail: THREE.KeepStencilOp, stencilZPass: THREE.KeepStencilOp,
+});
+// A frame for each pair: `near` is the glass's frame where you stand, `far` the same glass's frame in the
+// other place. Both are chamber roots, or the window's frames (local +z toward the side you look from).
+const winFar = new THREE.Object3D(); // the hall window's partner on the habitat, its +z into the habitat
+{ const W = PLACES.window.out; winFar.position.set(W.x, W.y, W.z); winFar.rotation.y = W.ry + Math.PI; world.hab.add(winFar); }
+const portals = [];
+function portal(glass, near, far, toWorld, clipZ, hide) {
+  const mask = new THREE.Mesh(glass.geometry, maskMat); mask.renderOrder = 50; mask.visible = false;
+  const punch = new THREE.Mesh(glass.geometry, punchMat); punch.renderOrder = 51; punch.visible = false;
+  mask.frustumCulled = punch.frustumCulled = false;
+  glass.add(mask, punch);
+  portals.push({ glass, near, far, to: toWorld, clipZ, hide, mask, punch });
+}
+for (const id in world.doors) {
+  const o = world.doors[id], h = interior.doors[id];
+  portal(o.portholes.Inner, o.root, h.root, 'in', -0.08, [h.inner]);                     // from the Moon into the hall
+  portal(h.portholes.Outer, h.root, o.root, 'out', CHAMBER.depth + 0.08, [o.outer]);    // from a hall chamber out
+}
+if (interior.windowGlass) portal(interior.windowGlass, interior.window, winFar, 'out', -0.05, []);
+// The materials of each place, to switch their stencil test on for the pass. Collected again now and then:
+// models arrive as they load.
+const matsOf = { in: [], out: [] };
+let matsAt = -9;
+const clip = new THREE.Plane(new THREE.Vector3(0, 1, 0), 1e6); // parked: clips nothing
+renderer.localClippingEnabled = true;
+function collectMats(now) {
+  if (now - matsAt < 3) return;
+  matsAt = now;
+  const grab = (roots, list) => { const seen = new Set(); list.length = 0; for (const r of roots) r.traverse(o => { if (!o.material || o === board) return; for (const m of [].concat(o.material)) if (!seen.has(m) && m !== maskMat && m !== punchMat) { seen.add(m); list.push(m); } }); };
+  grab([interior.group], matsOf.in); grab(outdoors, matsOf.out);
+  for (const m of [...matsOf.in, ...matsOf.out]) if (!m.clippingPlanes) { m.clippingPlanes = [clip]; m.needsUpdate = true; }
+}
+const frustum = new THREE.Frustum(), projView = new THREE.Matrix4(), sphere = new THREE.Sphere();
+const pM = new THREE.Matrix4(), pInv = new THREE.Matrix4(), nrm = new THREE.Vector3();
+let chosen = null, portalCalls = 0, portalMs = 0, shadowsStale = true;
+// Before the main draw: which porthole (if any) gets the stencil this frame.
+function choosePortal(now) {
+  if (chosen) { chosen.mask.visible = chosen.punch.visible = false; chosen = null; }
+  collectMats(now);
+  if ((!mode && !window.moonbase?.forcePortal) || window.moonbase?.noPortal || !portalAllowed()) return;
   camera.getWorldPosition(headPos);
-  if (headPos.distanceTo(portalAt) > 14 || portalTick++ % 3) return;
-  const dx = THREE.MathUtils.clamp(headPos.x - portalAt.x, -2, 2), dy = THREE.MathUtils.clamp(headPos.y - portalAt.y, -1, 1);
-  const eye = interior.toWorld(-dx * 0.25, -0.35);
-  portalCam.position.set(eye.x, 1.55 - dy * 0.15, eye.z);
-  const look = interior.toWorld(dx * 0.6, -8);
-  portalCam.lookAt(look.x, 1.35, look.z);
-  const target = renderer.getRenderTarget(), xr = renderer.xr.enabled, shadows = renderer.shadowMap.autoUpdate;
-  const shown = outdoors.map(o => o.visible);
-  for (const o of outdoors) o.visible = false;
-  interior.group.visible = true;
-  renderer.xr.enabled = false; renderer.shadowMap.autoUpdate = false;
-  renderer.setRenderTarget(portalRT); renderer.clear(); renderer.render(scene, portalCam);
-  renderer.setRenderTarget(target); renderer.shadowMap.autoUpdate = shadows; renderer.xr.enabled = xr;
-  interior.group.visible = false;
-  outdoors.forEach((o, i) => { o.visible = shown[i]; });
+  // In a headset, the camera given this frame's head pose and both eyes' frustum. (Not the XR ArrayCamera:
+  // its updateMatrixWorld() drops the rig, which put the frustum at the world's origin and no porthole in it.)
+  rig.updateMatrixWorld(true);
+  if (renderer.xr.isPresenting) renderer.xr.updateCamera(camera); else camera.updateMatrixWorld();
+  projView.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse); frustum.setFromProjectionMatrix(projView);
+  let best = Infinity;
+  for (const p of portals) {
+    if (p.to === where) continue;                         // it looks into the place you are already in
+    if (!isShown(p.glass)) continue;
+    p.glass.getWorldPosition(tmpV);
+    const d = tmpV.distanceTo(headPos);
+    if (d > PORT_RANGE || d > best) continue;
+    nrm.set(0, 0, 1).transformDirection(p.glass.matrixWorld);
+    if (nrm.dot(headPos.clone().sub(tmpV)) <= 0) continue; // seen from behind
+    sphere.set(tmpV, 0.3);
+    if (!frustum.intersectsSphere(sphere)) continue;
+    best = d; chosen = p;
+  }
+  if (chosen) chosen.mask.visible = chosen.punch.visible = true;
+}
+const isShown = m => { for (let o = m; o; o = o.parent) if (!o.visible) return false; return true; };
+// In a headset three.js draws into its own multisampled render target, and at the end of every render() it
+// throws that target's depth and stencil away (and, without WEBGL_multisampled_render_to_texture, its
+// multisampled colour too, after copying it out). The stencil the glass wrote in the main pass would be gone
+// before the porthole pass reads it. So, while a porthole is drawn: the target keeps its depth and stencil
+// after the main pass (resolveDepthBuffer), and the porthole pass draws no shadow maps, which would bind
+// another framebuffer in between. Without the extension there is no way to keep the colour: no porthole.
+let xrKeep = null; // { rt, depth, stencil } while the main pass is told to keep its depth and stencil
+const xrTarget = () => (renderer.xr.isPresenting ? renderer.getRenderTarget() : null);
+function portalAllowed() {
+  const rt = xrTarget();
+  return !rt || !(rt.samples > 0) || renderer.extensions.has('WEBGL_multisampled_render_to_texture');
+}
+function keepStencil(on) {
+  if (on) {
+    const rt = xrTarget(); if (!rt) return;
+    xrKeep = { rt, depth: rt.resolveDepthBuffer, stencil: rt.resolveStencilBuffer };
+    rt.resolveDepthBuffer = rt.resolveStencilBuffer = true;
+  } else if (xrKeep) {
+    xrKeep.rt.resolveDepthBuffer = xrKeep.depth; xrKeep.rt.resolveStencilBuffer = xrKeep.stencil; xrKeep = null;
+  }
+}
+// After the main draw: the other place, through the chosen glass.
+// Saved as an Euler, not a quaternion: copying a quaternion back makes three.js rewrite the rig's Euler, and a
+// yaw past 90 degrees comes back as (pi, pi - yaw, pi), which turns the mouse and the keys round backwards.
+const rigWas = { p: new THREE.Vector3(), r: new THREE.Euler() };
+function renderPortal() {
+  if (!chosen) return;
+  const p = chosen, other = p.to, mats = matsOf[other];
+  p.near.updateWorldMatrix(true, false); p.far.updateWorldMatrix(true, false);
+  pM.multiplyMatrices(p.far.matrixWorld, pInv.copy(p.near.matrixWorld).invert()); // near place -> far place
+  // The clipping plane: the far glass's plane, keeping the side away from the eye.
+  nrm.set(0, 0, -1).transformDirection(p.far.matrixWorld);
+  tmpV.set(0, 0, p.clipZ).applyMatrix4(p.far.matrixWorld);
+  clip.setFromNormalAndCoplanarPoint(p.clipZ > 0 ? nrm.negate() : nrm, tmpV);
+  // Move the rig (and the eyes) by the pair's transform; hide everything that rides on it.
+  rigWas.p.copy(rig.position); rigWas.r.copy(rig.rotation);
+  rig.updateMatrix(); tmpM.multiplyMatrices(pM, rig.matrix); tmpM.decompose(rig.position, rig.quaternion, tmpV);
+  rig.updateMatrixWorld(true);
+  const riding = [...rig.children.filter(o => o !== camera), ...camera.children.filter(o => !o.isLight)];
+  const shownRide = riding.map(o => o.visible); riding.forEach(o => { o.visible = false; });
+  const shownHide = p.hide.map(o => o.visible); p.hide.forEach(o => { o.visible = false; });
+  const shownOut = outdoors.map(o => o.visible), hallShown = interior.group.visible, boardShown = board.visible;
+  for (const o of outdoors) o.visible = other === 'out';
+  interior.group.visible = other === 'in'; board.visible = false;
+  for (const m of mats) { m.stencilWrite = true; m.stencilRef = 1; m.stencilFunc = THREE.EqualStencilFunc; m.stencilFail = m.stencilZFail = m.stencilZPass = THREE.KeepStencilOp; }
+  const autoClear = renderer.autoClear, shadows = renderer.shadowMap.autoUpdate;
+  // A colour background makes three.js clear the frame (and the stencil) even with autoClear off.
+  const bg = scene.background; scene.background = null;
+  renderer.autoClear = false;
+  renderer.shadowMap.autoUpdate = false;
+  if (!renderer.xr.isPresenting) { renderer.shadowMap.needsUpdate = other === 'out' && shadowsStale; shadowsStale = false; }
+  keepStencil(false); // this pass is the last one: the target may drop its depth and stencil after it
+  const t0 = performance.now();
+  renderer.render(scene, camera);
+  portalMs = performance.now() - t0;
+  portalCalls = renderer.info.render.calls; // three.js counts each render() from zero
+  renderer.autoClear = autoClear; renderer.shadowMap.autoUpdate = shadows; scene.background = bg;
+  clip.set(nrm.set(0, 1, 0), 1e6); // parked again
+  for (const m of mats) m.stencilWrite = false;
+  outdoors.forEach((o, i) => { o.visible = shownOut[i]; }); interior.group.visible = hallShown; board.visible = boardShown;
+  p.hide.forEach((o, i) => { o.visible = shownHide[i]; });
+  riding.forEach((o, i) => { o.visible = shownRide[i]; });
+  rig.position.copy(rigWas.p); rig.rotation.copy(rigWas.r); rig.updateMatrixWorld(true);
 }
 
 function renderScope() {
@@ -621,43 +847,182 @@ function renderScope() {
 }
 function setZoom(z) { zoom = Math.max(1, Math.min(ZOOM_MAX, +z || 1)); }
 
-// ---------- the airlock: moving between the surface and the hall ----------
-const FADE = 0.15; // seconds each way
-let passage = null; // { to, t, moved } while a fade is running
-function go(to) { passage = { to, t: 0, moved: false }; shade.visible = true; radio.sfx('hatch'); }
-// Put the head at (x, z) facing `yaw` (0 = north), and draw only the place it is now in.
-function place(to) {
+// ---------- the airlocks: walking between the surface and the hall ----------
+// Every door on the habitat is a walk-in chamber (client/airlock.js), and the hall has an identical twin of
+// each (client/interior.js). Stand in one: the hatch behind you swings shut. With both shut, in one frame,
+// the rig is moved from this chamber to its twin, which looks the same to the pixel, and the other place is
+// drawn instead. The air hisses, and the hatch in front swings open. The hall is bigger than the habitat
+// outside, and nobody can tell.
+const AIR = CFG.airlock;
+const ease = t => t < 0.5 ? 2 * t * t : 1 - 2 * (1 - t) ** 2;
+let cycle = null;  // { id, step: 'close' | 'repress' | 'open' | 'back', t } while a door is cycling
+let dwell = 0, armed = true; // seconds stood in a chamber; armed again once you have stepped out of it
+const chamberOf = (id, w = where) => w === 'in' ? interior.doors[id] : world.doors[id];
+const localHead = (ch, out) => { ch.root.updateWorldMatrix(true, false); return ch.root.worldToLocal(out.copy(headPos)); };
+const inTrigger = (ch, l) => ch.trigger.containsPoint(l);
+// Show one place, hide the other.
+function showPlace(to) {
   where = to;
   interior.group.visible = to === 'in';
   for (const o of outdoors) o.visible = to === 'out';
-  rig.position.y = 0; vy = 0;
-  rig.updateMatrixWorld(true);
-  camera.getWorldDirection(fwd);
-  const spot = to === 'in' ? interior.toWorld(ROOM.arrive.x, ROOM.arrive.z) : { x: 0, z: 4.5 };
-  turnRig((to === 'in' ? 0 : Math.PI) - Math.atan2(-fwd.x, -fwd.z)); // in: face up the hall. out: back to the hatch
-  rig.updateMatrixWorld(true);
-  teleport(spot);
   marker.visible = false;
 }
-function passageStep(dt) {
-  if (!passage) return;
-  passage.t += dt;
-  if (!passage.moved && passage.t >= FADE) { passage.moved = true; place(passage.to); }
-  shade.material.opacity = Math.max(0, Math.min(1, passage.t < FADE ? passage.t / FADE : 2 - passage.t / FADE));
-  if (passage.t >= FADE * 2) { passage = null; shade.visible = false; }
+// Apply a rigid move (a Matrix4 of a yaw and a translation) to the rig: the head keeps its place in the chamber.
+const sM = new THREE.Matrix4(), sV = new THREE.Vector3(), sQ = new THREE.Quaternion();
+function moveRig(m) {
+  rig.updateMatrix(); sM.multiplyMatrices(m, rig.matrix); sM.decompose(rig.position, sQ, sV);
+  rig.rotation.set(0, 2 * Math.atan2(sQ.y, sQ.w), 0); // yaw only, kept in the rig's usual Euler
+  rig.updateMatrixWorld(true);
+}
+// The swap, with both hatches shut: from this door's chamber where you are to its twin in the other place.
+function swap(id) {
+  const from = chamberOf(id), to = chamberOf(id, where === 'in' ? 'out' : 'in');
+  from.root.updateWorldMatrix(true, false); to.root.updateWorldMatrix(true, false);
+  moveRig(sM.copy(to.root.matrixWorld).multiply(tmpM.copy(from.root.matrixWorld).invert()));
+  showPlace(where === 'in' ? 'out' : 'in');
+  door = id;
+  // The chamber left behind goes back to how it stands when nobody is in it.
+  if (where === 'in') { from.setOuter(1); from.setInner(0); from.setLamp('green'); from.setPressure(0); to.setOuter(0); to.setInner(0); to.setPressure(0); }
+  else { from.setInner(1); from.setOuter(0); from.setLamp('green'); from.setPressure(1); to.setInner(0); to.setOuter(0); to.setPressure(1); }
+  sendPose();
+}
+// The hatch nearest where you came from, and the far one, for the chamber you are in.
+const nearHatch = (ch, w) => w === 'out' ? ['outer', ch.setOuter] : ['inner', ch.setInner];
+function airlockStep(dt) {
+  camera.getWorldPosition(headPos);
+  if (!cycle) {
+    let here = null;
+    for (const id in world.doors) { const ch = chamberOf(id); if (inTrigger(ch, localHead(ch, tmpV))) { here = id; break; } }
+    if (!here) { dwell = 0; armed = true; return; }
+    if (!armed) return;
+    dwell += dt;
+    if (dwell < AIR.dwell) return;
+    dwell = 0; armed = false;
+    cycle = { id: here, step: 'close', t: 0, from: where };
+    const ch = chamberOf(here); ch.setLamp('amber');
+    hatchSound('creak', ch, where === 'out' ? CHAMBER.depth : 0);
+    return;
+  }
+  const c = cycle, ch = chamberOf(c.id);
+  c.t += dt;
+  if (c.step === 'close') {
+    const k = Math.min(1, c.t / AIR.close), set = c.from === 'out' ? ch.setOuter : ch.setInner;
+    set(1 - ease(k));
+    // Changed your mind: step back out before it is half shut and it swings open again.
+    if (c.t < AIR.abort && !inTrigger(ch, localHead(ch, tmpV))) { c.step = 'back'; c.t = (1 - ease(k)) * AIR.close; return; }
+    if (k >= 1) {
+      hatchSound('hatch', ch, c.from === 'out' ? CHAMBER.depth : 0);
+      pulse(0, 0.6, 60); pulse(1, 0.6, 60);
+      swap(c.id);
+      c.step = 'repress'; c.t = 0;
+      radio.sfx('repress');
+      pulse(0, 0.25, AIR.repress * 1000); pulse(1, 0.25, AIR.repress * 1000);
+    }
+  } else if (c.step === 'back') {
+    const k = Math.min(1, c.t / AIR.close), set = c.from === 'out' ? ch.setOuter : ch.setInner;
+    set(ease(k));
+    if (k >= 1) { ch.setLamp('green'); cycle = null; }
+  } else if (c.step === 'repress') {
+    const k = Math.min(1, c.t / AIR.repress);
+    ch.setPressure(where === 'in' ? k : 1 - k); // air in, or air out
+    if (k >= 1) { c.step = 'open'; c.t = 0; hatchSound('creak', ch, where === 'in' ? 0 : CHAMBER.depth); }
+  } else if (c.step === 'open') {
+    const k = Math.min(1, c.t / AIR.open), set = where === 'in' ? ch.setInner : ch.setOuter;
+    set(ease(k));
+    if (k >= 1) { ch.setLamp('green'); cycle = null; }
+  }
+}
+function hatchSound(kind, ch, z) {
+  tmpV.set(0, 1.2, z); ch.root.localToWorld(tmpV);
+  radio.sfxAt(kind, tmpV, 1);
+}
+// Put the astronaut in the hall at the start point, facing up it, with every airlock at rest.
+function placeInside() {
+  cycle = null; dwell = 0; armed = true;
+  for (const id in world.doors) {
+    const o = world.doors[id], h = interior.doors[id];
+    o.setOuter(1); o.setInner(0); o.setLamp('green'); o.setPressure(0);
+    h.setInner(1); h.setOuter(0); h.setLamp('green'); h.setPressure(1);
+  }
+  showPlace('in');
+  door = CFG.spawn.door;
+  rig.position.y = 0; vy = 0; grounded = true;
+  rig.rotation.set(0, 0, 0);
+  rig.updateMatrixWorld(true);
+  camera.getWorldPosition(headPos);
+  const spot = interior.toWorld(CFG.spawn.x, CFG.spawn.z);
+  rig.position.x += spot.x - headPos.x; rig.position.z += spot.z - headPos.z;
+  rig.updateMatrixWorld(true);
+}
+// Keep the head out of walls. In a chamber, or its doorway: its walls, and whichever hatches are shut.
+const BODY = 0.25;
+function clampChamber(ch, l) {
+  const { width: AW, depth: AD, door: { hw } } = CHAMBER;
+  const lim = l.z < 0.12 || l.z > AD - 0.12 ? hw - 0.12 : AW / 2 - BODY;
+  const x = Math.max(-lim, Math.min(lim, l.x));
+  let z = l.z;
+  if (ch.innerT < 0.5) z = Math.max(z, BODY);
+  if (ch.outerT < 0.5) z = Math.min(z, AD - BODY);
+  if (x === l.x && z === l.z) return;
+  tmpV.set(x, l.y, z); ch.root.localToWorld(tmpV);
+  rig.position.x += tmpV.x - headPos.x; rig.position.z += tmpV.z - headPos.z;
+}
+// Which chamber (or doorway into one) is the head in?
+function chamberAt(l) {
+  for (const id in world.doors) {
+    const ch = chamberOf(id), lp = localHead(ch, l);
+    if (Math.abs(lp.x) < CHAMBER.width / 2 - 0.05 && lp.z > (where === 'in' ? -0.45 : -0.1) && lp.z < CHAMBER.depth + (where === 'in' ? 0.1 : 0.35)) return { id, ch, l: lp };
+  }
+  return null;
+}
+// While a door cycles, the head stays in that chamber.
+function clampWalk() {
+  camera.getWorldPosition(headPos);
+  const lv = new THREE.Vector3();
+  if (cycle) { const ch = chamberOf(cycle.id); clampChamber(ch, localHead(ch, lv)); return; }
+  const at = chamberAt(lv);
+  if (at) { clampChamber(at.ch, at.l); return; }
+  if (where === 'in') {
+    const l = interior.toLocal(headPos.x, headPos.z), c = interior.clamp(l.x, l.z);
+    rig.position.x += c.x - l.x; rig.position.z += c.z - l.z;
+    return;
+  }
+  const d = Math.hypot(headPos.x, headPos.z);
+  if (d > CFG.bounds - 1) { const k = (CFG.bounds - 1) / d; rig.position.x += headPos.x * (k - 1); rig.position.z += headPos.z * (k - 1); }
+  else if (d < CFG.habRadius && d > 0.01) { const k = CFG.habRadius / d; rig.position.x += headPos.x * (k - 1); rig.position.z += headPos.z * (k - 1); }
+  camera.getWorldPosition(headPos);
+  const m = inModule(headPos.x, headPos.z); if (m) { rig.position.x += m.x; rig.position.z += m.z; }
+  // The outside of each chamber is solid.
+  camera.getWorldPosition(headPos);
+  for (const id in world.doors) {
+    const ch = world.doors[id], lp = localHead(ch, lv), side = CHAMBER.width / 2 + 0.3;
+    if (Math.abs(lp.x) < side && lp.z > -0.3 && lp.z < CHAMBER.depth + 0.05) {
+      tmpV.set(Math.sign(lp.x || 1) * side, lp.y, lp.z); ch.root.localToWorld(tmpV);
+      rig.position.x += tmpV.x - headPos.x; rig.position.z += tmpV.z - headPos.z;
+      camera.getWorldPosition(headPos);
+    }
+  }
 }
 
-let vy = 0, turnArmed = true, lastPose = 0, shake = 0;
+let vy = 0, turnArmed = true, lastPose = 0, shake = 0, grounded = true;
+const footV = new THREE.Vector3();
+// The height of the ground under the head: the drawn lunar surface outside, the floor (0) indoors
+// and in an airlock.
+function floorY() {
+  if (where !== 'out' || cycle) return 0;
+  camera.getWorldPosition(footV);
+  return world.ground ? world.ground(footV.x, footV.z) : 0;
+}
 function control(dt, now) {
   let mx = 0, mz = 0, jump = false, ptt = mode === 'desk' && !!keys.tab;
-  const waiting = mode === 'vr' && !!state && state.phase === 'lobby'; // in the waiting room: look around, but stay put
+  const waiting = mode === 'vr' && !!state && state.phase === 'lobby'; // before the start, by the status board: look around, but stay put
   const session = renderer.xr.getSession();
   camera.getWorldPosition(headPos);
   camera.getWorldDirection(fwd); fwd.y = 0; fwd.normalize();
   if (session) {
     ptt = handControls(ptt);
     if (followArm() && gaugesReadable(dt)) ptt = true;
-    exitButton(dt, session);
+    exitButton(dt, now, session);
     for (const src of session.inputSources) {
       const gp = src.gamepad;
       if (!gp) continue;
@@ -681,6 +1046,7 @@ function control(dt, now) {
     camera.position.y += ((keys.c ? CROUCH : 1.65) - camera.position.y) * Math.min(1, dt * 10);
     if (keys.f) fx.patchSuit();
     if (keys.g) fx.pullCord();
+    deskExit(dt, now);
   }
 
   if (waiting) mx = mz = 0, jump = false;
@@ -688,20 +1054,17 @@ function control(dt, now) {
   rig.position.x += (-mz * fwd.x + mx * -fwd.z) * speed;
   rig.position.z += (-mz * fwd.z + mx * fwd.x) * speed;
 
-  if (jump && rig.position.y === 0) vy = 2.0; // a slow, floaty lunar hop
+  // Feet on the ground: follow it over craters and slopes; a hop is a slow, floaty lunar arc.
+  const floor = floorY();
+  if (jump && grounded) { vy = 2.0; grounded = false; }
   vy -= GRAVITY * dt;
-  rig.position.y = Math.max(0, rig.position.y + vy * dt);
-  if (rig.position.y === 0) vy = 0;
+  let y = rig.position.y + vy * dt;
+  if (grounded && y - floor < 0.3) y = floor; // walking downhill: stay on the slope rather than drift off it
+  if (y <= floor) { y = floor; vy = 0; grounded = true; } else grounded = false;
+  rig.position.y = y;
 
-  // Stay inside the play area and outside the habitat walls; or, indoors, inside the hall.
-  camera.getWorldPosition(headPos);
-  const d = Math.hypot(headPos.x, headPos.z);
-  if (where === 'in') {
-    const l = interior.toLocal(headPos.x, headPos.z), c = interior.clamp(l.x, l.z);
-    rig.position.x += c.x - l.x; rig.position.z += c.z - l.z;
-  } else if (d > CFG.bounds - 1) { const k = (CFG.bounds - 1) / d; rig.position.x += headPos.x * (k - 1); rig.position.z += headPos.z * (k - 1); }
-  if (where === 'out' && d < CFG.habRadius && d > 0.01) { const k = CFG.habRadius / d; rig.position.x += headPos.x * (k - 1); rig.position.z += headPos.z * (k - 1); }
-  if (where === 'out') { const m = inModule(headPos.x, headPos.z); if (m) { rig.position.x += m.x; rig.position.z += m.z; } }
+  // Stay inside the play area and outside the habitat walls; or, indoors, inside the hall; or in an airlock.
+  clampWalk();
 
   keyed = ptt;
   if (ptt !== talking && radio.micOk) { talking = ptt; radio.setTalking(ptt); }
@@ -736,15 +1099,18 @@ function arms() {
 function myPose() {
   const h = headHeight();
   camera.getWorldDirection(fwd); fwd.y = 0; fwd.normalize();
-  return { x: where === 'in' ? PLACES.airlock.x : headPos.x, z: where === 'in' ? PLACES.airlock.z : headPos.z, ry: Math.atan2(fwd.x, fwd.z), h, in: where === 'in', arms: arms() };
+  const d = PLACES.doors[door] || PLACES.doors.S, inside = where === 'in';
+  return { x: inside ? d.x : headPos.x, z: inside ? d.z : headPos.z, ry: Math.atan2(fwd.x, fwd.z), h, inside, door, arms: arms() };
 }
 function sendPose() { net.send({ t: 'pose', ...myPose() }); }
+
+placeInside(); // the astronaut starts in the hall, by the status board
 
 // ---------- main loop ----------
 // A picture of the view as just drawn, as a PNG data URL, for the smoke test's optional screenshots.
 let snapWaiting = null;
 const snap = () => new Promise(resolve => { snapWaiting = resolve; });
-let lastFrame = performance.now() / 1000;
+let lastFrame = performance.now() / 1000, mainCalls = 0;
 let armFrame = lastFrame;
 renderer.setAnimationLoop(() => {
   const now = performance.now() / 1000, dt = Math.min(0.05, now - lastFrame);
@@ -754,14 +1120,16 @@ renderer.setAnimationLoop(() => {
   if (s) {
     if (s.phase !== lastPhase) {
       music.mood(run ? 'run' : 'calm');
-      if (run) { flashUntil = 0; passage = null; shade.visible = false; if (where === 'in') place('out'); rig.position.set(CFG.spawn.x, 0, CFG.spawn.z); rig.rotation.y = 0; }
+      if (run) { flashUntil = 0; debrief = null; fx.reset(); placeInside(); }
+      if (s.phase === 'results' && s.result && !debrief) startDebrief(s, now);
       lastPhase = s.phase;
     }
     if (s.ev && s.ev.n !== lastEv) {
       lastEv = s.ev.n;
       const k = s.ev.kind;
       // The astronaut is never told what broke or where: that is mission control's job.
-      if (['alarm', 'solve', 'mistake', 'hit', 'blackout', 'power', 'gen', 'end'].includes(k)) radio.sfx(k);
+      if (['alarm', 'solve', 'mistake', 'hit', 'blackout', 'power', 'gen'].includes(k)) radio.sfx(k);
+      if (k === 'end') radio.sfx(s.result && s.result.won ? 'won' : 'lost');
       if (k === 'solve') show('ok', 4);
       if (k === 'mistake' || k === 'hit') show('bad', 5);
       if (k === 'hit' || k === 'mistake') { pulse(0, 1, 250); pulse(1, 1, 250); }
@@ -772,7 +1140,7 @@ renderer.setAnimationLoop(() => {
     // Sound: the leak hiss, and rocks landing during a shower. Indoors a hull breach is heard from
     // the airlock end of the hall, and the shower is a rumble through the walls.
     const inside = where === 'in';
-    const crackAt = inside ? interior.hatch.getWorldPosition(tmpV).setY(1.6) : world.fixtures.crack.userData.centre;
+    const crackAt = inside ? interior.doors[door].root.getWorldPosition(tmpV).setY(1.6) : world.fixtures.crack.userData.centre;
     radio.leak(run && s.suit, run && s.scene.hull ? crackAt : null);
     if (run && s.scene.meteor !== null && now > nextThump) {
       const close = s.scene.meteor > CFG.meteorGraceSeconds;
@@ -792,8 +1160,8 @@ renderer.setAnimationLoop(() => {
   interior.setDamage(debugDamage ? { board: [], hull: {}, meteor: 5 } : run ? s.scene : null, where === 'in');
   interior.update(dt, now);
   radio.room(where === 'in' ? (interior.dark ? 0.15 : 1) : 0);
-  passageStep(Math.min(0.25, now - armFrame)); // real time, so the airlock is as quick on a slow machine
   if (mode) control(dt, now); else keyed = false;
+  if (mode) airlockStep(Math.min(1, now - armFrame)); // real time, so the airlock is as quick on a slow machine
   if (pressed && now > nextUse) { nextUse = now + 0.09; use(pressed === 'desk' ? null : pressed, true); }
 
   // Hands for the fixtures: where a held tool is drawn, and where the fingers are.
@@ -810,21 +1178,29 @@ renderer.setAnimationLoop(() => {
   radio.listen(headPos, tmpV);
   shake *= 0.86;
   if (mode === 'desk') camera.rotation.z = (Math.random() - 0.5) * shake;
-  room.update(s);
+  drawResultBoard();
+  debriefStep(dt, now);
   // On a laptop the radio key swings the arm up. In a headset it is on your own arm (see followArm).
-  if (!arm.tracked) arm.update(Math.min(0.25, now - armFrame), keyed); // real time, so the arm is as quick on a slow machine
+  if (!arm.tracked) arm.update(Math.min(0.25, now - armFrame), keyed || (!!debrief && !!mode)); // real time, so the arm is as quick on a slow machine
   armFrame = now;
   if (arm.group.visible) drawGauges(now);
   renderScope();
-  renderPortal();
+  choosePortal(now);
+  keepStencil(!!chosen);
   renderer.render(scene, camera);
+  mainCalls = renderer.info.render.calls;
+  renderPortal();
+  keepStencil(false);
   if (snapWaiting) { snapWaiting(renderer.domElement.toDataURL('image/png')); snapWaiting = null; } // must follow the draw in the same frame
 });
 
 // For debugging from the browser console, and for the tests: moonbase.state(), moonbase.fx.targets() ...
-window.moonbase = { resetStanding: () => { standing = 1.2; }, state: () => state, fx, world, interior, radio, rig, camera, net, board: room.own, THREE, scene, use: () => use(null), useBoard: () => { if (mode === 'desk') faceOwnCard(); return useBoard(null); }, room, headset: () => headset, useHatch: () => useHatch(null), sendPose, myPose, teleport, turnRig,
-  where: () => where, place, renderer, outage: on => { debugOutage = on; }, wreck: on => { debugDamage = on; },
-  zoom: () => zoom, setZoom, controllers, handControls, scope: scopeMesh, arm, snap, radioState: () => ({ keyed, talking, rx, reading, shown: radioState() }) };
+window.moonbase = { resetStanding: () => { standing = 1.2; }, state: () => state, fx, world, interior, radio, rig, camera, net, board, THREE, scene, use: () => use(null), headset: () => headset, sendPose, myPose, teleport, turnRig,
+  where: () => where, placeInside, showPlace, renderer, phys, forcePortal: false,
+  // For the tests: stand the head at (x, z) in a place ('in': room coordinates, 'out': world), facing yaw (0 = north).
+  standAt(to, x, z, yaw = 0) { cycle = null; showPlace(to); rig.rotation.set(0, yaw, 0); rig.position.set(0, 0, 0); rig.updateMatrixWorld(true); camera.getWorldPosition(headPos); const p = to === 'in' ? interior.toWorld(x, z) : { x, z }; rig.position.x = p.x - headPos.x; rig.position.z = p.z - headPos.z; rig.updateMatrixWorld(true); },
+  airlock: () => cycle && { ...cycle }, door: () => door, portal: () => chosen && { to: chosen.to, glass: chosen.glass.name, calls: portalCalls }, calls: () => ({ portalMs, main: mainCalls, portal: chosen ? portalCalls : 0, physicsMs: phys.stepMs, bodies: phys.count() }), outage: on => { debugOutage = on; }, wreck: on => { debugDamage = on; },
+  zoom: () => zoom, setZoom, debrief: () => debrief, resultBoard, controllers, handControls, scope: scopeMesh, arm, snap, radioState: () => ({ keyed, talking, rx, reading, shown: radioState() }) };
 
 // ---------- start-up screen: the lobby, with the radio and VR steps in the astronaut's panel ----------
 const $ = id => document.getElementById(id);
@@ -836,16 +1212,14 @@ $('radioBtn').onclick = async () => {
   $('step2').hidden = false;
 };
 $('vrSlot').appendChild(VRButton.createButton(renderer, { optionalFeatures: ['hand-tracking'] }));
-$('deskBtn').onclick = () => { mode = 'desk'; keys.tab = false; $('deskBtn').blur(); lobby.show(false); $('cross').hidden = false; lockPointer(); };
+$('deskBtn').onclick = () => { mode = 'desk'; suited(true); keys.tab = false; $('deskBtn').blur(); lobby.show(false); $('cross').hidden = false; lockPointer(); };
 // In a headset the arm lives in the room with the hands, and follows the left one; on a laptop it hangs off the view.
-// Leaving VR, or taking the headset off, before the start makes the Astronaut not ready.
-const standDown = () => { if (state?.phase === 'lobby') setReady(false); };
-renderer.xr.addEventListener('sessionstart', () => {
-  const session = renderer.xr.getSession();
-  session.addEventListener('visibilitychange', () => { if (session.visibilityState === 'hidden') standDown(); });
-});
 // A headset is only ever the Astronaut: it has nothing to choose but entering VR.
 isHeadset().then(h => { headset = h; if (h) { $('deskBtn').hidden = true; document.body.classList.add('headset'); } });
-renderer.xr.addEventListener('sessionstart', () => { music.unlock(); mode = 'vr'; rig.add(arm.group); arm.setTracked(true); lobby.show(false); });
-renderer.xr.addEventListener('sessionend', () => {
-  standDown(); exitHeld = 0; exitTouched = exitGone = false; arm.pressExit(0); mode = null; zoom = 1; zoomGrab = null; reading = false; readFor = 0; camera.add(arm.group); arm.setTracked(false); lobby.show(true); });
+renderer.xr.addEventListener('sessionstart', () => {
+  music.unlock(); mode = 'vr'; suited(true); rig.add(arm.group); arm.setTracked(true); lobby.show(false);
+  // Taking the headset off before the start: not suited, so Mission Ops cannot call GO (and a GO already called stands down).
+  const session = renderer.xr.getSession();
+  session.addEventListener('visibilitychange', () => { if (state?.phase === 'lobby') suited(session.visibilityState !== 'hidden'); });
+});
+renderer.xr.addEventListener('sessionend', () => { suited(false); exitHeld = 0; exitTouched = exitGone = false; arm.pressExit(0); mode = null; zoom = 1; zoomGrab = null; reading = false; readFor = 0; camera.add(arm.group); arm.setTracked(false); lobby.show(true); });

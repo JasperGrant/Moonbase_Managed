@@ -34,7 +34,10 @@ catch { console.error('playwright is not installed. Run: npm i -D playwright && 
 
 // SMOKE_URL=http://localhost:8787 npm run smoke   tests a server that is already running (wrangler dev)
 const BASE = process.env.SMOKE_URL || `http://localhost:${PORT}`;
-const server = process.env.SMOKE_URL ? null : spawn(process.execPath, ['server/server.js'], { cwd: ROOT, env: { ...process.env, PORT }, stdio: 'ignore' });
+// Software rendering draws the Moon at a frame or two a second, and the walk-in airlocks take frames, so the
+// mission clock runs at half speed here (and every wait below is in mission seconds).
+const SCALE = process.env.SMOKE_URL ? 1 : 0.5;
+const server = process.env.SMOKE_URL ? null : spawn(process.execPath, ['server/server.js'], { cwd: ROOT, env: { ...process.env, PORT, TIME_SCALE: String(SCALE) }, stdio: 'ignore' });
 await new Promise(r => setTimeout(r, 800));
 
 const problems = [];
@@ -75,7 +78,7 @@ async function admin(cmd) {
   ws.close();
 }
 const T0 = Date.now(), step = what => console.log(`  ${String(Math.round((Date.now() - T0) / 1000)).padStart(4)} s  ${what}`);
-const POLL = { timeout: 30000, polling: 250 };
+const POLL = { timeout: 60000, polling: 250 };
 // Open a seat that another page has just left: it frees when the server sees that page go, so try a few times.
 async function seat(name, url) {
   for (let i = 0; i < 20; i++) {
@@ -176,25 +179,42 @@ function installHelpers() {
   }
   const F = mb.world.fixtures;
   const toolBox = id => m => owns(mb.fx.tools[id], m);
+  // Into the other place: stand in airlock S's chamber on this side, wait for the cycle, step out.
+  async function through(to) {
+    if (mb.where() === to) return { ok: true };
+    const ch = (mb.where() === 'in' ? mb.interior.doors : mb.world.doors).S;
+    ch.root.updateWorldMatrix(true, false);
+    const p = ch.root.localToWorld(new T.Vector3(0, 0, 0.65)), head = mb.camera.getWorldPosition(new T.Vector3());
+    mb.rig.position.x += p.x - head.x; mb.rig.position.z += p.z - head.z; mb.rig.updateMatrixWorld(true);
+    for (let i = 0; i < 1200 && (mb.where() !== to || mb.airlock()); i++) await sleep(100);
+    if (mb.where() !== to || mb.airlock()) return { ok: false, why: `the airlock cycle never finished (${mb.where()}, ${JSON.stringify(mb.airlock())})` };
+    // Step out of the chamber, a pace into the hall or onto the Moon.
+    const far = (mb.where() === 'in' ? mb.interior.doors : mb.world.doors).S.root.localToWorld(new T.Vector3(0, 0, mb.where() === 'in' ? -1.2 : 2.6));
+    const h2 = mb.camera.getWorldPosition(new T.Vector3());
+    mb.rig.position.x += far.x - h2.x; mb.rig.position.z += far.z - h2.z; mb.rig.updateMatrixWorld(true);
+    mb.sendPose();
+    await sleep(300);
+    return { ok: true };
+  }
+  const need = async place => place ? through(place) : { ok: true };
   window.smoke = {
-    sleep, until, face, work,
-    // Take a tool off the rack (or up off the ground) into a free hand, first tossing down the tools in
-    // `drop` (Q on a laptop tosses one; here the hand holding that tool is chosen).
-    async carry(id, drop = []) {
-      for (const d of drop) if (mb.state().hands.includes(d)) {
-        if (!mb.fx.dropTool(d)) return { ok: false, why: `could not let go of the ${d}` };
-        if (!(await until(s => !s.hands.includes(d) && s.ground[d], 8))) return { ok: false, why: `the ${d} never reached the ground` };
-      }
-      if (mb.state().hands.includes(id)) return { ok: true };
-      const r = await work(toolBox(id), `the ${id} on the rack`, 20);
+    sleep, until, face, work, through,
+    // Pick a tool up from wherever it lies, into the free hand (with both full, a click puts down the right hand's tool).
+    async carry(id) {
+      if (mb.fx.hands.includes(id)) return { ok: true };
+      const pose = mb.fx.toolState(id);
+      if (!pose || pose.state === 'gone') return { ok: false, why: `the ${id} is not there to take` };
+      const r0 = await need(pose.place === 'hall' ? 'in' : 'out'); if (!r0.ok) return r0;
+      const r = await work(toolBox(id), `the ${id}`, 30);
       if (!r.ok) return r;
-      return (await until(s => s.hands.includes(id), 8)) ? { ok: true } : { ok: false, why: `the ${id} never reached a hand` };
+      return (await until(s => s.hands.includes(id), 8)) ? { ok: true } : { ok: false, why: `the server never put the ${id} in the hand` };
     },
-    dust: () => work(m => F.dustCells.includes(m), 'a dusty cell', 60),
-    pullWheel: () => work(m => owns(F.wheel, m), 'the broken wheel', 20),
-    fitTire: () => work(m => owns(F.hub, m), 'the bare hub', 20),
-    weld: () => work(m => m.parent === F.crack, 'the crack', 30),
+    async dust() { const r = await need('out'); return r.ok ? work(m => F.dustCells.includes(m), 'a dusty cell', 60) : r; },
+    async pullWheel() { const r = await need('out'); return r.ok ? work(m => owns(F.wheel, m), 'the broken wheel', 20) : r; },
+    async fitTire() { const r = await need('out'); return r.ok ? work(m => owns(F.hub, m), 'the bare hub', 20) : r; },
+    async weld() { const r = await need('out'); return r.ok ? work(m => m.parent === F.crack, 'the crack', 30) : r; },
     async plug(cable, socket) {
+      const r0 = await need('in'); if (!r0.ok) return r0;
       const plug = F.plugs[cable].children.find(c => c.userData.click);
       // The plug drops out of its socket on the next drawn frame. Wait until it is hanging where it can be picked up.
       if (!(await until(() => F.plugs[cable].position.distanceTo(F.plugRest[cable]) < 0.01, 15))) return { ok: false, why: `the ${F.plugs[cable].userData.color} plug never dropped out of its socket` };
@@ -203,20 +223,7 @@ function installHelpers() {
       if (!sock || !(await face(sock)) || !mb.use()) return { ok: false, why: `could not reach socket ${socket}` };
       return (await until(s => s.scene.board === null || s.scene.board[cable].seated, 8)) ? { ok: true } : { ok: false, why: `the ${F.plugs[cable].userData.color} plug did not seat in socket ${socket}` };
     },
-    // Through the airlock, by pointing at the hatch from the steps (or, inside, from the middle of the hall).
-    async through(to) {
-      if (mb.where() === to) return { ok: true };
-      const at = to === 'in' ? { x: 0, z: 5.2 } : mb.interior.toWorld(0, -1.8);
-      mb.rig.position.set(at.x, 0, at.z); mb.rig.rotation.y = to === 'in' ? 0 : Math.PI; mb.camera.rotation.x = -0.1;
-      mb.rig.updateMatrixWorld(true); mb.camera.updateMatrixWorld(true);
-      if (!mb.useHatch()) return { ok: false, why: 'pointing at the airlock hatch did nothing' };
-      for (let i = 0; i < 300 && mb.where() !== to; i++) await sleep(100);
-      if (mb.where() !== to) return { ok: false, why: 'the airlock fade never finished' };
-      mb.sendPose();
-      await sleep(150);
-      return { ok: true };
-    },
-    standAt(x, z) { mb.rig.position.set(x, 0, z); mb.rig.rotation.y = 0; mb.camera.rotation.x = 0; mb.rig.updateMatrixWorld(true); mb.camera.updateMatrixWorld(true); mb.sendPose(); },
+    standAt(x, z) { mb.standAt(mb.where(), x, z, 0); mb.camera.rotation.x = 0; mb.sendPose(); },
   };
 }
 
@@ -227,7 +234,7 @@ const act = async (page, name, fn, arg) => {
   return !!r && r.ok;
 };
 const waitFor = async (page, name, fn, seconds) => {
-  const ok = await page.evaluate(([f, s]) => window.smoke.until(new Function('s', `return (${f})(s)`), s), [fn.toString(), seconds]);
+  const ok = await page.evaluate(([f, s]) => window.smoke.until(new Function('s', `return (${f})(s)`), s), [fn.toString(), seconds / SCALE]);
   if (!ok) problems.push(`astronaut: waited ${seconds} s for ${name}`);
   return !!ok;
 };
@@ -269,46 +276,51 @@ try {
   if (pitch > 0.2) problems.push(`astronaut: camera pitched ${pitch.toFixed(2)} rad right after entering (pointer-lock jump)`);
   await astro.evaluate(installHelpers);
 
-  // Ready up: the astronaut uses their own card in the waiting room (two cards: a 2-player game),
-  // Mission Control presses Ready in the lobby. The mission starts itself after the countdown.
-  const cards = await astro.evaluate(() => window.moonbase.room.describe().map(c => c.role));
-  if (JSON.stringify(cards) !== JSON.stringify(['astronaut', 'all'])) problems.push('astronaut: the waiting room should have two cards in a 2-player game: ' + JSON.stringify(cards));
-  if (!(await astro.evaluate(() => window.moonbase.useBoard()))) problems.push('astronaut: could not use their own card in the waiting room');
+  // Ready up. The astronaut does not: entering the game (the desk button here) tells the server they are
+  // suited, and Mission Control (2-player mode, so the crew is complete) calls them GO from their panel
+  // in the lobby, then presses its own Ready. The mission starts itself after the countdown.
+  await ctl.waitForFunction(() => window.moonbase.state()?.suited === true, null, { timeout: 20000, polling: 250 }).catch(() => problems.push('lobby: the server never heard the astronaut suit up'));
+  if (await astro.evaluate(() => window.moonbase.board.visible && window.moonbase.where() === 'in') !== true) problems.push('astronaut: no status board in the hall at the start');
+  await ctl.click('[data-ready-for]');
+  await ctl.waitForFunction(() => (window.moonbase.state()?.ready || []).includes('astronaut'), null, { timeout: 20000, polling: 250 }).catch(() => problems.push('lobby: Mission Control could not call the astronaut GO'));
   await ctl.click('[data-ready]');
   await ctl.waitForFunction(() => window.moonbase.state()?.phase === 'run', null, { timeout: 60000, polling: 250 });
   step('mission started');
+  if (await astro.evaluate(() => window.moonbase.where()) !== 'in') problems.push('astronaut: the mission did not start in the hall');
 
-  // 0:05 the solar panels get dusty. Brush off the rack, then every cell.
+  // 0:05 the solar panels get dusty. Find the brush in the hall, take it out through the airlock, brush every cell.
   await waitFor(astro, 'dust on the panels', s => s.phase === 'run' && s.scene.dust, 30);
   await ctl.waitForFunction(() => window.moonbase.state().power?.solar < 60, null, POLL).catch(() => problems.push('console: the Scientist\'s solar gauge should be low with dusty panels'));
+  await ctl.waitForFunction(() => window.moonbase.state().tools?.brush?.area === 'BENCH', null, POLL).catch(() => problems.push('console: the tool log does not have the brush on the bench'));
   await shot(ctl, 'mission-control-dust');
   await act(astro, 'take the brush', () => window.smoke.carry('brush'));
   await act(astro, 'brush the panels', () => window.smoke.dust());
   await waitFor(astro, 'the panels to be clean', s => !s.scene.dust, 8);
 
-  // 0:45 the rover wheel breaks and the radar goes with it. Brush in one hand, the tire in the other.
+  // 0:45 the rover wheel breaks and the radar goes with it. The tire is in the corridor: go back in for it
+  // (taking it puts the brush down in the hall), and bring it out.
   await waitFor(astro, 'the rover wheel to break', s => s.scene.wheel === 1, 60);
   await ctl.waitForFunction(() => window.moonbase.state().radar === false, null, POLL).catch(() => problems.push('console: the Technician still has radar with the wheel broken'));
   await act(astro, 'take the tire', () => window.smoke.carry('tire'));
+  await ctl.waitForFunction(() => window.moonbase.state().tools?.tire?.at === 'hand' && window.moonbase.state().tools?.brush?.at === 'loose', null, POLL).catch(() => problems.push('console: the tool log does not show the tire in hand and the brush put down'));
   await act(astro, 'pull the broken wheel off', () => window.smoke.pullWheel());
   await waitFor(astro, 'the wheel to come off', s => s.scene.wheel === 2, 8);
   await act(astro, 'fit the tire', () => window.smoke.fitTire());
   await waitFor(astro, 'the rover to be fixed', s => s.scene.wheel === 0, 8);
 
-  // 1:25 the radar shows a shower coming. Get under the canopy and wait it out.
-  await ctl.waitForFunction(() => !!window.moonbase.state().meteor, null, { timeout: 60000, polling: 250 }).then(() => step('meteor warning seen on the radar'), () => problems.push('console: no meteor warning on the radar'));
+  // 1:25 the radar shows a shower coming. Get inside and wait it out.
+  await ctl.waitForFunction(() => !!window.moonbase.state().meteor, null, { timeout: 60000 / SCALE, polling: 250 }).then(() => step('meteor warning seen on the radar'), () => problems.push('console: no meteor warning on the radar'));
   await shot(ctl, 'mission-control-meteor');
-  await astro.evaluate(() => window.smoke.standAt(0, 4.6));
+  await act(astro, 'go in through the airlock', () => window.smoke.through('in'));
   await waitFor(astro, 'the shower to start', s => s.scene.meteor !== null, 30);
   await waitFor(astro, 'the shower to end', s => s.scene.meteor === null && s.scene.hull, 20);
   const hits = await astro.evaluate(() => window.moonbase.state().suit);
-  if (hits) problems.push('astronaut: hit by the shower while standing under the canopy');
+  if (hits) problems.push('astronaut: hit by the shower while inside');
 
-  // The shower left dust, a hull breach and a tripped switchboard. Power first: the board, while the
-  // Scientist still has a screen to read the wiring diagram from, then the panels.
+  // The shower left dust, a hull breach and a tripped switchboard. The board first, while the Scientist
+  // still has a screen to read the wiring diagram from: it is in the hall, where we are.
   const wiring = await ctl.evaluate(async () => { for (let i = 0; i < 50; i++) { const w = window.moonbase.state().wiring; if (w) return w; await new Promise(r => setTimeout(r, 100)); } return null; });
   if (!wiring) problems.push('console: the Scientist has no wiring diagram for the tripped switchboard');
-  await act(astro, 'go in through the airlock', () => window.smoke.through('in'));
   for (const w of wiring || []) {
     await act(astro, `plug the ${w.color} cable into socket ${w.socket}`, ({ color, socket }) => {
       const cable = window.moonbase.world.fixtures.plugs.findIndex(p => p.userData.color === color);
@@ -316,22 +328,21 @@ try {
     }, w);
   }
   await waitFor(astro, 'the switchboard to be fixed', s => !s.scene.board, 8);
-  await act(astro, 'come back out', () => window.smoke.through('out'));
+  await act(astro, 'take the brush again', () => window.smoke.carry('brush'));
   await act(astro, 'brush the panels again', () => window.smoke.dust());
   await waitFor(astro, 'the panels to be clean again', s => !s.scene.dust, 8);
   await act(astro, 'take the welder', () => window.smoke.carry('welder'));
   await act(astro, 'weld the crack', () => window.smoke.weld());
   await waitFor(astro, 'the hull to be sealed', s => !s.scene.hull, 8);
 
-  // 2:30 the suit leaks. Patch kit, then F.
-  // Both hands are full (welder and brush): put the brush down to take the patch kit.
-  await act(astro, 'put the brush down and take the patch kit', () => window.smoke.carry('patch', ['brush']));
+  // 2:30 the suit leaks. The patch kit is by the lockers; then F.
+  await act(astro, 'take the patch kit', () => window.smoke.carry('patch'));
   await waitFor(astro, 'the suit leak', s => s.suit || s.phase !== 'run', 60);
   await astro.keyboard.down('f');
   await waitFor(astro, 'the suit to be patched', s => !s.suit, 8);
   await astro.keyboard.up('f');
 
-  await ctl.waitForFunction(() => window.moonbase.state()?.phase === 'results', null, { timeout: 120000, polling: 250 });
+  await ctl.waitForFunction(() => window.moonbase.state()?.phase === 'results', null, { timeout: 120000 / SCALE, polling: 250 });
   const result = await ctl.evaluate(() => window.moonbase.state().result);
   step('result ' + JSON.stringify(result));
 
@@ -339,6 +350,34 @@ try {
   if (result.fixed !== 6) problems.push(`expected all 6 faults fixed, got ${result.fixed}`);
   if (result.hits || result.blackouts || result.mistakes) problems.push(`a clean run should have no hits, blackouts or wrong plugs: ${JSON.stringify(result)}`);
   await shot(ctl, 'mission-control-results');
+
+  // The debrief and the way back. Every seat has BACK TO LOBBY. The astronaut (on a laptop: hold X)
+  // leaves first: the crew goes to the lobby, the astronaut is back at the READY board, and the
+  // console keeps its results up with the CREW IN LOBBY lamp lit until it leaves too.
+  step('the debrief and the way back to the lobby');
+  const ctlOut = await ctl.evaluate(() => ({ button: !!document.querySelector('#results [data-lobby]'), lamp: document.getElementById('crewLamp')?.classList.contains('on'), left: document.getElementById('debriefLeft')?.textContent }));
+  if (!ctlOut.button || ctlOut.lamp || !(Number(ctlOut.left) > 0)) problems.push('console: the results should have BACK TO LOBBY, the lamp off and the seconds left: ' + JSON.stringify(ctlOut));
+  const cuff = await astro.evaluate(async () => { for (let i = 0; i < 40 && !window.moonbase.arm.shown?.debrief; i++) await new Promise(r => setTimeout(r, 100)); return { debrief: window.moonbase.debrief(), shown: window.moonbase.arm.shown, board: window.moonbase.resultBoard.visible }; });
+  if (!cuff.board) problems.push('astronaut: no MISSION COMPLETE / FAILED board appeared in the world when the mission ended');
+  if (!cuff.debrief || !cuff.shown?.debrief || cuff.shown.status !== (result.won ? 'won' : 'lost')) problems.push('astronaut: the cuff did not show the debrief: ' + JSON.stringify(cuff));
+  await astro.keyboard.down('x');
+  const back = await astro.evaluate(async () => {
+    const mb = window.moonbase;
+    for (let i = 0; i < 100 && (mb.debrief() || mb.state().phase !== 'lobby' || !mb.board.visible); i++) await new Promise(r => setTimeout(r, 100));
+    await new Promise(r => setTimeout(r, 600)); // the fade
+    mb.camera.updateMatrixWorld(true);
+    const head = mb.camera.getWorldPosition(new mb.THREE.Vector3()), dir = mb.camera.getWorldDirection(new mb.THREE.Vector3());
+    const toBoard = new mb.THREE.Vector3(0, 0, -1); // the status board stands up the hall from the start point
+    return { debrief: mb.debrief(), phase: mb.state().phase, where: mb.where(), board: mb.board.visible, facing: +dir.dot(toBoard).toFixed(2) };
+  });
+  await astro.keyboard.up('x');
+  if (back.debrief || back.phase !== 'lobby' || back.where !== 'in' || !back.board || back.facing < 0.8) problems.push('astronaut: holding X in the debrief did not bring them back to the status board in the hall: ' + JSON.stringify(back));
+  await ctl.waitForFunction(() => document.getElementById('crewLamp')?.classList.contains('on'), null, POLL);
+  if (!(await ctl.evaluate(() => !document.getElementById('results').hidden && document.getElementById('lobbyView').hidden))) problems.push('console: the results were pulled away when the astronaut went back to the lobby');
+  await shot(ctl, 'mission-control-results-crew-in-lobby');
+  await ctl.click('#results [data-lobby]');
+  await ctl.waitForFunction(() => !document.getElementById('lobbyView').hidden && document.getElementById('results').hidden, null, POLL);
+  step('back in the lobby');
   // The rest is on the astronaut's page alone. Mission Control's page draws the rover camera, a second
   // 3D scene, and in software rendering the two starve each other.
   await browsers[0].close();
@@ -402,7 +441,7 @@ try {
   for (const g of gestures) problems.push('hand gestures: ' + g);
 
   step('visor zoom');
-  // The visor scope: look at the tool locker and zoom in. The scope must be on, its extra pass
+  // The visor scope: look a little up from where we stand and zoom in. The scope must be on, its extra pass
   // must have drawn the scene, and WebGL must have no complaint: the first version of the scope drew
   // nothing but black because a copy between two buffers failed, which showed up only as a WebGL error.
   // Laptop players have no gesture for this; the test sets the zoom directly.
@@ -447,14 +486,19 @@ try {
   await until('wrist gauges: letting go of Tab did not lower the arm', async () => (await armState(astro)).raise === 0);
 
   step('through the airlock, power outage lighting, things knocked loose');
-  // Through the airlock: the hatch pad is in reach from the foot of the steps, the fade moves the
-  // astronaut into the hall, the switchboard is mounted there, and the outage lighting runs.
+  // Through the airlock: walk into the chamber, the hatch shuts behind, the swap happens with the head
+  // exactly where it was in the chamber, and the hatch in front opens onto the hall. The switchboard is
+  // mounted there, and the outage lighting runs.
   const indoors = await astro.evaluate(async () => {
-    const mb = window.moonbase, wait = ms => new Promise(r => setTimeout(r, ms));
-    mb.rig.position.set(0, 0, 5.2); mb.rig.rotation.y = 0; mb.camera.rotation.x = -0.1; mb.rig.updateMatrixWorld(true);
-    if (!mb.useHatch()) return 'pointing at the airlock hatch from the steps did nothing';
-    for (let i = 0; i < 100 && mb.where() !== 'in'; i++) await wait(100);
-    if (mb.where() !== 'in') return 'the fade never moved the astronaut inside';
+    const mb = window.moonbase, T = mb.THREE, wait = ms => new Promise(r => setTimeout(r, ms));
+    if (mb.where() === 'in') { const r = await window.smoke.through('out'); if (!r.ok) return 'out: ' + r.why; }
+    mb.standAt('out', 0.1, 3.25, 0); // in airlock S's chamber, facing the inner hatch
+    const local = () => { const ch = (mb.where() === 'in' ? mb.interior.doors : mb.world.doors).S; return ch.root.worldToLocal(mb.camera.getWorldPosition(new T.Vector3())); };
+    const before = local();
+    for (let i = 0; i < 1200 && (mb.where() !== 'in' || mb.airlock()); i++) await wait(100);
+    if (mb.where() !== 'in') return 'walking into airlock S never brought the astronaut inside';
+    const after = local();
+    if (after.distanceTo(before) > 0.02) return `the head jumped ${after.distanceTo(before).toFixed(3)} m in the chamber during the swap`;
     if (!mb.interior.group.visible || mb.world.rover.visible) return 'inside, but the wrong place is being drawn';
     if (mb.world.fixtures.board.parent !== mb.interior.mount) return 'no switchboard on the interior wall';
     mb.outage(true);
@@ -476,7 +520,7 @@ try {
   });
   if (indoors !== 'ok') problems.push('astronaut: ' + indoors);
   await view(astro, 'astronaut-interior');
-  await astro.evaluate(() => window.moonbase.place('out'));
+  await astro.evaluate(() => window.moonbase.placeInside());
 
   await view(astro, 'astronaut-spawn');
   await Promise.all(browsers.map(b => b.close().catch(() => {})));
@@ -534,5 +578,5 @@ try {
 }
 
 if (problems.length) { console.error('SMOKE FAILED\n' + problems.join('\n')); process.exit(1); }
-console.log(`smoke passed: the demo mission was played to a win through the laptop controls; hand gestures, visor zoom, wrist gauges, the airlock and the radio both ways work. ${SHOTS ? `Screenshots in ${path.relative(ROOT, OUT)}/` : 'No screenshots taken (SMOKE_SHOTS=1 for those).'}`);
+console.log(`smoke passed: the demo mission was played to a win through the laptop controls (tools found in the hall, one in each hand, through the walk-in airlock, Mission Control calling GO); hand gestures, visor zoom, wrist gauges, the airlock swap and the radio both ways work. ${SHOTS ? `Screenshots in ${path.relative(ROOT, OUT)}/` : 'No screenshots taken (SMOKE_SHOTS=1 for those).'}`);
 process.exit(0);

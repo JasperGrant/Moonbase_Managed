@@ -1,6 +1,6 @@
 // Technician's rover camera: the same world as the astronaut's, seen from the rover. The astronaut is a
 // figure that walks, crouches and reaches (client/avatar.js), with the tools in their hands, and any tool
-// they have put down or thrown lies where it came to rest.
+// lying out on the surface lies where it came to rest.
 import * as THREE from 'three';
 import { buildWorld } from '/world.js';
 import { buildTools, layDown } from '/tools.js';
@@ -34,8 +34,8 @@ export function startRoverCam(canvas, getState) {
     world.moveRover(s.rover);
     world.update(t);
     if (s.scene) world.apply(s.scene, t);
-    // Indoors the astronaut is out of the camera's sight.
-    world.avatar.visible = !!s.astro && s.crew.includes('astronaut') && !s.astro.in;
+    // Inside the habitat the astronaut is out of the camera's sight.
+    world.avatar.visible = !!s.astro && s.crew.includes('astronaut') && !s.astro.inside;
     if (s.astro) world.figure.update(dt, s.astro);
     const kit = s.scene?.tools || { held: [null, null], ground: {} };
     for (const id in tools) tools[id].visible = false;

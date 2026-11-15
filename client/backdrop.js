@@ -49,10 +49,10 @@ export function startBackdrop(canvas, { onReady, onGiveUp } = {}) {
   const scene = new THREE.Scene();
   const camera = new THREE.PerspectiveCamera(48, 16 / 9, 0.1, 2600);
   const world = buildWorld(THREE, scene, { renderer });
-  // The rover parked by the array, and an astronaut standing by the locker, looking out.
+  // The rover parked by the array, and an astronaut standing outside airlock S, looking out.
   world.moveRover({ x: PLACES.rover.x, z: PLACES.rover.z, ry: -0.5 }, 1);
   world.avatar.visible = true;
-  world.avatar.position.set(PLACES.locker.x + 1.6, world.height(PLACES.locker.x + 1.6, PLACES.locker.z + 2.2), PLACES.locker.z + 2.2);
+  world.avatar.position.set(PLACES.doors.S.x + 1.6, world.height(PLACES.doors.S.x + 1.6, PLACES.doors.S.z + 3.2), PLACES.doors.S.z + 3.2);
   world.avatar.rotation.y = 2.6;
 
   const pos = new THREE.Vector3(), look = new THREE.Vector3();

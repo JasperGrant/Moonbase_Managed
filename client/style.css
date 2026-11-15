@@ -66,7 +66,7 @@ main { padding:14px 16px; }
 .termrow { display:flex; gap:6px; margin-top:6px; }
 .termrow input { flex:1; background:#000; color:var(--green); border:1px solid var(--line); border-radius:4px; padding:.5em; font:inherit; font-size:18px; letter-spacing:.2em; text-transform:uppercase; }
 
-#map { width:100%; max-width:460px; aspect-ratio:1; display:block; background:#000; border:1px solid var(--line); border-radius:4px; }
+#map { width:100%; max-width:640px; aspect-ratio:1; display:block; background:#000; border:1px solid var(--line); border-radius:4px; }
 #cam { width:100%; aspect-ratio:16/9; display:block; background:#000; border:1px solid var(--line); border-radius:4px; margin-top:10px; }
 .hint { color:var(--dim); font-size:12px; margin:.5em 0 0; }
 
@@ -263,6 +263,14 @@ body.period { background:var(--p-bakelite); }
 .period #run::before { content:''; position:fixed; inset:0; z-index:-1; pointer-events:none; opacity:.09; background:url(/assets/textures/mission-control-room.webp) center/cover no-repeat; filter:sepia(.4); }
 .period .verdict { font-family:var(--p-label); font-weight:400; letter-spacing:.2em; font-size:26px; }
 .period .verdict.won { color:var(--p-green); } .period .verdict.lost { color:var(--p-red); }
+/* The way out of the debrief: a button, an engraved line, the CREW IN LOBBY lamp and a Nixie counter. */
+.period .debrief-out { display:flex; align-items:center; flex-wrap:wrap; gap:14px 20px; margin-top:1.4em; padding-top:1.1em; border-top:1px solid var(--p-rule); }
+.period .debrief-out .engraved, .period .debrief-out .crew-lamp { font-family:var(--p-label); font-size:9px; letter-spacing:.18em; text-transform:uppercase; color:var(--p-dim); }
+.period .debrief-out .crew-lamp { position:relative; padding-left:20px; margin-left:auto; }
+.period .debrief-out .crew-lamp i { position:absolute; left:2px; top:50%; width:11px; height:11px; margin-top:-6px; border-radius:50%; background:var(--p-green-off); box-shadow:0 0 0 2px var(--p-bezel); }
+.period .debrief-out .crew-lamp.on { color:var(--p-ink); }
+.period .debrief-out .crew-lamp.on i { background:radial-gradient(circle at 35% 35%, #fff3d6, var(--p-green) 45%); box-shadow:0 0 0 2px var(--p-bezel), 0 0 6px var(--p-green); }
+.period .debrief-out .nixie { font-family:var(--p-type); font-weight:700; font-size:18px; color:var(--p-nixie); text-shadow:0 0 5px rgba(255,138,61,.55); background:#16120e; border:1px solid var(--p-rule); border-radius:3px; padding:0 .3em; letter-spacing:.08em; }
 .period .log li { border-bottom-color:var(--p-rule); }
 .period .log .at { color:var(--p-dim); }
 .period .log .solve, .period .log .power, .period .log .gen { color:var(--p-green); }
