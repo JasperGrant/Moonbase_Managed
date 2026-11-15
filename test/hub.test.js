@@ -34,7 +34,8 @@ function setup(opts) {
   assert.ok(second.got.some(m => m.includes('"taken"')), 'a second person cannot take a held seat');
   assert.equal(second.role, null);
 
-  for (const c of [a, o, t]) say(c, { t: 'ready', on: true });
+  say(a, { t: 'suited', on: true }); say(o, { t: 'ready', for: 'astronaut', on: true });
+  for (const c of [o, t]) say(c, { t: 'ready', on: true });
   wait(S + 1);
   assert.equal(hub.game.phase, 'lobby', 'three ready and one not: no start');
 
@@ -71,7 +72,8 @@ function setup(opts) {
 {
   const { hub, join, say, wait } = setup();
   const cs = ['astronaut', 'ops', 'tech', 'sci'].map(join);
-  for (const c of cs) say(c, { t: 'ready', on: true });
+  say(cs[0], { t: 'suited', on: true }); say(cs[1], { t: 'ready', for: 'astronaut', on: true });
+  for (const c of cs.slice(1)) say(c, { t: 'ready', on: true });
   wait(1);
   assert.ok(hub.countdown !== null);
   hub.remove(cs[3]);
@@ -87,7 +89,7 @@ function setup(opts) {
   const { hub, join, say, wait } = setup();
   const a = join('astronaut'), all = join('all');
   assert.ok(join('sci').role === null, 'Mission Control holds the Scientist seat');
-  say(a, { t: 'ready', on: true }); say(all, { t: 'ready', on: true });
+  say(a, { t: 'suited', on: true }); say(all, { t: 'ready', for: 'astronaut', on: true }); say(all, { t: 'ready', on: true });
   wait(S + 0.5);
   assert.equal(hub.game.phase, 'run');
 }
@@ -95,12 +97,34 @@ function setup(opts) {
 // The state every seat receives carries ready and countdown.
 {
   const { hub, join, say } = setup();
-  const a = join('astronaut');
-  say(a, { t: 'ready', on: true });
+  const a = join('astronaut'), o = join('ops');
+  say(a, { t: 'suited', on: true }); say(o, { t: 'ready', for: 'astronaut', on: true });
   hub.tick();
   const st = JSON.parse(a.got.at(-1));
   assert.deepEqual(st.ready, ['astronaut']);
-  assert.ok('countdown' in st);
+  assert.ok('countdown' in st && st.suited === true);
+}
+
+// Mission Ops calls the astronaut GO. The astronaut cannot ready themselves, nobody can ready an astronaut
+// who is not suited up, only Ops (or the 2-player console) can do it, and taking the headset off stands them down.
+{
+  const { hub, join, say } = setup();
+  const a = join('astronaut'), o = join('ops'), t = join('tech'), s = join('sci');
+  say(a, { t: 'ready', on: true });
+  assert.ok(!hub.seats().ready.includes('astronaut'), 'the astronaut cannot ready themselves');
+  say(o, { t: 'ready', for: 'astronaut', on: true });
+  assert.ok(!hub.seats().ready.includes('astronaut'), 'not before the headset is on');
+  say(a, { t: 'suited', on: true });
+  assert.equal(hub.seats().suited, true);
+  for (const c of [t, s]) say(c, { t: 'ready', for: 'astronaut', on: true });
+  assert.ok(!hub.seats().ready.includes('astronaut'), 'only Mission Ops calls the astronaut GO');
+  say(o, { t: 'ready', for: 'astronaut', on: true });
+  assert.ok(hub.seats().ready.includes('astronaut') && !hub.seats().ready.includes('ops'), 'Ops readied the astronaut, not themselves');
+  say(a, { t: 'suited', on: false });
+  assert.ok(!hub.seats().ready.includes('astronaut') && !hub.seats().suited, 'headset off: stood down');
+  say(a, { t: 'suited', on: true }); say(o, { t: 'ready', for: 'astronaut', on: true });
+  hub.remove(a);
+  assert.ok(!hub.seats().suited && !hub.seats().ready.includes('astronaut'), 'the astronaut leaving clears both');
 }
 
 // Testing alone: with requireFullCrew off, one ready player starts the mission.

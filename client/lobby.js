@@ -1,10 +1,11 @@
 // The lobby: four role scenes side by side. A scene is grey while its seat is open and comes to
-// life, in colour, with its own motion and sound, when someone takes the seat. Everyone presses
-// Ready, and the server starts the mission once all four roles are held and ready.
+// life, in colour, with its own motion and sound, when someone takes the seat. Mission Control's seats
+// press Ready; the astronaut does not: once they are suited up (in the headset), Mission Ops calls them
+// GO from the astronaut's panel. The server starts the mission once all four roles are held and ready.
 // Used by the landing page (nobody seated yet) and by every seat page while the game is in the lobby.
 //
-//   const lobby = createLobby(el, { mine: 'tech', onReady: on => ..., onPick: role => ... });
-//   lobby.update({ crew, ready, countdown, phase });
+//   const lobby = createLobby(el, { mine: 'tech', onReady: on => ..., onPick: role => ..., onReadyFor: (role, on) => ... });
+//   lobby.update({ crew, ready, countdown, phase, suited });
 //
 // The art is client/lobby/<role>.svg, 900 x 1800. Drop in a finished painting with the same name
 // and framing and nothing else changes; the motion overlays below are drawn on top of it.
@@ -119,7 +120,7 @@ export function createLobby(root, opts = {}) {
   });
 
   // ---------- pointing and clicking ----------
-  let st = { crew: [], ready: [], countdown: null, phase: 'lobby' };
+  let st = { crew: [], ready: [], countdown: null, phase: 'lobby', suited: false };
   for (const r of ORDER) {
     const p = panel(r);
     p.addEventListener('pointerenter', () => amb.setFocus(r));
@@ -129,6 +130,7 @@ export function createLobby(root, opts = {}) {
     const pick = () => { if (opts.onPick && !held(r)) opts.onPick(r); };
     p.addEventListener('click', e => {
       if (e.target.closest('[data-ready]')) { opts.onReady?.(!isReady(r)); return; }
+      if (e.target.closest('[data-ready-for]')) { if (st.suited || isReady(r)) opts.onReadyFor?.(r, !isReady(r)); return; }
       if (e.target.closest('button, a, input, label')) return;
       pick();
     });
@@ -178,7 +180,7 @@ export function createLobby(root, opts = {}) {
   // ---------- drawing the state ----------
   let wasHeld = null, lastCount = null, actKey = {};
   function update(s) {
-    st = { crew: s.crew || [], ready: s.ready || [], countdown: s.countdown ?? null, phase: s.phase || 'lobby' };
+    st = { crew: s.crew || [], ready: s.ready || [], countdown: s.countdown ?? null, phase: s.phase || 'lobby', suited: !!s.suited };
     const locked = st.phase !== 'lobby';
     const nowHeld = ORDER.filter(held);
     root.classList.toggle('locked', locked);
@@ -189,7 +191,7 @@ export function createLobby(root, opts = {}) {
       p.classList.toggle('open', !h);
       p.classList.toggle('lit', h);
       p.classList.toggle('ready', rd);
-      p.querySelector('.lb-state').textContent = !h ? 'OPEN' : rd ? 'GO' : 'STANDING BY';
+      p.querySelector('.lb-state').textContent = !h ? 'OPEN' : rd ? 'GO' : r === 'astronaut' && st.suited ? 'SUITED' : 'STANDING BY';
       if (ownActions(r)) {
         const key = [rd, locked].join();
         if (actKey[r] !== key) {
@@ -198,6 +200,16 @@ export function createLobby(root, opts = {}) {
             `<button class="lb-ready ${rd ? 'on' : ''}" data-ready type="button">${rd ? 'GO · press to stand down' : 'READY'}</button>
              <a class="lb-leave" href="/">Leave seat</a>`;
         }
+      }
+    }
+    // Mission Ops calls the astronaut GO, from the astronaut's panel, once they are suited up.
+    if (opts.onReadyFor && !yours('astronaut')) {
+      const p = panel('astronaut'), h = held('astronaut'), rd = h && isReady('astronaut');
+      const key = [h, rd, st.suited, locked].join();
+      if (actKey.go !== key) {
+        actKey.go = key;
+        p.querySelector('.lb-actions').innerHTML = locked || !h ? '' :
+          `<button class="lb-ready ${rd ? 'on' : ''}" data-ready-for type="button" ${st.suited || rd ? '' : 'disabled'}>${rd ? 'ASTRONAUT GO · press to stand down' : st.suited ? 'CALL ASTRONAUT GO' : 'NOT SUITED'}</button>`;
       }
     }
     // A seat that just lit up gets the radio beep, so the room notices someone joined.
@@ -221,7 +233,7 @@ export function createLobby(root, opts = {}) {
     if (locked) text = st.phase === 'run' ? 'Mission in progress. An open seat can still be taken to rejoin.' : 'Mission over. Mission Ops can fly again.';
     else if (n != null) text = `All four GO. Launching in ${n}...`;
     else if (missing.length) text = `Waiting for ${list(missing)}. ${ready} of 4 ready.`;
-    else text = `Crew complete. ${ready} of 4 ready.${ready < 4 ? ' Everyone presses Ready.' : ''}`;
+    else text = `Crew complete. ${ready} of 4 ready.${ready < 4 ? (isReady('astronaut') ? ' Mission Control presses Ready.' : st.suited ? ' Mission Ops calls the astronaut GO.' : ' The astronaut is suiting up.') : ''}`;
     $('.lb-status').textContent = text;
     const twoPlayer = opts.onPick && ['ops', 'sci', 'tech'].every(r => !held(r));
     $('.lb-links').innerHTML = twoPlayer ? '<a href="/control">2-player mode: one person takes Mission Ops, Scientist and Technician</a>' : '';

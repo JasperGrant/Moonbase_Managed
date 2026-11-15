@@ -95,6 +95,8 @@ function installVR() {
     // Stand with the head over world (x, z), facing the world point (tx, tz). Hands hang in front.
     async stand(x, z, tx, tz, h = height) {
       height = h;
+      const to = x > 250 ? 'in' : 'out'; // the hall is built 500 m off to one side
+      if (mb.where() !== to) mb.showPlace(to);
       mb.rig.position.set(x, 0, z); mb.rig.rotation.y = Math.atan2(-(tx - x), -(tz - z));
       X.head(0, h, 0);
       mb.rig.updateMatrixWorld(true);
@@ -120,7 +122,9 @@ function installVR() {
     haptics: () => X.dev.haptics.splice(0),
     until: async (test, seconds = 5) => { for (const end = Date.now() + seconds * 1000; Date.now() < end;) { const v = test(mb.state()); if (v) return v; await sleep(50); } return null; },
     ring: s => { const r = mb.fx.rings[index(s)]; return r.visible ? '#' + r.material.color.getHexString() : null; },
-    parentOf: tool => { const p = mb.fx.tools[tool].parent; return !p ? 'nowhere' : p === F.locker ? 'rack' : p === mb.fx.beltGroup ? 'belt' : mb.controllers.includes(p) ? 'hand:' + p.userData.hand : 'other'; },
+    // Where a tool is: in a hand, loose (lying somewhere), or nowhere (used up).
+    parentOf: tool => { const i = [0, 1].find(k => mb.fx.holding(k)?.id === tool); if (i !== undefined) return 'hand:' + side(i); const st = mb.fx.toolState(tool)?.state; return st === 'loose' ? 'loose' : st === 'gone' ? 'nowhere' : st; },
+    pose: tool => mb.fx.toolState(tool),
   };
 }
 
@@ -128,36 +132,48 @@ function installVR() {
 const serverUntil = async (test, seconds = 5) => { for (const end = Date.now() + seconds * 1000; Date.now() < end;) { if (test()) return true; await new Promise(r => setTimeout(r, 50)); } return false; };
 const P = (fn, arg) => page.evaluate(fn, arg);
 
-// A complete grab of a tool: reach for it wherever it is (rack or belt), close the hand, check it came.
-async function grabTool(side, tool) {
-  return P(async ({ side, tool }) => {
+// A complete grab of a loose tool: reach for it wherever it lies, close the hand, check it came.
+async function grabTool(side, tool, near = null) {
+  return P(async ({ side, tool, near }) => {
     const v = window.vr, mb = window.moonbase;
-    await v.move(side, v.wp(mb.fx.tools[tool]), 6);
+    const at = v.wp(mb.fx.tools[tool]); if (near) at.add(v.V(...near));
+    await v.move(side, at, 6);
     await v.frames(2);
     const ring = v.ring(side);
     v.grip(side, true);
-    await v.until(s => s.belt.includes(tool), 3);
+    await v.until(s => s.held === tool, 3);
     await v.frames(2);
     return { ring, held: v.holding(side)?.id || null, parent: v.parentOf(tool) };
-  }, { side, tool });
+  }, { side, tool, near });
 }
-// Let go. `to`: 'locker' moves the hand to the rack first; 'away' leaves it where it is.
-async function letGo(side, to = 'away') {
-  return P(async ({ side, to }) => {
-    const v = window.vr, mb = window.moonbase;
-    if (to === 'locker') await v.move(side, v.wp(mb.world.fixtures.locker).setY(1.3), 6);
+// Let go, where the hand is.
+async function letGo(side) {
+  return P(async side => {
+    const v = window.vr;
     v.grip(side, false);
     await v.frames(3);
     await v.sleep(350);
     await v.frames(2);
-  }, { side, to });
+  }, side);
 }
-const LOCKER = [PLACES.locker.x, PLACES.locker.z + 0.62, PLACES.locker.x, PLACES.locker.z]; // standing at the rack, facing it
-// Step sideways along the rack to stand in front of a tool that is on it.
-const faceTool = async tool => { const x = await P(tool => window.vr.wp(window.moonbase.fx.tools[tool]).x, tool); await stand(x, PLACES.locker.z + 0.62, x, PLACES.locker.z); };
+const HALL_X = 500; // ROOM.origin.x in client/interior.js: room x + this = world x
 const stand = (x, z, tx, tz, h) => P(([x, z, tx, tz, h]) => window.vr.stand(x, z, tx, tz, h), [x, z, tx, tz, h]);
-// Set the belt up for the next test without going through the motions again.
-const kit = async (...tools) => { g.belt = [...tools]; g.locker = ['brush', 'patch', 'welder', 'tire', 'gen'].filter(t => !tools.includes(t)); await P(tools => window.vr.until(s => s.belt.length === tools.length && tools.every(t => s.belt.includes(t)), 3), tools); await P(() => window.vr.frames(2)); };
+// Put one tool in a hand for the next test without going through the motions again (or empty both hands).
+const kit = async (tool = null, side = 'right') => {
+  if (g.held && g.held !== tool) { const t = g.tools[g.held]; Object.assign(t, { at: 'loose', inside: !!g.astro.inside, x: g.astro.x, y: 0, z: g.astro.z }); }
+  g.held = tool;
+  if (tool) g.tools[tool].at = 'hand';
+  await P(({ tool, side }) => { const v = window.vr; window.moonbase.fx.give(tool, v.index(side)); }, { tool, side });
+  await P(tool => window.vr.until(s => s.held === tool, 3), tool);
+  await P(() => window.vr.frames(3));
+};
+// Lay a tool loose somewhere (world coordinates outside, room coordinates inside), on the server's word.
+const lay = async (tool, inside, x, z, y = 0) => {
+  if (g.held === tool) g.held = null;
+  g.tools[tool] = { at: 'loose', inside, x, y, z, area: inside ? 'HALL' : 'OUTSIDE' };
+  await P(({ tool, x, z }) => window.vr.until(() => { const p = window.moonbase.fx.toolState(tool); return p && p.state === 'loose' && Math.hypot(p.x - x, p.z - z) < 0.3; }, 5), { tool, x, z });
+  await P(() => window.vr.frames(4));
+};
 const reachOk = async (what, limit = 0.8) => { const r = await P(() => { const r = window.vr.reach; window.vr.resetReach(); return r; }); check(r <= limit, `${what}: needed an arm ${r.toFixed(2)} m long (a real one is about 0.75 m)`); return r; };
 
 try {
@@ -183,52 +199,67 @@ try {
   await P(() => window.vr.frames(5));
   check(await P(() => window.moonbase.fx.gloves.every(gl => gl.visible)), 'no gloves are drawn on the controllers');
 
-  // ---------- 1. tools off the rack and the belt ----------
-  step('1. grabbing tools off the rack and the belt');
-  await stand(...LOCKER);
+  // ---------- 1. tools found in the hall, one at a time ----------
+  step('1. tools lying in the hall: pick up, drop, throw, one at a time');
+  check(await P(() => window.moonbase.where()) === 'in', 'start: the mission did not start inside the hall');
+  const bodies = await P(() => window.moonbase.calls());
+  console.log(`        physics: ${bodies.bodies} bodies, last step ${bodies.physicsMs.toFixed(2)} ms`);
+  check(bodies.bodies === 9, `physics: expected 5 tools and 4 decoys, got ${bodies.bodies} bodies`);
+  const brushSpot = PLACES.toolSpots[PLACES.demoTools.brush];
+  await stand(HALL_X + brushSpot.x, brushSpot.z + 0.75, HALL_X + brushSpot.x, brushSpot.z);
   let r = await grabTool('right', 'brush');
-  check(r.ring === PAL.green, 'rack: no green ring on the brush before grabbing it: ' + r.ring);
-  check(g.belt.includes('brush'), 'rack: gripping the brush on the rack did not put it on the belt');
-  check(r.held === 'brush' && r.parent === 'hand:right', 'rack: the brush should be in the right hand straight off the rack: ' + JSON.stringify(r));
+  check(r.ring === PAL.green, 'hall: no green ring on the brush before grabbing it: ' + r.ring);
+  check(g.held === 'brush' && g.tools.brush.at === 'hand', 'hall: gripping the brush on the bench did not put it in the hand on the server');
+  check(r.held === 'brush' && r.parent === 'hand:right', 'hall: the brush should be in the right hand: ' + JSON.stringify(r));
   let buzz = await P(() => window.vr.haptics());
-  check(buzz.some(b => b.side === 'right' && b.strength >= 0.5), 'rack: no buzz in the hand that grabbed: ' + JSON.stringify(buzz));
-  await letGo('right'); // still standing at the rack, but it only just came off it: belt, not back on the rack
-  check(g.belt.includes('brush') && await P(() => window.vr.parentOf('brush')) === 'belt', 'rack: letting go straight after taking a tool should leave it on the belt, got ' + await P(() => window.vr.parentOf('brush')));
-  r = await grabTool('right', 'brush'); // now off the belt
-  check(r.held === 'brush' && r.parent === 'hand:right', 'belt: could not take the brush off the belt: ' + JSON.stringify(r));
-  await letGo('right', 'locker');
-  check(await serverUntil(() => g.locker.includes('brush')), 'belt: letting go of a belt tool at the locker did not put it back on the rack');
-  // Away from the locker a tool let go returns to the belt.
-  await faceTool('welder');
-  r = await grabTool('left', 'welder');
-  check(r.held === 'welder' && r.parent === 'hand:left', 'rack: the left hand could not take the welder: ' + JSON.stringify(r));
-  await stand(0, 9, 0, 0);
-  await letGo('left');
-  check(g.belt.includes('welder') && await P(() => window.vr.parentOf('welder')) === 'belt', 'belt: a tool let go out on the surface did not return to the belt');
-  r = await grabTool('left', 'welder');
-  check(r.held === 'welder', 'belt: could not take the welder off the belt out on the surface');
-  await letGo('left');
-  check(g.belt.includes('welder'), 'belt: the welder was lost when let go');
-  // Both hands, and the weight limit: welder 2 + brush 1 + patch 1 fills the belt, the tire will not come.
-  await stand(...LOCKER);
-  r = await grabTool('right', 'brush'); const l = await grabTool('left', 'patch');
-  check(r.held === 'brush' && l.held === 'patch', 'rack: could not hold a tool in each hand: ' + JSON.stringify([r, l]));
-  await letGo('right'); await letGo('left');
-  await P(() => window.vr.haptics());
-  await faceTool('tire');
+  check(buzz.some(b => b.side === 'right' && b.strength >= 0.5), 'hall: no buzz in the hand that grabbed: ' + JSON.stringify(buzz));
+  // One at a time: with the brush in the right hand, the left cannot take the welder.
+  await lay('welder', true, brushSpot.x - 0.5, brushSpot.z + 0.45);
   r = await P(async () => {
     const v = window.vr, mb = window.moonbase;
-    await v.move('right', v.wp(mb.fx.tools.tire).add(v.V(0.15, 0.2, 0.15)), 6); await v.frames(2); // the top of the rim
-    const ring = v.ring('right');
-    v.grip('right', true); await v.frames(3); await v.sleep(300);
-    const out = { ring, held: v.holding('right'), parent: v.parentOf('tire'), buzz: v.haptics() };
-    v.grip('right', false); await v.frames(2);
+    await v.move('left', v.wp(mb.fx.tools.welder).add(v.V(0, 0.03, 0)), 6); await v.frames(2);
+    const ring = v.ring('left');
+    v.haptics();
+    v.grip('left', true); await v.frames(3); await v.sleep(400);
+    const out = { ring, held: v.holding('left'), buzz: v.haptics() };
+    v.grip('left', false); await v.frames(2);
     return out;
   });
-  check(r.ring === PAL.red, 'weight: the ring on a tool too heavy for the belt should be red: ' + r.ring);
-  check(!g.belt.includes('tire') && r.parent === 'rack' && !r.held, 'weight: the tire came off the rack with a full belt: ' + JSON.stringify(r));
-  check(r.buzz.filter(b => b.strength === 1).length >= 1, 'weight: no warning buzz when the belt refused the tire');
-  await reachOk('rack and belt');
+  check(r.ring === PAL.red, 'one at a time: the ring on a second tool should be red while the other hand holds one: ' + r.ring);
+  check(!r.held && g.held === 'brush' && g.tools.welder.at === 'loose', 'one at a time: the left hand took the welder with the brush in the right: ' + JSON.stringify(r.held));
+  check(r.buzz.filter(b => b.strength === 1).length >= 1, 'one at a time: no warning buzz when the second tool was refused');
+  // Drop it: it falls to the floor, comes to rest, and the server (and Mission Ops' tool log) hears where.
+  const dropAt = await P(async () => {
+    const v = window.vr, mb = window.moonbase, at = v.wp(mb.camera).add(v.V(0.45, -0.6, -0.1).applyQuaternion(mb.rig.quaternion));
+    await v.move('right', at, 6); await v.frames(2);
+    v.grip('right', false);
+    for (let i = 0; i < 200 && !(v.pose('brush')?.asleep); i++) await v.frames(1);
+    await v.sleep(300);
+    const p = v.pose('brush');
+    return { x: p.x, y: p.y, z: p.z, asleep: p.asleep, place: p.place };
+  });
+  check(dropAt.asleep && dropAt.place === 'hall' && dropAt.y < 0.15, 'drop: the brush did not fall to the hall floor and settle: ' + JSON.stringify(dropAt));
+  check(await serverUntil(() => g.held === null && g.tools.brush.at === 'loose' && g.tools.brush.inside && Math.hypot(g.tools.brush.x - dropAt.x, g.tools.brush.z - dropAt.z) < 0.05, 3),
+    'drop: the server did not hear where the brush came to rest: ' + JSON.stringify(g.tools.brush));
+  check(!!g.tools.brush.area, 'drop: the brush has no area for the tool log');
+  // Throw it: grab, swing the hand up the hall and let go mid-swing. It flies, lands and rolls on.
+  r = await grabTool('right', 'brush');
+  check(r.held === 'brush', 'throw: could not pick the brush up off the floor: ' + JSON.stringify(r));
+  const thrown = await P(async () => {
+    const v = window.vr, mb = window.moonbase, head = v.wp(mb.camera), q = mb.rig.quaternion;
+    const from = head.clone().add(v.V(0.25, -0.35, 0.1).applyQuaternion(q)), to = head.clone().add(v.V(0.25, 0.05, -0.55).applyQuaternion(q));
+    await v.move('right', from, 4);
+    await v.move('right', to, 3);
+    const start = v.wp(mb.fx.tools.brush);
+    v.grip('right', false);
+    for (let i = 0; i < 400 && !(v.pose('brush')?.asleep); i++) await v.frames(1);
+    const p = v.pose('brush');
+    return { flew: Math.hypot(p.x + 500 - start.x, p.z - start.z), y: p.y, asleep: p.asleep, buzz: v.haptics() };
+  });
+  check(thrown.flew > 1 && thrown.asleep, 'throw: a brush let go mid-swing should fly more than a metre and settle: ' + JSON.stringify(thrown));
+  check(thrown.buzz.some(b => b.side === 'right' && b.strength >= 0.8), 'throw: no buzz in the hand on the throw');
+  check(await serverUntil(() => g.tools.brush.at === 'loose' && g.tools.brush.inside, 3), 'throw: the server did not hear where the thrown brush landed');
+  await reachOk('tools in the hall');
 
   // ---------- 2. sweeping the brush ----------
   step('2. sweeping the brush');
@@ -252,8 +283,8 @@ try {
     }
   }, { pn, gap });
   await stand(panels[0].x + panels[0].nx * 0.62, panels[0].z + panels[0].nz * 0.62, panels[0].x, panels[0].z);
-  r = await grabTool('right', 'brush');
-  check(r.held === 'brush', 'brush: could not take the brush off the belt at the panels');
+  await kit('brush');
+  check(await P(() => window.vr.holding('right')?.id) === 'brush', 'brush: could not put the brush in the right hand at the panels');
   await sweep(0, 0.35);
   await page.waitForTimeout(300);
   check(g.faults.dust.cells.every(Boolean), 'brush: waving the brush 35 cm off the panel cleaned it');
@@ -279,8 +310,8 @@ try {
   await P(() => window.vr.frames(3));
   const crack = await P(() => { const c = window.moonbase.world.fixtures.crack.userData; return { x: c.centre.x, z: c.centre.z, nx: c.normal.x, nz: c.normal.z }; });
   await stand(crack.x + crack.nx * 0.7, crack.z + crack.nz * 0.7, crack.x, crack.z);
-  r = await grabTool('right', 'welder');
-  check(r.held === 'welder', 'weld: could not take the welder off the belt');
+  await kit('welder');
+  check(await P(() => window.vr.holding('right')?.id) === 'welder', 'weld: could not put the welder in the right hand');
   const weld = (point, seconds) => P(async ({ point, seconds }) => {
     const v = window.vr, mb = window.moonbase, c = mb.world.fixtures.crack.userData;
     const at = mb.world.fixtures.crackPts[point].clone().addScaledVector(c.normal, 0.03);
@@ -311,17 +342,26 @@ try {
 
   // ---------- 4. pushing plugs into sockets (inside the habitat) ----------
   step('4. pushing plugs into sockets');
-  // In through the airlock: point the right controller at the hatch and pull the trigger.
-  await stand(0, 5.2, 0, 0);
-  await P(async () => {
-    const v = window.vr, at = v.wp(window.moonbase.camera).add(v.V(0.2, -0.4, -0.3));
-    v.hand('right', at, v.V(0, 1.2, 3.35).sub(at));
-    await v.frames(3);
-    window.fakeXR.trigger('right', true); await v.frames(2); window.fakeXR.trigger('right', false);
-    for (let i = 0; i < 100 && window.moonbase.where() !== 'in'; i++) await v.sleep(50);
-    await v.frames(3);
+  // In through the airlock: walk into airlock S's chamber. The hatch behind shuts, the head is moved to
+  // the chamber's twin in the hall without moving in the chamber, the air comes back, the hatch in front opens.
+  await kit();
+  await stand(0.1, 3.25, 0.1, 0);
+  r = await P(async () => {
+    const v = window.vr, mb = window.moonbase;
+    const local = () => { const ch = (mb.where() === 'in' ? mb.interior.doors : mb.world.doors).S; return ch.root.worldToLocal(v.wp(mb.camera)); };
+    const before = local(), seen = new Set();
+    let swapped = null;
+    for (let i = 0; i < 600 && (mb.where() !== 'in' || mb.airlock()); i++) {
+      await v.frames(1); const a = mb.airlock(); if (a) seen.add(a.step);
+      if (!swapped && mb.where() === 'in') swapped = local().distanceTo(before);
+    }
+    return { where: mb.where(), steps: [...seen], jump: swapped, inner: mb.interior.doors.S.innerT, pose: mb.myPose() };
   });
-  check(await P(() => window.moonbase.where()) === 'in', 'airlock: pointing at the hatch and pulling the trigger did not go inside');
+  check(r.where === 'in', 'airlock: walking into airlock S did not take the astronaut inside: ' + JSON.stringify(r));
+  check(['close', 'repress', 'open'].every(k => r.steps.includes(k)), 'airlock: the cycle skipped a step (close, repress, open): ' + JSON.stringify(r.steps));
+  check(r.jump !== null && r.jump < 0.01, `airlock: the head moved ${r.jump} m in the chamber at the swap; it must not move at all`);
+  check(r.inner > 0.99, 'airlock: the inner hatch did not open onto the hall');
+  check(r.pose.inside && r.pose.door === 'S', 'airlock: the pose sent to the server does not say inside, at door S: ' + JSON.stringify(r.pose));
   g.break('board');
   await P(() => window.vr.until(s => s.scene.board, 3));
   check(await P(async () => { for (let i = 0; i < 120 && window.moonbase.interior.phase !== 'backup'; i++) await window.vr.sleep(50); return window.moonbase.interior.phase; }) === 'backup', 'board: the hall did not go to its red backup lights when the switchboard tripped');
@@ -370,7 +410,18 @@ try {
   check(await P(async () => { for (let i = 0; i < 120 && window.moonbase.interior.phase !== 'main'; i++) await window.vr.sleep(50); return window.moonbase.interior.phase; }) === 'main', 'board: the roof lights did not come back');
   await reachOk('the switchboard');
   check(sheltered(g.astro, g.rover), 'inside the habitat should count as cover from a meteor shower');
-  await P(async () => { window.moonbase.place('out'); await window.vr.frames(3); });
+  // And out again through the east door: the twin on the hall's east wall comes out at the long module's end.
+  r = await P(async () => {
+    const v = window.vr, mb = window.moonbase, ch = mb.interior.doors.E;
+    ch.root.updateWorldMatrix(true, false);
+    const p = ch.root.localToWorld(v.V(0, 0, 0.65));
+    await v.stand(p.x, p.z, p.x + 1, p.z);
+    for (let i = 0; i < 600 && (mb.where() !== 'out' || mb.airlock()); i++) await v.frames(1);
+    const head = v.wp(mb.camera);
+    return { where: mb.where(), x: head.x, z: head.z, door: mb.door(), outer: mb.world.doors.E.outerT };
+  });
+  check(r.where === 'out' && r.door === 'E' && Math.abs(r.x - (PLACES.doors.E.x + 0.65)) < 0.2 && Math.abs(r.z - PLACES.doors.E.z) < 0.2 && r.outer > 0.99,
+    'airlock: going out through the hall\'s east door should leave you in airlock E outside, its outer hatch open: ' + JSON.stringify(r));
 
   // ---------- 5. pulling the wheel, fitting the tire ----------
   step('5. pulling the wheel');
@@ -405,44 +456,40 @@ try {
   check(r.buzz >= 3, 'wheel: no buzz in the hand as the wheel resisted');
   check(r.lying < 0.25, 'wheel: once off, the old wheel should be lying on the ground');
   await reachOk('pulling the wheel');
-  // Back to the locker for the tire: the belt has to be lightened first.
-  await kit('patch');
-  await faceTool('tire');
-  r = await P(async () => {
-    const v = window.vr, mb = window.moonbase;
-    await v.move('right', v.wp(mb.fx.tools.tire).add(v.V(0.15, 0.2, 0.15)), 6); await v.frames(2);
-    v.grip('right', true);
-    await v.until(s => s.belt.includes('tire'), 3); await v.frames(2);
-    return { held: v.holding('right')?.id, parent: v.parentOf('tire') };
-  });
-  check(r.held === 'tire' && r.parent === 'hand:right', 'tire: could not carry the tire off the rack in the hand: ' + JSON.stringify(r));
+  // The tire is found loose (here, lying on the regolith beside the rover) and picked up by its rim.
+  await lay('tire', false, hubAt.x + hubAt.ox * 1.0 + 0.3, hubAt.z + hubAt.oz * 1.0);
+  await stand(hubAt.x + hubAt.ox * 1.5 + 0.3, hubAt.z + hubAt.oz * 1.5, hubAt.x + hubAt.ox * 1.0 + 0.3, hubAt.z + hubAt.oz * 1.0, 1.35);
+  r = await grabTool('right', 'tire', [0, 0.25, 0]);
+  check(r.held === 'tire' && r.parent === 'hand:right', 'tire: could not pick the tire up by its rim: ' + JSON.stringify(r));
   await reachOk('taking the tire');
   await stand(hubAt.x + hubAt.ox * 0.7, hubAt.z + hubAt.oz * 0.7, hubAt.x, hubAt.z, 1.5);
   check(await P(() => window.vr.holding('right')?.id) === 'tire', 'tire: it fell out of the hand on the walk to the rover');
-  await P(async ({ ox, oz }) => {
-    const v = window.vr, mb = window.moonbase, hub = v.wp(mb.world.fixtures.hub), into = v.V(-ox, 0, -oz);
-    // The wheel is carried out in front of the hand, by its rim: lower it on to the hub from above.
-    const down = v.V(-ox * 0.5, -1, -oz * 0.5).normalize();
-    await v.move('right', hub.clone().addScaledVector(down, -0.8), 6, down);
-    await v.move('right', hub.clone().addScaledVector(down, -0.4), 8, down);
-    await v.until(s => s.scene.wheel === 0, 2);
+  await P(async () => {
+    const v = window.vr, mb = window.moonbase, hub = v.wp(mb.world.fixtures.hub);
+    // The tire hangs from the hand where it was gripped (and swings after it: it is heavy). Bring its
+    // middle down on to the bare hub, and hold it there a moment.
+    const off = v.wp(mb.fx.tools.tire).sub(v.where('right'));
+    await v.move('right', hub.clone().sub(off).add(v.V(0, 0.4, 0)), 6);
+    await v.move('right', hub.clone().sub(off), 8);
+    for (let i = 0; i < 30 && mb.state().scene.wheel !== 0; i++) await v.frames(1);
     v.grip('right', false); await v.frames(2);
-  }, hubAt);
+  });
   check(await serverUntil(() => !g.faults.wheel), 'tire: offering the tire up to the bare hub did not fit it');
-  check(!g.belt.includes('tire') && await P(() => window.vr.parentOf('tire')) === 'nowhere', 'tire: once fitted it should be gone from the belt and the hand');
+  check(g.tools.tire.at === 'gone' && !g.held && await P(() => window.vr.parentOf('tire')) === 'nowhere', 'tire: once fitted it should be gone from the hand and the world');
   await reachOk('fitting the tire');
 
   // ---------- 6. the generator cord ----------
   step('6. the generator cord');
-  await kit('gen', 'patch');
+  await kit();
   await stand(0, 9, 0, 0);
+  await lay('gen', false, 0.35, 8.45); // set down at the work
   g.break('dust'); g.battery = 0;
   check(await serverUntil(() => g.blackout && !g.powered), 'generator: could not black the base out for the test');
   check(await P(() => window.vr.until(s => !s.powered, 3).then(() => window.moonbase.radioState().shown)) === 'dead', 'blackout: the radio should read NO SIGNAL');
   await P(() => window.vr.haptics());
   r = await P(async () => {
     const v = window.vr, mb = window.moonbase;
-    const at = v.wp(mb.fx.tools.gen);
+    const at = v.wp(mb.fx.tools.gen.userData.handle);
     await v.move('left', at, 6); await v.frames(2);
     const ring = v.ring('left');
     v.grip('left', true); await v.frames(2);
@@ -450,16 +497,16 @@ try {
     const up = at.clone().add(v.V(0, 0.25, 0));
     await v.move('left', up, 6);
     const cord = mb.scene.children.some(o => o.isLine && o.visible && o.name === 'Cord_Pull');
-    const early = mb.state().belt.includes('gen');
+    const early = mb.state().tools.gen.at !== 'gone';
     await v.move('left', at.clone().add(v.V(0.1, 0.44, -0.05)), 6);
-    await v.until(s => !s.belt.includes('gen'), 2);
+    await v.until(s => s.tools.gen.at === 'gone', 2);
     v.grip('left', false); await v.frames(2);
     return { ring, held, cord, early, buzz: v.haptics() };
   });
-  check(r.ring && r.held === 'cord', 'generator: could not get hold of the generator on the belt: ' + JSON.stringify({ ring: r.ring, held: r.held }));
+  check(r.ring && r.held === 'cord', 'generator: could not get hold of the pull handle on the generator: ' + JSON.stringify({ ring: r.ring, held: r.held }));
   check(r.cord, 'generator: no cord is drawn between the generator and the hand');
   check(r.early, 'generator: it started after only 25 cm of cord');
-  check(g.genLeft > 0 && g.powered && !g.belt.includes('gen'), 'generator: a full pull of the cord did not start it');
+  check(g.genLeft > 0 && g.powered && g.tools.gen.at === 'gone', 'generator: a full pull of the cord did not start it');
   check(r.buzz.length >= 3 && r.buzz.some(b => b.strength === 1), 'generator: no buzz building up as the cord came out');
   check(await P(() => window.vr.until(s => s.powered, 3).then(() => window.moonbase.radioState().shown)) !== 'dead', 'generator: the radio did not come back');
   delete g.faults.dust; g.battery = 100; g.blackout = false; g.genLeft = 0;
@@ -484,7 +531,7 @@ try {
     v.grip(hand, true); await v.frames(3);
     const held = v.holding(hand)?.id, spotOn = mb.fx.spot.parent?.userData?.hand;
     const spot = v.wp(mb.fx.spot);
-    // Out to the side and up, so the patch does not brush the leak on its way from the belt, then over it.
+    // Out to the side and up, so the patch does not brush the leak on its way, then over it.
     const out = v.V(hand === 'right' ? 0.35 : -0.35, 0, 0).applyQuaternion(mb.rig.quaternion);
     await v.move(hand, v.where(hand).add(out), 4, v.V(0, -1, 0));
     await v.move(hand, spot.clone().add(out).add(v.V(0, 0.3, 0)), 5, v.V(0, -1, 0), 'patch');
@@ -499,6 +546,7 @@ try {
   check(r.held === 'patch' && r.early, 'patch: could not hold the patch kit, or it worked from 30 cm away: ' + JSON.stringify(r));
   check(await serverUntil(() => !g.faults.suit), 'patch: pressing the patch on the spot did not seal the leak');
   // Patch kit in the left hand: the spot moves to the right arm.
+  await kit('patch', 'left');
   g.break('suit', true);
   await P(() => window.vr.until(s => s.suit, 3));
   r = await patch('left', 'right');
@@ -570,10 +618,10 @@ try {
   await shower(1);
   check(g.stats.hits === hits + 1, 'cover: crouching out in the open should not be cover');
   delete g.faults.suit; hits = g.stats.hits;
-  // Under the canopy, standing.
-  await stand(0, 4.4, 0, 0, 1.7);
+  // Inside the habitat, standing.
+  await stand(HALL_X, -2, HALL_X, -6, 1.7);
   await shower(1);
-  check(g.stats.hits === hits, 'cover: standing under the airlock canopy should be safe');
+  check(g.stats.hits === hits, 'cover: standing inside the habitat should be safe');
   // Height is relative: a small player (1.3 m standing) is not crouching just by being short...
   await P(() => window.vr.T && (window.moonbase.resetStanding?.()));
   await stand(...beside, 1.3);
@@ -589,13 +637,14 @@ try {
   await P(async () => { window.fakeXR.kind('left', 'hand'); window.fakeXR.kind('right', 'hand'); await window.vr.frames(8); });
   check(await P(() => window.moonbase.controllers.every(c => c.userData.isHand)), 'hands: the page did not notice the controllers were put down');
   check(await P(() => window.moonbase.fx.gloves.every(gl => !gl.visible)), 'hands: the controller gloves are still drawn over tracked hands');
-  await faceTool('brush');
-  r = await grabTool('right', 'brush'); // grip() pinches when the hand is bare
-  check(r.ring && r.held === 'brush' && r.parent === 'hand:right', 'hands: a pinch on the brush did not take it off the rack: ' + JSON.stringify(r));
-  await letGo('right');
-  check(g.belt.includes('brush') && await P(() => window.vr.parentOf('brush')) === 'belt', 'hands: letting the pinch go did not put the brush on the belt');
-  // Holding a tool in one hand and pinching the other in empty air must not start the visor zoom.
   await stand(0, 9, 0, 0);
+  await lay('brush', false, 0.25, 8.45);
+  r = await grabTool('right', 'brush'); // grip() pinches when the hand is bare
+  check(r.ring && r.held === 'brush' && r.parent === 'hand:right', 'hands: a pinch on the brush did not pick it up: ' + JSON.stringify(r));
+  await letGo('right');
+  check(await serverUntil(() => g.tools.brush.at === 'loose') && await P(() => window.vr.parentOf('brush')) === 'loose', 'hands: letting the pinch go did not put the brush down');
+  // Holding a tool in one hand and pinching the other in empty air must not start the visor zoom.
+  await P(() => window.vr.sleep(1500));
   r = await grabTool('right', 'brush');
   r = await P(async () => {
     const v = window.vr, mb = window.moonbase, X = window.fakeXR;
@@ -613,7 +662,7 @@ try {
   // With both hands empty, the two-handed pinch still zooms, and a right pinch at the ground still teleports on release.
   r = await P(async () => {
     const v = window.vr, mb = window.moonbase, X = window.fakeXR, head = v.wp(mb.camera);
-    // Hands held up at chest height, in view. (Down at the waist, a pinch takes a tool off the belt instead.)
+    // Hands held up at chest height, in view, clear of anything to pick up.
     const at = dx => head.clone().add(v.V(dx, -0.2, 0).applyQuaternion(mb.rig.quaternion)).add(v.V(0, 0, -0.4).applyQuaternion(mb.rig.quaternion));
     v.hand('left', at(-0.1)); v.hand('right', at(0.1)); await v.frames(2);
     X.pinch('right', true); await v.frames(1);
@@ -711,7 +760,7 @@ try {
   // Everything above ran with the drawing skipped. Draw the scene for real, both eyes, with a tool in
   // each hand, and make sure WebGL has no complaint.
   await P(async () => { window.fakeXR.kind('left', 'controller'); window.fakeXR.kind('right', 'controller'); await window.vr.frames(8); });
-  await kit('welder', 'brush', 'patch');
+  await kit();
   g.break('dust'); g.break('hull'); g.faults.hull.spot = 0; g.faults.hull.welded[0] = g.faults.hull.welded[1] = true;
   await P(() => window.vr.until(s => s.scene.dust && s.scene.hull, 3));
   const draw = async (name, pose) => {
@@ -729,7 +778,7 @@ try {
     if (out.url) fs.writeFileSync(path.join(OUT, `vr-${name}.png`), Buffer.from(out.url.split(',')[1], 'base64'));
   };
   await stand(crack.x + crack.nx * 0.7, crack.z + crack.nz * 0.7, crack.x, crack.z);
-  await grabTool('right', 'welder');
+  await kit('welder');
   await draw('welding', async () => {
     const v = window.vr, mb = window.moonbase, c = mb.world.fixtures.crack.userData;
     await v.move('right', mb.world.fixtures.crackPts[2].clone().addScaledVector(c.normal, 0.03), 4, c.normal.clone().negate().add(v.V(0, -0.3, 0)), 'welder');
@@ -739,24 +788,32 @@ try {
   await letGo('right');
   if (SHOTS) {
     await kit();
-    await faceTool('patch');
-    await draw('rack', async () => {
+    // Finding the tools in the hall: reaching for the patch kit by the lockers.
+    const patchSpot = PLACES.toolSpots[PLACES.demoTools.patch];
+    await lay('patch', true, patchSpot.x, patchSpot.z);
+    await stand(HALL_X + patchSpot.x - 0.7, patchSpot.z + 0.6, HALL_X + patchSpot.x, patchSpot.z);
+    await draw('hall-tools', async () => {
       const v = window.vr, mb = window.moonbase;
-      await v.move('right', v.wp(mb.fx.tools.welder).add(v.V(0.03, -0.02, 0.12)), 4, v.V(0, 0, -1));
-      v.hand('left', v.wp(mb.camera).add(v.V(-0.25, -0.45, -0.35)), v.V(0, 0.2, -1));
-      window.fakeXR.head(0, 1.7, 0, 0, -0.2);
+      await v.move('right', v.wp(mb.fx.tools.patch).add(v.V(-0.05, 0.12, 0.05)), 4, v.V(0.3, -1, -0.3));
+      window.fakeXR.head(0, 1.7, 0, 0, -0.55);
       await v.frames(3);
     });
-    await kit('welder', 'brush', 'patch');
-    await draw('belt', async () => {
+    // The porthole in airlock S's inner hatch, from outside: the hall, live, behind the glass.
+    await draw('porthole', async () => {
       const v = window.vr;
-      await v.stand(0, 9, 0, 0);
-      v.hand('right', v.wp(window.moonbase.fx.tools.brush).add(v.V(0, 0.06, 0.02)), v.V(0, -1, -0.3));
-      window.fakeXR.head(0, 1.7, 0, 0, -1.05);
+      await v.stand(0.35, 4.6, 0, 2.6);
+      window.fakeXR.head(0, 1.7, 0, 0, -0.08);
+      await v.frames(4);
+    });
+    // The hall's window, looking out at the Moon.
+    await draw('window', async () => {
+      const v = window.vr;
+      await v.stand(HALL_X + 1.6, -1.1, HALL_X + 1.9, 0);
+      window.fakeXR.head(0, 1.7, 0, 0, 0.0);
       await v.frames(4);
     });
     await stand(panels[1].x + panels[1].nx * 0.62, panels[1].z + panels[1].nz * 0.62, panels[1].x, panels[1].z);
-    await grabTool('right', 'brush');
+    await kit('brush');
     await draw('brushing', async () => {
       const v = window.vr, F = window.moonbase.world.fixtures, c = F.dustCells[6 + 1], n = c.getWorldDirection(new v.T.Vector3());
       await v.move('right', v.wp(c).addScaledVector(n, 0.04), 6, n.clone().negate(), 'brush');
@@ -764,7 +821,7 @@ try {
     });
     await letGo('right');
     // Inside, a plug in the hand on its way to a socket.
-    await P(async () => { window.moonbase.place('in'); await window.vr.frames(3); });
+    await kit();
     g.break('board');
     await P(() => window.vr.until(s => s.scene.board, 3));
     await stand(boardAt.x + boardAt.nx * 0.75, boardAt.z + boardAt.nz * 0.75, boardAt.x, boardAt.z);
@@ -780,9 +837,9 @@ try {
       window.fakeXR.head(0, 1.7, 0, 0, -0.25);
       await v.frames(3);
     });
-    await P(async () => { window.vr.grip('right', false); await window.vr.frames(2); window.moonbase.place('out'); await window.vr.frames(3); });
+    await P(async () => { window.vr.grip('right', false); await window.vr.frames(2); });
     delete g.faults.board;
-    // The base, from the spawn side.
+    // The base, from the south.
     await draw('base', async () => {
       const v = window.vr;
       await v.stand(1.2, 10.5, -0.6, 0);

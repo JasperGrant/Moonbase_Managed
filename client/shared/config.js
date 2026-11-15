@@ -18,8 +18,7 @@ export const CFG = {
   blackoutEndsAt: 10,         // battery % at which a blackout lifts
   generatorSeconds: 25,       // power from one pull of the backup generator
 
-  beltCapacity: 4,            // weight units the astronaut can carry
-  tireRestockSeconds: 30,     // a new space tire appears in the locker this long after one is fitted
+  tireRestockSeconds: 30,     // a new space tire turns up at the cargo end of the hall this long after one is fitted
 
   meteorWarnSeconds: 15,      // radar warning before the first impact
   meteorSeconds: 8,           // how long a shower lasts
@@ -31,7 +30,12 @@ export const CFG = {
   roverSpeed: 2.7,            // m/s, about 6 mph (crewed lunar terrain vehicle class)
   bounds: 22,                 // metres from the habitat that players and rover may go
   habRadius: 2.9,
-  spawn: { x: -3.6, z: 7.0 }, // facing the tool locker
+  // The astronaut starts inside the hall (room coordinates, see client/interior.js), facing up it, with
+  // the tools lying round. The server sees them at door S until they go out.
+  spawn: { inside: true, x: 0, z: -1.3, door: 'S' },
+  // The airlock cycle, seconds (client/airlock.js): stand in the chamber, a hatch swings shut, the air
+  // hisses, the other hatch swings open.
+  airlock: { dwell: 0.3, close: 1.0, repress: 1.2, open: 1.0, abort: 0.6 },
 
   // Free play: after the scripted opening, random faults and showers.
   freeFaultEvery: [25, 35],   // seconds between random faults
@@ -51,14 +55,15 @@ export const CFG = {
 export const CREW = ['astronaut', 'ops', 'sci', 'tech'];
 export const covers = (held, role) => held === role || (held === 'all' && role !== 'astronaut');
 
-// The tool belt. Welder + brush + patch kit fill it exactly, so the tire or the
-// generator always means leaving something behind.
+// The tools. The astronaut holds one at a time, in the hand: to take another, put the first one down.
+// They start scattered round the hall (PLACES.toolSpots) and obey physics (client/physics.js).
+// mass is in kilograms, for the physics only.
 export const TOOLS = {
-  brush:  { name: 'Brush',            weight: 1 },
-  patch:  { name: 'Patch kit',        weight: 1 },
-  welder: { name: 'Welder',           weight: 2 },
-  tire:   { name: 'Space tire',       weight: 3 },
-  gen:    { name: 'Backup generator', weight: 3 },
+  brush:  { name: 'Brush',            mass: 0.4 },
+  patch:  { name: 'Patch kit',        mass: 0.8 },
+  welder: { name: 'Welder',           mass: 3.5 },
+  tire:   { name: 'Space tire',       mass: 12 },
+  gen:    { name: 'Backup generator', mass: 25 },
 };
 
 // What can break, the tool that fixes it, and the line for the results log.
@@ -78,15 +83,40 @@ export const CRACK_POINTS = 6;
 
 // Where things are. x/z in metres, north is -z. ry is the way a fixture faces: the astronaut
 // stands on its local +z side.
-const CRACK_ANGLES = [45, 135, 225, 255, 285, 315]; // degrees round the habitat's drum, clear of the airlock (+z) and the side modules (±x)
+const CRACK_ANGLES = [45, 140, 215, 245, 295, 320]; // degrees round the habitat's drum, clear of the four airlocks, the window and the side modules
 export const PLACES = {
-  locker: { x: -3.6, z: 4.6, ry: 0 },
-  // The switchboard is inside the habitat, on the west wall of the hall (client/interior.js). Indoors,
-  // the server sees the astronaut at the airlock, which is also under the canopy: inside is cover.
-  board:  { x: 0, z: 3 },
-  airlock: { x: 0, z: 3 },
+  // The switchboard is inside the habitat, on the west wall of the hall (client/interior.js). Inside
+  // (the hall or any airlock chamber) is cover from a meteor shower, and the only place the board is in reach.
+  board:  { x: 0, z: 0 },
+  // The four hatches on the habitat model, each a walk-in airlock into the hall. x/z is the hatch on the
+  // model's skin, ry turns the chamber so its open end (local +z) faces out. `hall` is the same chamber's
+  // twin on a wall of the hall, in room coordinates: the two are swapped while both hatches are shut.
+  doors: {
+    S: { x: 0,    z: 2.54,  ry: 0,            hall: { x: 0,    z: 0,   ry: 0 } },
+    N: { x: 0,    z: -2.54, ry: Math.PI,      hall: { x: 2.5,  z: -15, ry: Math.PI } },
+    W: { x: -3.4, z: 0.95,  ry: 0,            hall: { x: -3.5, z: -3,  ry: -Math.PI / 2 } },
+    E: { x: 7.4,  z: 0,     ry: Math.PI / 2,  hall: { x: 3.5,  z: -8,  ry: Math.PI / 2 } },
+  },
+  // The hall's window onto the Moon, and the painted window on the habitat (Segment C) it looks out of.
+  window: { hall: { x: 1.9, y: 1.7, z: 0, ry: 0 }, out: { x: -1.75, y: 2.1, z: 1.84, ry: -0.76 } },
+  // Where a tool can lie at the start of a mission, in room coordinates (y is the surface it lies on), and
+  // what Mission Ops' tool log calls the place.
+  toolSpots: [
+    { x: 0.55,  y: 0.96, z: -4.15, area: 'BENCH' },
+    { x: -0.35, y: 0.96, z: -4.2,  area: 'BENCH' },
+    { x: -1.4,  y: 0.96, z: -5.55, area: 'BENCH' },
+    { x: 2.45,  y: 0,    z: -2.1,  area: 'LOCKERS' },
+    { x: -2.7,  y: 0,    z: -4.3,  area: 'WEST DOOR' },
+    { x: 1.2,   y: 0,    z: -7.0,  area: 'HALL' },
+    { x: -3.2,  y: 1.78, z: -10.75, area: 'LIFE SUPPORT' },
+    { x: -0.5,  y: 0,    z: -11.0, area: 'NORTH END' },
+    { x: 2.5,   y: 0,    z: -13.4, area: 'CORRIDOR' },
+    { x: 2.9,   y: 0,    z: -10.4, area: 'EAST WALL' },
+  ],
+  // The demo mission always lays the tools out the same way (indexes into toolSpots); free play shuffles.
+  demoTools: { brush: 0, patch: 3, welder: 7, tire: 8, gen: 5 },
+  restock: 8, // a new tire turns up here
   panels: [{ x: 9, z: 8 }, { x: 9, z: 11 }, { x: 9, z: 14 }],
-  canopy: { x0: -1.5, x1: 1.5, z0: 2.6, z1: 5.8 },
   cracks: CRACK_ANGLES.map(deg => { const a = deg * Math.PI / 180; return { a, x: Math.cos(a) * 2.52, z: Math.sin(a) * 2.52 }; }),
   rover:  { x: 4, z: 9 },
   // Scenery only: nothing to fix here.

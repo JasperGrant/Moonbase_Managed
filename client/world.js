@@ -7,6 +7,7 @@ import { drawShape } from '/shared/icons.js';
 import { HORIZON, TERRAIN, SUN_AZ_DEG } from '/shared/horizon.js';
 import { PAL, CABLE_HEX } from '/shared/palette.js';
 import { loadPeriod, loadModel } from '/shared/assets.js';
+import { buildAirlock, CHAMBER } from '/airlock.js';
 
 // The base sits on the Connecting Ridge between Shackleton and de Gerlache craters at the lunar
 // south pole (89.45 S, 222.69 E), an Artemis III candidate region. The ground beyond the pad and
@@ -209,7 +210,6 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
   const orange = new THREE.MeshStandardMaterial({ color: PAL.hex.orange, roughness: 0.75 });
   const warmGlow = new THREE.MeshBasicMaterial({ color: 0xe8b872, toneMapped: false });
   const windowGlow = new THREE.MeshBasicMaterial({ color: 0xe8b872, toneMapped: false });
-  const shadowPaint = new THREE.MeshLambertMaterial({ color: PAL.hex.consoleDeep }); // tool outlines on the rack
 
   const mesh = (geo, mat, x = 0, y = 0, z = 0, parent = scene) => {
     const m = new THREE.Mesh(geo, mat);
@@ -258,7 +258,7 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
   }
   addCraters(0, 130, 3, 100);      // the mesh is fine enough for 3 m craters near the base
   addCraters(130, 1080, 10, 100);  // further out, 10 m and up; anything over 100 m is already in the DEM
-  const r0 = Math.hypot(CFG.spawn.x, CFG.spawn.z);
+  const r0 = 7.9; // the graded pad round the base, metres
   function craterHeight(x, z, r) {
     const gx = Math.floor((x + FIELD) / CELL), gz = Math.floor((z + FIELD) / CELL);
     if (gx < 0 || gz < 0 || gx >= NC || gz >= NC) return 0;
@@ -328,7 +328,7 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
 
   // ---------- rocks ----------
   // Two shapes (jagged, rounded), each displaced by noise, instanced many times.
-  const SITES = [PLACES.locker, ...PLACES.panels, PLACES.rover, PLACES.depot, PLACES.dish, PLACES.drill, CFG.spawn];
+  const SITES = [...Object.values(PLACES.doors).map(d => ({ x: d.x + Math.sin(d.ry) * 2, z: d.z + Math.cos(d.ry) * 2 })), ...PLACES.panels, PLACES.rover, PLACES.depot, PLACES.dish, PLACES.drill];
   const keepClear = (x, z, m) => Math.hypot(x, z) > 4.5 + m && SITES.every(s => Math.hypot(x - s.x, z - s.z) > 2.8 + m);
   function rockGeo(detail, amp, seed) {
     // Icosahedron geometry is unindexed (flat shaded); weld shared vertices first so normals smooth.
@@ -450,6 +450,7 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
   // swung open so you can look inside, and a porthole in the inner hatch that shows the hall itself
   // (astronaut.js renders the hall into it with a second camera).
   const hab = new THREE.Group();
+  const doors = {}, floods = [];
   {
     const CORE_X = 1.5; // the model's core is 1.5 m off its bounding-box centre
     loadModel(THREE, 'hab-module').then(m => {
@@ -474,55 +475,46 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
       return t;
     }
 
-    // The airlock vestibule: a painted steel box on the core's door, open at the front.
-    const AZ0 = 2.62, AZ1 = 3.45, AW = 1.5, AH = 2.4, FLOOR = 0.36; // back (in the core wall), front, width, height, floor
-    const vest = new THREE.Group(); vest.name = 'Airlock'; hab.add(vest);
-    const inside = new THREE.MeshStandardMaterial({ map: panelTex, color: PAL.hex.enamel, roughness: 0.8, metalness: 0.1, emissive: 0x4a3f2c }); // lit by its own lamp
-    const shell = new THREE.MeshStandardMaterial({ map: panelTex, color: PAL.hex.enamel, roughness: 0.8, metalness: 0.1 });
-    const D = AZ1 - AZ0, zc = (AZ0 + AZ1) / 2;
-    for (const sx of [-1, 1]) mesh(new THREE.BoxGeometry(0.08, AH, D), shell, sx * (AW / 2 + 0.04), FLOOR + AH / 2 - 0.1, zc, vest); // side walls
-    for (const sx of [-1, 1]) mesh(new THREE.PlaneGeometry(D, AH - 0.1), inside, sx * (AW / 2 - 0.001), FLOOR + AH / 2 - 0.1, zc, vest).rotation.y = -sx * Math.PI / 2;
-    mesh(new THREE.BoxGeometry(AW + 0.16, 0.1, D + 0.05), shell, 0, FLOOR + AH - 0.05, zc, vest);                  // roof
-    mesh(new THREE.PlaneGeometry(AW, D), inside, 0, FLOOR + AH - 0.101, zc, vest).rotation.x = Math.PI / 2;
-    mesh(new THREE.BoxGeometry(AW + 0.16, FLOOR, D + 0.05), grey, 0, FLOOR / 2, zc, vest);                         // floor plinth
-    const grate = canvasTexture(THREE, 128, 128, (d, w, h, g) => { g.fillStyle = PAL.consoleDeep; g.fillRect(0, 0, w, h); g.strokeStyle = PAL.bezel; g.lineWidth = 3; for (let i = 0; i <= w; i += 16) { g.beginPath(); g.moveTo(i, 0); g.lineTo(i, h); g.stroke(); g.beginPath(); g.moveTo(0, i); g.lineTo(w, i); g.stroke(); } });
-    mesh(new THREE.PlaneGeometry(AW, D), new THREE.MeshStandardMaterial({ map: grate, roughness: 0.7, metalness: 0.5 }), 0, FLOOR + 0.002, zc, vest).rotation.x = -Math.PI / 2;
-    // The front frame, bevelled, round the open doorway.
-    {
-      const fr = new THREE.Shape(); fr.moveTo(-AW / 2 - 0.12, 0); fr.lineTo(AW / 2 + 0.12, 0); fr.lineTo(AW / 2 + 0.12, AH + 0.1); fr.lineTo(-AW / 2 - 0.12, AH + 0.1); fr.closePath();
-      const hole = new THREE.Path(), hw = 0.55, hh = 1.85, hr = 0.18; // a rounded door opening
-      hole.moveTo(-hw + hr, 0.1); hole.lineTo(hw - hr, 0.1); hole.quadraticCurveTo(hw, 0.1, hw, 0.1 + hr); hole.lineTo(hw, 0.1 + hh - hr); hole.quadraticCurveTo(hw, 0.1 + hh, hw - hr, 0.1 + hh);
-      hole.lineTo(-hw + hr, 0.1 + hh); hole.quadraticCurveTo(-hw, 0.1 + hh, -hw, 0.1 + hh - hr); hole.lineTo(-hw, 0.1 + hr); hole.quadraticCurveTo(-hw, 0.1, -hw + hr, 0.1);
-      fr.holes.push(hole);
-      const frame = mesh(new THREE.ExtrudeGeometry(fr, { depth: 0.08, bevelEnabled: true, bevelSize: 0.015, bevelThickness: 0.015, bevelSegments: 2 }), grey, 0, FLOOR - 0.1, AZ1 - 0.04, vest);
-      frame.name = 'Doorway';
-      // The outer hatch, swung open on its hinge to the right, porthole and wheel on it.
-      const hinge = new THREE.Group(); hinge.position.set(hw + 0.02, FLOOR, AZ1 + 0.06); hinge.rotation.y = 1.9; vest.add(hinge);
-      const leaf = new THREE.Shape(); leaf.moveTo(0, 0); leaf.lineTo(-2 * hw, 0); leaf.lineTo(-2 * hw, hh); leaf.lineTo(0, hh); leaf.closePath();
-      const port = new THREE.Path(); port.absarc(-hw, 1.35, 0.17, 0, Math.PI * 2, true); leaf.holes.push(port);
-      const door = mesh(new THREE.ExtrudeGeometry(leaf, { depth: 0.07, bevelEnabled: true, bevelSize: 0.012, bevelThickness: 0.012, bevelSegments: 2 }), grey, 0, 0.1, 0, hinge);
-      door.name = 'Hatch_Outer';
-      mesh(new THREE.TorusGeometry(0.19, 0.03, 8, 24), steel, -hw, 1.45, 0.09, hinge);
-      mesh(new THREE.TorusGeometry(0.16, 0.025, 8, 20), steel, -hw, 0.95, 0.1, hinge).name = 'Wheel';
+    // The four airlocks: a walk-in chamber on each of the model's hatches (client/airlock.js), outer hatch
+    // standing open, a floodlight over it and a hazard-striped apron in front. Their twins are in the hall.
+    const apronTex = canvasTexture(THREE, 256, 128, (d, w2, h2, g) => {
+      g.fillStyle = PAL.hazard; g.fillRect(0, 0, w2, h2);
+      g.strokeStyle = '#2b2a26'; g.lineWidth = 22;
+      for (let i = -256; i < 512; i += 64) { g.beginPath(); g.moveTo(i, 0); g.lineTo(i + 128, 128); g.stroke(); }
+      g.fillStyle = '#35393f'; g.fillRect(16, 16, w2 - 32, h2 - 32);
+    });
+    const apronMat = new THREE.MeshStandardMaterial({ map: apronTex, roughness: 0.9, metalness: 0.05 });
+    for (const [id, d] of Object.entries(PLACES.doors)) {
+      const a = buildAirlock(THREE, { id, shell: true, castShadow: shadows });
+      a.root.position.set(d.x, 0, d.z); a.root.rotation.y = d.ry;
+      a.setOuter(1); a.setInner(0); a.setLamp('green'); a.setPressure(0);
+      hab.add(a.root);
+      doors[id] = a;
+      const D = CHAMBER.depth, H = CHAMBER.height;
+      mesh(new THREE.BoxGeometry(0.3, 0.12, 0.2), dark, 0, H + 0.2, D + 0.12, a.root);
+      mesh(new THREE.CircleGeometry(0.06, 12), warmGlow, 0, H + 0.139, D + 0.15, a.root).rotation.x = -Math.PI / 2;
+      // A real light over the main door only: every light costs the Quest on every pixel outside. The
+      // others have their lamp glowing and no light.
+      if (id === 'S') {
+        const flood = new THREE.SpotLight(PAL.hex.incandescent, 25, 10, 0.7, 0.6, 1.2);
+        flood.position.set(0, H + 0.1, D + 0.2); flood.target.position.set(0, 0, D + 3);
+        a.root.add(flood, flood.target);
+        floods.push(flood);
+      }
+      const apron = new THREE.Mesh(new THREE.PlaneGeometry(1.5, 0.9), apronMat);
+      apron.rotation.x = -Math.PI / 2; apron.position.set(0, 0.012, D + 0.5); apron.receiveShadow = true; a.root.add(apron);
     }
-    // Inside: a warm lamp in the roof, handrails, a status lamp, and the inner hatch with its porthole.
-    mesh(new THREE.BoxGeometry(0.5, 0.04, 0.16), warmGlow, 0, FLOOR + AH - 0.13, zc, vest);
-    for (const sx of [-1, 1]) tube(steel, [sx * 0.62, FLOOR + 0.8, AZ0 + 0.2], [sx * 0.62, FLOOR + 0.8, AZ1 - 0.15], 0.02, vest);
-    mesh(new THREE.BoxGeometry(1.2, 2.0, 0.08), inside, 0, FLOOR + 1.0, AZ0 + 0.04, vest);                          // inner hatch
-    mesh(new THREE.TorusGeometry(0.2, 0.035, 8, 24), steel, 0, FLOOR + 1.35, AZ0 + 0.09, vest);
-    const portal = mesh(new THREE.CircleGeometry(0.2, 32), new THREE.MeshBasicMaterial({ color: 0xe8b872, toneMapped: false }), 0, FLOOR + 1.35, AZ0 + 0.085, vest);
-    portal.name = 'Porthole_Inner'; portal.castShadow = false;
-    hab.userData.portal = portal; // astronaut.js draws the hall into it
-    const status = mesh(new THREE.SphereGeometry(0.035, 12, 8), new THREE.MeshBasicMaterial({ color: PAL.hex.green, toneMapped: false }), 0.48, FLOOR + 1.9, AZ0 + 0.1, vest);
-    status.name = 'Lamp_Status';
-    // The floodlight over the door, and the steps up to it.
-    mesh(new THREE.BoxGeometry(0.3, 0.12, 0.2), dark, 0, FLOOR + AH + 0.12, AZ1 + 0.1, hab);
-    mesh(new THREE.CircleGeometry(0.06, 12), warmGlow, 0, FLOOR + AH + 0.06, AZ1 + 0.15, hab).rotation.x = -Math.PI / 2;
-    const flood = new THREE.SpotLight(PAL.hex.incandescent, 25, 12, 0.7, 0.6, 1.2);
-    flood.position.set(0, 2.8, 3.55); flood.target.position.set(0, 0, 6);
-    hab.add(flood, flood.target);
-    hab.userData.flood = flood;
-    mesh(new THREE.BoxGeometry(1.4, 0.18, 0.4), grey, 0, 0.09, 3.7, hab); // a step up to the airlock floor
+    hab.userData.flood = floods[0];
+    // The habitat's painted windows get dark glass over them, so they read as windows and not stickers.
+    // The one on Segment C is the outside of the hall's window.
+    {
+      const W = PLACES.window.out;
+      const glass = mesh(new THREE.CircleGeometry(0.2, 24), new THREE.MeshStandardMaterial({ color: PAL.hex.whiteOff, roughness: 0.15, metalness: 0.4, emissive: 0x2a1e10 }), W.x, W.y, W.z, hab);
+      glass.rotation.y = W.ry; glass.position.x += Math.sin(W.ry) * 0.03; glass.position.z += Math.cos(W.ry) * 0.03; glass.castShadow = false;
+      glass.name = 'Window_SegmentC';
+      const ring = mesh(new THREE.TorusGeometry(0.21, 0.025, 8, 24), steel, glass.position.x, W.y, glass.position.z, hab);
+      ring.rotation.y = W.ry;
+    }
     // Mast on the dome with the tracking mount and its dish.
     tube(steel, [1.2, 5.6, 0], [1.2, 7.2, 0], 0.035, hab);
     const dish = mesh(new THREE.LatheGeometry(Array.from({ length: 12 }, (_, i) => new THREE.Vector2(i * 0.05, (i * 0.05) ** 2 * 0.5)), 24), whitePlain, 1.2, 7.3, 0, hab);
@@ -680,59 +672,6 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
     const lamp = new THREE.Mesh(new THREE.SphereGeometry(0.06, 12, 8), new THREE.MeshBasicMaterial({ color: PAL.hex.green, toneMapped: false }));
     lamp.position.set(0.45, 1.88, 0.06); board.add(lamp);
     board.userData.lamp = lamp;
-  }
-
-  // ---------- tool locker: an open rack beside the airlock. The tools themselves are added by stations.js ----------
-  const locker = fixture(PLACES.locker);
-  // Everything hangs between waist and shoulder height, so nothing has to be picked up off the floor:
-  // the tire on the left, the hand tools in the middle, the generator on its shelf on the right.
-  const lockerSlots = {
-    tire:   new THREE.Vector3(-0.85, 1.12, 0.2),
-    brush:  new THREE.Vector3(-0.2, 1.3, 0.14),
-    patch:  new THREE.Vector3(0.14, 1.46, 0.2),
-    welder: new THREE.Vector3(0.52, 1.5, 0.14),
-    gen:    new THREE.Vector3(0.98, 1.08, 0.22),
-  };
-  {
-    mesh(new THREE.BoxGeometry(2.7, 1.9, 0.08), whitePlain, 0, 1.0, 0, locker);
-    mesh(new THREE.BoxGeometry(2.8, 0.08, 0.5), orange, 0, 1.98, 0.2, locker);
-    mesh(new THREE.BoxGeometry(2.7, 0.08, 0.5), grey, 0, 0.1, 0.22, locker);        // floor
-    mesh(new THREE.BoxGeometry(0.6, 0.05, 0.45), grey, 1.03, 0.88, 0.22, locker);   // the generator's shelf
-    tube(steel, [-0.85, 1.12, 0.04], [-0.85, 1.12, 0.3], 0.03, locker);             // the peg the tire hangs on
-    for (const x of [-1.35, 1.35]) mesh(new THREE.BoxGeometry(0.06, 1.95, 0.5), grey, x, 1.0, 0.22, locker);
-  }
-  // Shadow board along the top of the rack: four NASA hand tools (docs/ASSETS.md), each on a peg over its
-  // painted outline. Scenery: they are not game tools, nothing picks them up.
-  for (const [id, x, rot] of [['wrench', -0.95, [Math.PI / 2, 0, Math.PI / 2, 'ZXY']], ['ratchet', -0.5, [Math.PI / 2, 0, Math.PI / 2, 'ZXY']],
-    ['hammer', 0.0, [Math.PI / 2, 0, Math.PI / 2, 'ZXY']], ['grease-gun', 0.62, [0, Math.PI / 2, 0, 'XYZ']]]) {
-    loadPeriod(THREE, id, { rough: 0.55, metal: 0.6, merge: true }).then(m => {
-      m.rotation.set(...rot); m.updateMatrix();
-      const depth = new THREE.Box3().setFromObject(m).getSize(new THREE.Vector3()).z;
-      m.position.set(x, 1.82, 0.046 + depth / 2);
-      const sil = m.clone(); sil.position.set(0, 0, 0); // the painted silhouette: the tool's own shape, flat, a little larger
-      sil.traverse(o => { if (o.isMesh) { o.material = shadowPaint; o.castShadow = false; } });
-      const outline = new THREE.Group(); outline.add(sil);
-      outline.position.set(x, 1.82, 0.041); outline.scale.set(1.1, 1.1, 0.02);
-      tube(steel, [x, 1.82, 0.04], [x, 1.82, 0.05 + depth], 0.006, locker);
-      locker.add(outline, m);
-    }).catch(e => console.warn(id, e));
-  }
-
-  // ---------- airlock canopy: the one roof on the base. Stand under it in a meteor shower. ----------
-  {
-    const c = PLACES.canopy, w = c.x1 - c.x0, z0 = 3.25, len = c.z1 - z0;
-    mesh(new THREE.BoxGeometry(w + 0.2, 0.1, len), whitePlain, 0, 2.62, z0 + len / 2);
-    mesh(new THREE.BoxGeometry(w + 0.2, 0.14, 0.08), orange, 0, 2.6, c.z1);
-    for (const x of [c.x0, c.x1]) tube(steel, [x, 0, c.z1 - 0.1], [x, 2.6, c.z1 - 0.1], 0.05);
-    const stripeTex = canvasTexture(THREE, 256, 256, (d, w2, h2, g) => {
-      g.fillStyle = PAL.hazard; g.fillRect(0, 0, w2, h2);
-      g.strokeStyle = '#2b2a26'; g.lineWidth = 26;
-      for (let i = -256; i < 512; i += 72) { g.beginPath(); g.moveTo(i, 0); g.lineTo(i + 256, 256); g.stroke(); }
-      g.fillStyle = '#35393f'; g.fillRect(22, 22, w2 - 44, h2 - 44);
-    });
-    const pad = new THREE.Mesh(new THREE.PlaneGeometry(w, len - 0.6), new THREE.MeshStandardMaterial({ map: stripeTex, roughness: 0.9 }));
-    pad.rotation.x = -Math.PI / 2; pad.position.set(0, 0.015, z0 + 0.6 + (len - 0.6) / 2); pad.receiveShadow = true;
-    scene.add(pad);
   }
 
   // ---------- hull crack: one crack, moved to whichever of the six spots is breached ----------
@@ -902,7 +841,8 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
   return {
     rover, avatar, sun, height, hab,
     // Handles for the astronaut's hands (stations.js). Vectors are local to their fixture group.
-    fixtures: { locker, lockerSlots, board, sockets, plugs, plugRest, dustCells, crack, crackPts, wheel: rover.userData.wheel, hub: rover.userData.hub },
+    doors, height,
+    fixtures: { board, sockets, plugs, plugRest, dustCells, crack, crackPts, wheel: rover.userData.wheel, hub: rover.userData.hub },
     // Call every frame.
     update(time) {
       earth.userData.clouds.rotation.y = time * 0.004;
@@ -916,7 +856,7 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
       // The habitat's own power shows from outside: with the switchboard tripped it is on red backup
       // lights, and in a blackout there is nothing at all. The floodlight is off in both.
       const backup = !!s.board && !s.dark;
-      hab.userData.flood.intensity = s.dark || s.board ? 0 : 25;
+      floods.forEach(f => { f.intensity = s.dark || s.board ? 0 : 25; });
       warmGlow.color.setHex(s.dark ? 0x120d05 : backup ? 0x3d1a14 : 0xe8b872);
       windowGlow.color.setHex(s.dark ? 0x120d05 : backup ? 0x5a2418 : 0xe8b872);
 

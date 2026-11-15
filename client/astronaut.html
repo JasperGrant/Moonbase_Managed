@@ -16,16 +16,16 @@
   #cross { position:fixed; left:50%; top:50%; width:6px; height:6px; margin:-3px; border-radius:50%; background:#fff; opacity:.7; pointer-events:none; }
   #err { color:var(--red); }
 </style>
-<script type="importmap">{ "imports": { "three": "/vendor/three/build/three.module.js", "three/addons/": "/vendor/three/examples/jsm/" } }</script>
+<script type="importmap">{ "imports": { "three": "/vendor/three/build/three.module.js", "three/addons/": "/vendor/three/examples/jsm/", "cannon-es": "/vendor/cannon-es/cannon-es.js" } }</script>
 </head>
 <body>
-<!-- The lobby, with the astronaut's own panel holding these steps. You ready up inside the headset. -->
+<!-- The lobby, with the astronaut's own panel holding these steps. Mission Ops calls you GO once you are suited up. -->
 <div id="gate"></div>
 <div id="gateActions">
   <div class="row"><button id="radioBtn" class="big">1. Turn on radio</button></div>
   <div class="row" id="step2" hidden><span id="vrSlot"></span><button id="deskBtn" class="big ghost">Play on this screen</button></div>
-  <span class="lb-hint">Put the headset on and enter VR, then pull the trigger on the READY board in front of you.</span>
-  <details id="how"><summary>Controls</summary>Nothing is drawn on your visor: your gauges are on your left wrist, and reading them is what turns the radio on.<br>Headset: raise your LEFT wrist like a watch, where you can read it = radio on (the microphone on it lights up), GRIP = grab a tool off the rack or your belt, LEFT trigger = radio without looking, RIGHT trigger = point at something close (the hatch, the READY board), left stick = walk, right stick = turn, A = jump. Crouch by crouching.<br>Bare hands: pinch on a thing = grab it, left wrist raised like a watch = radio on, left hand to helmet = radio without looking, point + pinch = use, pinch at the ground = teleport, pinch left + drag sideways = turn, pinch both empty hands and pull apart = zoom.<br>Desktop: click = take a tool or use it (hold to keep brushing or welding), hold Tab = radio + wrist gauges, WASD = walk, mouse = look, C = crouch, F = patch suit, G = generator, Space = jump.</details>
+  <span class="lb-hint">Put the headset on and enter VR. Mission Ops calls you GO from the ground.</span>
+  <details id="how"><summary>Controls</summary>Nothing is drawn on your visor: your gauges are on your left wrist, and reading them is what turns the radio on.<br>Headset: raise your LEFT wrist like a watch, where you can read it = radio on (the microphone on it lights up), GRIP = pick up a tool (one at a time; open your hand to drop it, swing and let go to throw), LEFT trigger = radio without looking, RIGHT trigger = point at something close, walk into an airlock to go in or out, left stick = walk, right stick = turn, A = jump. Crouch by crouching.<br>Bare hands: pinch on a thing = grab it, left wrist raised like a watch = radio on, left hand to helmet = radio without looking, point + pinch = use, pinch at the ground = teleport, pinch left + drag sideways = turn, pinch both empty hands and pull apart = zoom.<br>Desktop: click = pick up a tool or use it (hold to keep brushing or welding), Q = put the tool down, walk into an airlock to go through, hold Tab = radio + wrist gauges, WASD = walk, mouse = look, C = crouch, F = patch suit, G = generator, Space = jump.</details>
   <a class="lb-leave" href="/">Leave seat</a>
   <span id="err" class="lb-hint" style="color:var(--red)"></span>
 </div>
