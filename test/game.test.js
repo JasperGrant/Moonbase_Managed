@@ -11,7 +11,8 @@ const rng = () => (seed = (seed * 1664525 + 1013904223) % 4294967296) / 42949672
 const run = (g, seconds) => { for (let t = 0; t < Math.round(seconds * 10) && g.phase === 'run'; t++) g.tick(0.1); };
 const at = (g, p) => { g.astro = { ...g.astro, x: p.x, z: p.z, h: 1.65, inside: false }; };
 const inside = g => { g.astro = { ...g.astro, x: PLACES.doors.S.x, z: PLACES.doors.S.z, h: 1.65, inside: true, door: 'S' }; };
-const fresh = (mode = 'demo') => { const g = new Game(rng); g.setMode(mode); g.start(); g.script = []; return g; }; // no director: the test breaks things itself
+// no director: the test breaks things itself. Lookalikes on (the admin's switch off), so their rules are tested too.
+const fresh = (mode = 'demo') => { const g = new Game(rng); g.setMode(mode); g.setAllReal(false); g.start(); g.script = []; return g; };
 // Core a rock with the drill so it can be picked up: carry the drill to it (wherever it was), lock it on,
 // wait out the countdown. The core is left on the drill's tray; the drill stays on the rock.
 const core = (g, s) => {
@@ -312,7 +313,8 @@ const kit = (g, tool) => {
   assert.ok(!demoOrder(false).includes('wheel'), 'with rover faults off, no wheel ever breaks');
   // Lookalikes: in the field unless the admin makes every sample real, from the next mission.
   const field = allReal => { const d = new Game(rng); d.setAllReal(allReal); d.start(); return d; };
-  assert.ok(field(false).samples.some(x => x.kind === 'dud'), 'lookalikes lie in the field by default');
+  assert.equal(new Game(rng).allReal, true, 'all samples are real by default');
+  assert.ok(field(false).samples.some(x => x.kind === 'dud'), 'with the switch off, lookalikes lie in the field');
   const real = field(true);
   assert.ok(!real.samples.some(x => x.kind === 'dud') && real.view('sci').real === true, 'all samples real: no lookalikes, and the consoles are told');
   assert.ok(real.manifest.every(m => real.samples.some(x => x.kind === m.kind)), 'all samples real: every wanted kind still lies in the field');

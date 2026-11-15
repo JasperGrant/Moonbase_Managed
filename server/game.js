@@ -18,7 +18,7 @@ export class Game {
     this.evn = 0;
     this.mode = 'demo';
     this.roverFaults = false; // broken rover wheels: off unless the admin turns them on. Kept across missions, like the mode.
-    this.allReal = false;     // no lookalike samples in the field: the admin's switch, kept across missions too
+    this.allReal = true;      // no lookalike samples in the field (on unless the admin turns it off), kept across missions too
     this.reset();
   }
 
