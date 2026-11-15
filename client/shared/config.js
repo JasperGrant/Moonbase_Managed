@@ -11,7 +11,6 @@ export const CFG = {
   o2RefillPerSec: 3,          // inside the base, while it has power, the suit tops up (less any leak)
   leakMultiplier: 3,          // a leak drains oxygen this many times faster
   meteorHit: 20,              // oxygen lost when caught in the open
-  wrongPlug: 4,               // oxygen lost per cable pushed into the wrong socket
   fixPoints: 100,             // score per fault fixed
 
   batterySeconds: 60,         // 100% to 0% while a power fault is active
@@ -85,14 +84,11 @@ export const TOOLS = {
 // What can break, the tool that fixes it, and the line for the results log.
 export const FAULTS = {
   dust:  { name: 'Dusty solar panels',  tool: 'brush' },
-  board: { name: 'Tripped switchboard', tool: null },
   wheel: { name: 'Broken rover wheel',  tool: 'tire' },
   hull:  { name: 'Hull breach',         tool: 'welder' },
   suit:  { name: 'Suit leak',           tool: 'patch' },
 };
 
-export const CABLE_COLORS = ['red', 'blue', 'yellow', 'green'];
-export const SOCKET_SHAPES = ['triangle', 'circle', 'square', 'diamond'];
 export const DUST_COLS = 3, DUST_ROWS = 2, PANELS = 3;
 export const DUST_CELLS = PANELS * DUST_COLS * DUST_ROWS;
 export const CRACK_POINTS = 6;
@@ -101,9 +97,6 @@ export const CRACK_POINTS = 6;
 // stands on its local +z side.
 const CRACK_ANGLES = [45, 140, 215, 245, 295, 320]; // degrees round the habitat's drum, clear of the four airlocks, the window and the side modules
 export const PLACES = {
-  // The switchboard is inside the habitat, on the west wall of the hall (client/interior.js). Inside
-  // (the hall or any airlock chamber) is cover from a meteor shower, and the only place the board is in reach.
-  board:  { x: 0, z: 0 },
   // The four hatches on the habitat model, each a walk-in airlock into the hall. x/z is the hatch on the
   // model's skin, ry turns the chamber so its open end (local +z) faces out. `hall` is the same chamber's
   // twin on a wall of the hall, in room coordinates: the two are swapped while both hatches are shut.
@@ -156,7 +149,6 @@ export const SCRIPTS = {
     { ev: 'meteor' },
     { ev: 'hull' },
     { ev: 'suit' },
-    { ev: 'board' },
   ],
   // One scripted opener, then random.
   free: [

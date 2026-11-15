@@ -1,20 +1,5 @@
-// Small pictures drawn on a 2D canvas: the tools and the socket shapes. Mission control and the
+// Small pictures drawn on a 2D canvas: the tools. Mission control and the
 // astronaut both use them, so a welder looks like the same welder everywhere.
-
-// A socket shape, centred on (x, y), about `size` across.
-export function drawShape(g, shape, x, y, size, color) {
-  const r = size / 2;
-  g.save();
-  g.fillStyle = color;
-  g.beginPath();
-  if (shape === 'circle') g.arc(x, y, r * 0.9, 0, Math.PI * 2);
-  else if (shape === 'square') g.rect(x - r * 0.8, y - r * 0.8, r * 1.6, r * 1.6);
-  else if (shape === 'triangle') { g.moveTo(x, y - r); g.lineTo(x + r, y + r * 0.8); g.lineTo(x - r, y + r * 0.8); }
-  else if (shape === 'diamond') { g.moveTo(x, y - r); g.lineTo(x + r * 0.8, y); g.lineTo(x, y + r); g.lineTo(x - r * 0.8, y); }
-  g.closePath();
-  g.fill();
-  g.restore();
-}
 
 // A tool, centred on (x, y), about `size` across, in one colour (a silhouette).
 export function drawTool(g, tool, x, y, size, color) {

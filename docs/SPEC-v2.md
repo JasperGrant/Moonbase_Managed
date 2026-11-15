@@ -57,7 +57,7 @@ The Scientist sees the battery falling, plus two gauges: **solar input** and **b
 - Tool: brush.
 - Fix: sweep the brush across the panels. Each panel is a grid of 2 by 3 dust cells and a cell clears when the brush passes over it. Dust puffs away and blue panel shows through. The Scientist's solar gauge climbs as cells clear. Fixed when all 18 cells are clear.
 
-**2. Tripped switchboard.** Solar input is fine but board output is low.
+**2. Tripped switchboard.** *Removed: the switchboard was taken out of the game; dusty panels are the only power fault. See [SPEC-quest-fixes.md](SPEC-quest-fixes.md).* Solar input is fine but board output is low.
 
 - Where: a switchboard box inside the habitat, on the west wall of the hall, reached through the airlock (first drafted on the outer wall; moved when the hall was built). Three cables have popped out and hang loose. Red lamp on the box, and the hall drops to its red backup lights.
 - Tool: none, just hands.

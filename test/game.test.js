@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import { Game } from '../server/game.js';
 import { Hub } from '../server/hub.js';
-import { CFG, TOOLS, PLACES, SCRIPTS, DUST_CELLS, CRACK_POINTS, ROVERS, SAMPLES } from '../client/shared/config.js';
+import { CFG, TOOLS, FAULTS, PLACES, SCRIPTS, DUST_CELLS, CRACK_POINTS, ROVERS, SAMPLES } from '../client/shared/config.js';
 import { OBSTACLES, BOULDERS, FIELD, layField } from '../client/shared/field.js';
 import { sheltered } from '../client/shared/rules.js';
 
@@ -113,28 +113,14 @@ const kit = (g, tool) => {
   assert.ok(g.tools.tire.at === 'loose' && g.tools.tire.inside && g.tools.tire.area === 'CORRIDOR', 'a new tire turns up at the cargo end of the hall');
 }
 
-// ---------- the switchboard ----------
+// ---------- no switchboard: dust is the only power fault ----------
 {
   const g = fresh();
   g.break('board');
-  at(g, { x: 0, z: 3 });
-  g.act({ fix: 'board', cable: g.faults.board.cables.findIndex(c => !c.seated), socket: 0 });
-  assert.equal(g.stats.mistakes, 0, 'the board is inside: nothing happens from outside');
-  inside(g);
-  const cables = g.faults.board.cables;
-  assert.equal(cables.filter(c => !c.seated).length, 3);
-  const loose = cables.findIndex(c => !c.seated), full = cables.find(c => c.seated).socket;
-  const wrong = [0, 1, 2, 3].find(s => s !== cables[loose].socket && s !== full);
-  let o2 = g.oxygen;
-  g.act({ fix: 'board', cable: loose, socket: full });
-  assert.equal(g.oxygen, o2, 'a full socket is ignored');
-  g.act({ fix: 'board', cable: loose, socket: wrong });
-  assert.equal(g.oxygen, o2 - CFG.wrongPlug, 'a wrong socket costs oxygen');
-  assert.equal(g.view('sci').wiring.length, 3, 'the Scientist sees where each loose cable goes');
-  assert.ok(!JSON.stringify(g.view('astronaut').scene.board.filter(c => !c.seated)).match(/"socket":[0-9]/), 'the astronaut does not');
-  assert.equal(g.view('sci').power.board, 25, 'board output falls with the cables out');
-  cables.forEach((c, i) => g.act({ fix: 'board', cable: i, socket: c.socket }));
-  assert.ok(!g.faults.board, 'no tool needed, just hands');
+  assert.ok(!g.faults.board, 'there is no switchboard to trip');
+  assert.ok(!('board' in g.view('astronaut').scene), 'the astronaut sees no switchboard');
+  assert.ok(!('board' in g.view('sci').power) && !('wiring' in g.view('sci')), 'the Scientist has no board output and no wiring diagram');
+  assert.ok(!Object.keys(FAULTS).includes('board') && !SCRIPTS.demo.some(e => (e.after || []).includes('board')), 'free play and the demo never trip it');
 }
 
 // ---------- power: a flat battery darkens the base, and comms never fail ----------
@@ -446,13 +432,13 @@ const kit = (g, tool) => {
 // ---------- who sees what ----------
 {
   const g = fresh();
-  g.break('dust'); g.break('board'); g.break('hull'); g.break('suit'); // (the test forces what the director never would)
+  g.break('dust'); g.break('hull'); g.break('suit'); // (the test forces what the director never would)
   const only = (role, allowed) => { for (const k of Object.keys(g.view(role))) assert.ok(allowed.includes(k), `${role} sees ${k}`); };
   const common = ['t', 'n', 'phase', 'mode', 'crew', 'score', 'result', 'powered', 'ev', 'timeLeft', 'oxygen', 'o2Max', 'tally'];
   only('astronaut', [...common, 'hands', 'tools', 'scene', 'suit', 'rovers', 'riding', 'carry']);
   only('ops', [...common, 'hands', 'tools', 'carry', 'tray']);
   only('tech', [...common, 'rovers', 'rider', 'scene', 'astro', 'meteor', 'tools']);
-  only('sci', [...common, 'power', 'leak', 'drain', 'wiring', 'survey', 'manifest', 'assay']);
+  only('sci', [...common, 'power', 'leak', 'drain', 'survey', 'manifest', 'assay']);
   assert.ok(!('text' in g.view('ops').ev), 'nobody is told in words what broke');
   // The leak lamp does not say where.
   assert.equal(JSON.stringify(g.view('sci').leak), 'true');
@@ -484,7 +470,6 @@ const kit = (g, tool) => {
     const tool = { dust: 'brush', wheel: 'tire', hull: 'welder', suit: 'patch' }[type];
     if (tool && !g.has(tool)) { kit(g, tool); busy = 60; continue; }
     if (type === 'dust') { at(g, PLACES.panels[1]); for (let c = 0; c < DUST_CELLS; c++) g.act({ fix: 'dust', cell: c }); }
-    if (type === 'board') { inside(g); g.faults.board.cables.forEach((c, i) => g.act({ fix: 'board', cable: i, socket: c.socket })); }
     if (type === 'wheel') { at(g, g.rovers[g.faults.wheel.which]); g.act({ fix: 'wheel', pull: true }); g.act({ fix: 'wheel', fit: true }); }
     if (type === 'hull') { at(g, PLACES.cracks[g.faults.hull.spot]); for (let p = 0; p < CRACK_POINTS; p++) g.act({ fix: 'hull', point: p }); }
     if (type === 'suit') g.act({ fix: 'suit' });

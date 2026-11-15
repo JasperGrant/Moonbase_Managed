@@ -11,6 +11,8 @@ import * as CANNON from 'cannon-es';
 
 export const G = 1.62; // m/s^2, the Moon
 const STEP = 1 / 72;
+const HAND_MAX = 8;    // m/s: the fastest a hand body pushes things
+const HAND_JUMP = 0.4;  // m in one frame: further than this is a jump, not a swing
 
 export function buildPhysics() {
   const make = damping => {
@@ -102,7 +104,11 @@ export function buildPhysics() {
     hands.forEach((h, i) => {
       const p = points[i];
       if (!p) { h.position.set(0, -50, 0); h.velocity.setZero(); return; }
-      if (dt > 0) h.velocity.set((p.x - h.position.x) / dt, (p.y - h.position.y) / dt, (p.z - h.position.z) / dt);
+      // A hand that jumped (a teleport, an airlock, the first frame) arrives at rest: swept along the jump at
+      // jump/dt it would knock whatever it crossed through the floor. A real arm swing is capped too.
+      const dx = p.x - h.position.x, dy = p.y - h.position.y, dz = p.z - h.position.z, d = Math.hypot(dx, dy, dz);
+      if (d > HAND_JUMP || !(dt > 0)) h.velocity.setZero();
+      else { const k = Math.min(1 / dt, HAND_MAX / Math.max(d, 1e-6)); h.velocity.set(dx * k, dy * k, dz * k); }
       h.position.set(p.x, p.y, p.z);
     });
   }
