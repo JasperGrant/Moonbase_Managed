@@ -32,6 +32,8 @@ export class Radio {
     drive.curve = curve;
     const out = c.createGain(); out.gain.value = 1.2;
     this.rxIn.connect(hp).connect(lp).connect(drive).connect(out).connect(c.destination);
+    // Level meters for Mission Ops' intercom (docs/design/mission-control-consoles.md, D8): what comes in, and the mic.
+    this.rxMeter = c.createAnalyser(); this.rxMeter.fftSize = 512; this.rxIn.connect(this.rxMeter);
 
     // Static, switched on while someone is transmitting to us
     const noise = c.createBuffer(1, RATE * 2, RATE);
@@ -79,12 +81,22 @@ export class Radio {
       this.mic = new AudioWorkletNode(c, 'mic', { numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [1] });
       this.mic.port.onmessage = e => this.net.sendBin(e.data);
       const mute = c.createGain(); mute.gain.value = 0;
-      c.createMediaStreamSource(stream).connect(this.mic).connect(mute).connect(c.destination);
+      const micSrc = c.createMediaStreamSource(stream);
+      micSrc.connect(this.mic).connect(mute).connect(c.destination);
+      this.micMeter = c.createAnalyser(); this.micMeter.fftSize = 512; micSrc.connect(this.micMeter);
       this.micOk = true;
     } catch (err) {
       console.warn('Microphone not available (needs HTTPS or localhost, and permission):', err);
     }
     return this.micOk;
+  }
+
+  // 0..1: the microphone's level while talking, what is coming in otherwise.
+  level() {
+    const a = this.talking ? this.micMeter : this.rxMeter; if (!a) return 0;
+    const buf = this._lv ||= new Float32Array(a.fftSize); a.getFloatTimeDomainData(buf);
+    let sum = 0; for (const v of buf) sum += v * v;
+    return Math.min(1, Math.sqrt(sum / buf.length) * 4);
   }
 
   setTalking(on) {

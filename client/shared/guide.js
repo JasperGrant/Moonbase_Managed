@@ -50,8 +50,9 @@ export const BRIEFINGS = {
       ['TALK', 'Hold SPACE, or the big button'],
       ['RADIO', 'ENABLE RADIO turns your microphone on'],
       ['GO', 'GO under the astronaut in the lobby, then READY for yourself'],
-      ['BEACON', 'Click a tool in the TOOL LOG to light a beacon over it'],
-      ['LOGS', 'HANDS: what they hold. TOOL LOG: where each tool is. SAMPLE LOG: hand, tray, banked'],
+      ['BEACON', 'Click a tool on the TOOL BOARD to light a beacon over it; click it again to put it out'],
+      ['DESK', 'HANDS: what they hold. TOOL BOARD: the bay each tool lies in. SAMPLES: hand, tray, banked, and the drill. The tape: what has happened'],
+      ['LIGHTS', 'The square lamps along the top light when something happens: alarm, fixed, meteor hit, base dark, power back, banked, dud, no link'],
     ],
     talk: 'Everyone. You are the only seat that talks to the astronaut.',
   },
@@ -64,7 +65,7 @@ export const BRIEFINGS = {
       ['HAULER', 'Arrow keys, at the same time'],
       ['VIEWS', 'C or click the left screen (Scout), / or click the right (Hauler). Wheel: chase distance'],
       ['HOME', 'The red needle points to base, with the range in metres'],
-      ['LAMPS', 'WHEEL: that rover is stuck. RIDER: the astronaut is aboard. METEOR: counts down to impact'],
+      ['LAMPS', 'Under each screen: WHEEL (that rover is stuck), RIDER (the astronaut is aboard). Between the screens: METEOR, counting down to impact, and TAKE COVER'],
     ],
     talk: 'The Scientist, for where to go. Ops, for the astronaut and the meteor warning.',
   },
@@ -73,10 +74,10 @@ export const BRIEFINGS = {
     story: 'You are the geologist, with an orbital survey of the ridge and a field guide to what the mission came for: anorthosite, the Moon\'s oldest crust; basalt, pitted with gas holes; the orange glass of old fire fountains; ice, from craters the sun never touches. Each one has a lookalike.',
     job: 'Read the chart: bright ground may hold samples. Send the Technician\'s Scout there; the chart sharpens wherever a rover drives, and samples appear on it. Describe the right rock from your field guide so Ops can tell the astronaut. When something breaks, its symbol blinks on the chart: tell Ops what it is and which tool fixes it.',
     controls: [
-      ['SURVEY', 'The chart. RANGE zooms, CENTRE follows the base, the Scout or the Hauler. Click it to stand a beacon there'],
-      ['GUIDE', 'A card for each wanted sample: what it looks like, where it lies, its telltale, and NOT THIS. ASSAY: FOUND or DUD'],
-      ['POWER', 'The battery and the solar panels\' charge'],
-      ['AIR', 'Oxygen, drain and the LEAK lamp'],
+      ['SURVEY', 'The round chart, always on. R: range. E: centre on the base, the Scout or the Hauler. Click it to stand a beacon there'],
+      ['1 GUIDE', 'A card for each wanted sample: what it looks like, where it lies, its telltale, and NOT THIS. ASSAY: FOUND or DUD'],
+      ['2 POWER', 'The battery and the solar panels\' charge, with a recorder of the last minute'],
+      ['3 AIR', 'Oxygen, drain and the LEAK lamp, with a recorder of the last minute'],
     ],
     talk: 'The Technician, for where to drive. Ops, for which rock and what broke.',
   },
@@ -86,9 +87,9 @@ export const BRIEFINGS = {
     job: 'Everything on the other three cards. Read the chart, drive the Scout to bright ground, find the sample, bring the astronaut on the Hauler, and talk them onto the right rock. When something breaks, the chart\'s symbol says what: tell the astronaut which tool.',
     controls: [
       ['TALK', 'Hold SPACE'],
-      ['ROVERS', 'W A S D for the Scout, the arrows for the Hauler'],
-      ['CHART', 'The SURVEY, GUIDE, POWER and AIR tabs'],
-      ['BEACON', 'Click a tool in the TOOL LOG, or a spot on the chart'],
+      ['ROVERS', 'W A S D for the Scout, the arrows for the Hauler. C and / change each camera\'s view'],
+      ['CHART', 'R: range. E: centre. The field guide is under it, a row per sample'],
+      ['BEACON', 'Click a tool in the TOOLS list, or a spot on the chart'],
     ],
     talk: 'The astronaut, and nobody else.',
   },
@@ -117,7 +118,7 @@ const GEN = CFG.generatorSeconds;
 export const LINES = {
   // teach (phase 1)
   'sci.role':    { tier: 5, full: 'YOU HAVE THE CHART AND THE FIELD GUIDE.' },
-  'sci.goal':    { tier: 5, full: `MISSION: ${CFG.sample.manifest} SAMPLES. THE GUIDE TAB SHOWS THEM.` },
+  'sci.goal':    { tier: 5, full: `MISSION: ${CFG.sample.manifest} SAMPLES. KEY 1, THE GUIDE, SHOWS THEM.` },
   'ops.role':    { tier: 5, full: 'YOU ARE THE ONLY VOICE. HOLD SPACE TO TALK.' },
   'ops.goal':    { tier: 5, full: `MISSION: ${CFG.sample.manifest} SAMPLES HOME. ASK THE SCIENTIST WHERE.`, all: `MISSION: ${CFG.sample.manifest} SAMPLES HOME. THE CHART SHOWS WHERE.` },
   'tech.role':   { tier: 5, full: 'YOU DRIVE BOTH ROVERS. NO MAP: ASK THE SCIENTIST.', all: 'YOU DRIVE BOTH ROVERS. THE CHART IS YOUR MAP.' },
@@ -133,7 +134,7 @@ export const LINES = {
   'sci.batt':    { tier: 1, full: 'BATTERY LOW. THE BASE GOES DARK AT ZERO.' },
   'sci.dark':    { tier: 1, full: 'BASE DARK: NO OXYGEN REFILL INSIDE.' },
   'ops.alarm':   { tier: 2, full: 'ALARM. ASK THE SCIENTIST WHAT BROKE.', all: "ALARM. THE CHART'S SYMBOL SAYS WHAT BROKE." },
-  'ops.tool':    { tier: 2, full: 'YOUR TOOL LOG SAYS WHERE EACH TOOL LIES.' },
+  'ops.tool':    { tier: 2, full: 'YOUR TOOL BOARD SAYS WHERE EACH TOOL LIES.' },
   'ops.full':    { tier: 2, full: 'HANDS FULL. TELL THEM TO PUT ONE DOWN.', all: 'HANDS FULL. TELL THE ASTRONAUT TO PUT ONE DOWN.' },
   'ops.o2':      { tier: 1, full: 'SUIT OXYGEN LOW. ASTRONAUT INSIDE TO REFILL.' },
   'ops.dark':    { tier: 1, full: `BASE DARK. THE GENERATOR GIVES ${GEN} S OF POWER.` },
@@ -239,11 +240,3 @@ export function pickLine(seat, s, mem, { quiet = false } = {}) {
   }
   return best ? { id: best.id, text: lineText(best.id, all, best.vars), tier: lineTier(best.id) } : null;
 }
-
-// Captions under the console instruments (phase 5): what each one is for. Shown while GUIDE is ON.
-export const CAPTIONS = {
-  home: 'POINTS TO BASE', wheel: 'LIT: ROVER STUCK', rider: 'LIT: ASTRONAUT ON', meteor: 'IMPACT COUNTDOWN',
-  chart: 'BRIGHT: LIKELY SAMPLES', surveyed: 'SEEN BY ROVERS', solar: 'LOW: DUSTY PANELS', battery: 'DRAINS ON A POWER FAULT',
-  leak: 'HULL OR SUIT', drain: `${CFG.leakMultiplier}X WITH A LEAK`, assay: 'LAST ROCK IN THE PORT',
-  hands: 'WHAT THEY HOLD', tools: 'WHERE EACH TOOL LIES', samples: 'HANDS, TRAY, BANKED',
-};

@@ -4,7 +4,7 @@
 export const PAL = {
   // surfaces
   bakelite: '#1d1c19', console: '#3f4a47', consoleDeep: '#2b3230', bezel: '#8b887d', rule: '#55605b',
-  dial: '#e3d9bf', enamel: '#d8d2c2', foilGold: '#b8913f', regolith: '#a8a397', glass: '#101810',
+  dial: '#e3d9bf', keycap: '#4a4a44', enamel: '#d8d2c2', foilGold: '#b8913f', regolith: '#a8a397', glass: '#101810',
   // ink
   ink: '#d6ccb4', inkDim: '#8f8a78', inkDial: '#24221e',
   // lamps: off and on
