@@ -1,5 +1,8 @@
 # The trailer
 
+The current cut is committed as [docs/moonbase-trailer.mp4](../../docs/moonbase-trailer.mp4). After recording a new
+one, copy `trailer/moonbase-trailer.mp4` over it.
+
 A 30-second trailer cut from the game's own code: the Moon, the habitat, the astronaut figure, the rovers,
 the real astronaut page in a pretend headset and the real Mission Control desks. Nothing is painted over
 afterwards except the captions and the end title, which use the game's type and palette (docs/DESIGN.md).
