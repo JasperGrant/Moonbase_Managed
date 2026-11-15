@@ -32,6 +32,7 @@ export const SOLIDS = [
   [2.9, 3.5, -3.05, -0.95, 2.06],    // suit lockers
   [2.9, 3.5, -0.95, -0.05, 1.85],    // the empty pressure suit beside them
   [-3.5, -1.95, -12, -10.25, 1.78],  // life support stack
+  [3.1, 3.5, -4.85, -4.35, 1.08],    // the sample port on the east wall
 ];
 // The four doors, in room coordinates: each is the inner hatch of an airlock chamber whose twin is on the
 // habitat outside (PLACES.doors). The opening in the wall is the chamber's doorway.

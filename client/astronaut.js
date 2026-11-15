@@ -58,11 +58,12 @@ scene.add(rig);
 
 const sceneBefore = new Set(scene.children);
 const world = buildWorld(THREE, scene, { renderer });
-const outdoors = scene.children.filter(o => !sceneBefore.has(o)); // everything on the surface, sun included
+const outdoors = scene.children.filter(o => !sceneBefore.has(o) && o !== world.carriedSamples); // everything on the surface, sun included; samples in hand are drawn in both places
 
 // The inside of the habitat. Only one of the two places is drawn at a time.
 const interior = buildInterior(THREE, scene, { sfx: k => radio.sfx(k) });
 interior.group.visible = false;
+interior.group.add(world.port); // the sample port stands in the hall (PLACES.port is in room coordinates)
 let where = 'out';                        // 'out' on the surface, 'in' inside the habitat
 let door = CFG.spawn.door;                // the airlock last come through: indoors, the map shows you there
 

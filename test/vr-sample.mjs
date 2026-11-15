@@ -264,10 +264,9 @@ try {
   const feet = await P(async () => { await window.vr.frames(8); const mb = window.moonbase, h = window.vr.wp(mb.camera); return Math.abs(mb.rig.position.y - mb.world.height(h.x, h.z)); });
   check(feet < 0.4, 'after stepping off, the feet should be on the ground: ' + feet);
 
-  // ---------- take it out, carry it to the port, bank it ----------
-  step('4. the sample port');
-  const port = await P(() => { const mb = window.moonbase, v = window.vr; mb.world.port.updateMatrixWorld(true); return v.wp(mb.world.port).toArray().concat(v.wp(mb.world.port.children.find(o => o.name === 'Lamp_Port')).toArray()); });
-  Object.assign(g.rovers.hauler, { x: PLACES.port.x + 2.5, z: PLACES.port.z + 4, v: 0 });
+  // ---------- take it out of the cup, a lookalike in the other hand, both home through the airlock ----------
+  step('4. two samples carried in through the airlock');
+  Object.assign(g.rovers.hauler, { x: 3, z: 6.5, ry: 0, v: 0 });
   await wait(500);
   await P(() => { const mb = window.moonbase; mb.world.moveRovers(mb.state().rovers, 1); });
   const cup2 = await P(async () => {
@@ -282,39 +281,69 @@ try {
     return { carry: mb.state().carry };
   });
   check(cup2.carry.includes('s0'), 'a sample should come out of a cup into the hand: ' + JSON.stringify(cup2));
-  const bank = await P(async () => {
-    const v = window.vr, mb = window.moonbase, P0 = mb.world.fixtures.portMouth;
-    const mouth = mb.world.port.localToWorld(P0.clone());
-    await v.stand(mouth.x + 0.8, mouth.z + 0.8, mouth.x, mouth.z, 1.7);
-    await v.move('right', mouth, 10); await v.frames(2);
-    v.grip('right', false);
-    await v.until(s => s.scene?.port?.banked >= 1, 3);
-    await v.frames(3);
-    return { tally: mb.state().scene.port, buzz: v.haptics().length };
-  });
-  check(g.samples.find(s => s.id === 's0').at === 'banked' && bank.tally.banked === 1, 'letting go over the port should bank it: ' + JSON.stringify(bank));
-  check(bank.tally.assay && bank.tally.assay.kind === 'anor', 'the assay should say anorthosite: ' + JSON.stringify(bank.tally));
-  check(g.score >= CFG.sample.wanted, 'a manifest sample should score');
-  // Mission control sees it.
-  check(g.view('sci').manifest.filter(m => m.got).length === 1 && g.view('ops').tray.every(x => !x), 'Ops and the Scientist should see the tally');
-
-  // ---------- a lookalike, and two hands ----------
-  step('5. a lookalike reads DUD; two hands, one thing in each');
   const dud = g.samples.find(s => s.kind === 'dud');
-  Object.assign(dud, { x: PLACES.port.x + 1.2, z: PLACES.port.z + 1.5 });
+  Object.assign(dud, { x: 1.2, z: 5.2 });
   await P(([x, z]) => window.vr.stand(x + 0.6, z, x, z, 1.7), [dud.x, dud.z]);
-  await P(() => window.vr.until(s => s.scene.samples.some(x => x.look === 'pale-plain' || x.id === window.__dud), 2));
+  await P(id => window.vr.until(s => s.scene.samples.some(x => x.id === id), 2), dud.id);
   const two = await P(async ({ x, z, id }) => {
     const v = window.vr, mb = window.moonbase;
     const at = new v.T.Vector3(x, mb.world.height(x, z) + 0.12, z);
     await v.move('left', at, 8); v.grip('left', true); await v.until(s => (s.carry || []).includes(id), 3);
     await v.frames(2);
-    return { carry: mb.state().carry };
+    return { carry: mb.state().carry, right: v.holding('right')?.id };
   }, { x: dud.x, z: dud.z, id: dud.id });
-  check(two.carry.includes(dud.id), 'the left hand should take the lookalike: ' + JSON.stringify(two));
+  check(two.carry.includes(dud.id) && two.right === 's0', 'the left hand should take the lookalike, the right still hold the first: ' + JSON.stringify(two));
+  // In through airlock S with a rock in each hand. Both stay in the hands, and both are drawn in the hall.
+  await P(() => window.vr.stand(0.1, 3.25, 0.1, 0));
+  const indoors = await P(async () => {
+    const v = window.vr, mb = window.moonbase;
+    for (let i = 0; i < 600 && (mb.where() !== 'in' || mb.airlock()); i++) await v.frames(1);
+    await v.sleep(400); await v.frames(3);
+    const grp = mb.world.carriedSamples, drawn = grp.children.reduce((n, im) => n + (im.visible ? im.count : 0), 0);
+    let shown = true; for (let o = grp; o; o = o.parent) if (!o.visible) shown = false;
+    return { where: mb.where(), left: v.holding('left')?.id, right: v.holding('right')?.id, carry: mb.state().carry, drawn, shown };
+  });
+  check(indoors.where === 'in', 'airlock S should take the astronaut inside: ' + JSON.stringify(indoors));
+  check(indoors.left === dud.id && indoors.right === 's0' && indoors.carry.length === 2, 'both samples should still be in the hands in the hall: ' + JSON.stringify(indoors));
+  check(indoors.drawn === 2 && indoors.shown, 'both samples in hand should be drawn in the hall: ' + JSON.stringify(indoors));
+  check(g.carry.length === 2, 'the server should still have both samples in hand indoors: ' + JSON.stringify(g.carry));
+  // Let go of the lookalike over the hall floor: it lies there, indoors, and comes back up into the hand.
+  const floor = await P(async id => {
+    const v = window.vr, mb = window.moonbase, p = mb.interior.toWorld(0.8, -3.2);
+    await v.stand(p.x, p.z + 0.6, p.x, p.z, 1.7);
+    await v.move('left', v.V(p.x, 0.9, p.z), 8); await v.frames(4); v.grip('left', false); // held still: let go, not thrown
+    await v.until(s => s.scene.samples.some(x => x.id === id && x.at === 'ground'), 4);
+    await v.frames(3);
+    const lay = mb.state().scene.samples.find(x => x.id === id);
+    await v.move('left', v.V(p.x, 0.12, p.z), 8); v.grip('left', true);
+    await v.until(s => (s.carry || []).includes(id), 3);
+    await v.frames(2);
+    return { lay, again: mb.state().carry, where: mb.where() };
+  }, dud.id);
+  check(floor.lay?.inside && Math.hypot(floor.lay.x - 0.8, floor.lay.z + 3.2) < 0.3, 'a sample let go in the hall should lie on the hall floor where it fell: ' + JSON.stringify(floor));
+  check(floor.again.includes(dud.id) && floor.where === 'in', 'a sample on the hall floor should come back into the hand: ' + JSON.stringify(floor));
+
+  // ---------- the sample port, in the hall ----------
+  step('5. the sample port in the hall: FOUND, then DUD');
+  const bank = await P(async () => {
+    const v = window.vr, mb = window.moonbase, P0 = mb.world.fixtures.portMouth;
+    mb.world.port.updateMatrixWorld(true);
+    const mouth = mb.world.port.localToWorld(P0.clone()), out = v.V(0, 0, 0.6).applyQuaternion(mb.world.port.getWorldQuaternion(new v.T.Quaternion()));
+    await v.stand(mouth.x + out.x, mouth.z + out.z, mouth.x, mouth.z, 1.7);
+    await v.move('right', mouth, 10); await v.frames(2);
+    v.grip('right', false);
+    await v.until(s => s.scene?.port?.banked >= 1, 3);
+    await v.frames(3);
+    return { tally: mb.state().scene.port, buzz: v.haptics().length, inHall: mb.world.port.parent === mb.interior.group };
+  });
+  check(bank.inHall, 'the sample port should stand in the hall');
+  check(g.samples.find(s => s.id === 's0').at === 'banked' && bank.tally.banked === 1, 'letting go over the port should bank it: ' + JSON.stringify(bank));
+  check(bank.tally.assay && bank.tally.assay.kind === 'anor', 'the assay should say anorthosite: ' + JSON.stringify(bank.tally));
+  check(g.score >= CFG.sample.wanted, 'a manifest sample should score');
+  // Mission control sees it.
+  check(g.view('sci').manifest.filter(m => m.got).length === 1 && g.view('ops').tray.every(x => !x), 'Ops and the Scientist should see the tally');
   const dd = await P(async () => {
     const v = window.vr, mb = window.moonbase, mouth = mb.world.port.localToWorld(mb.world.fixtures.portMouth.clone());
-    await v.stand(mouth.x + 0.8, mouth.z + 0.8, mouth.x, mouth.z, 1.7);
     await v.move('left', mouth, 10); await v.frames(2); v.grip('left', false);
     await v.until(s => s.scene?.port?.assay?.kind === 'dud', 3);
     return mb.state().scene.port;

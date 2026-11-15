@@ -455,9 +455,9 @@ export function buildFixtures(THREE, world, { rig, camera, send, sfx = () => {},
       offer(b.distanceTo(p), GRAB_CORD, { kind: 'cord', start: p.clone() });
     }
     for (const [rid, w] of Object.entries(F.wheels)) if (wheelOf(rid) === 1) offer(worldPos(w.wheel, b).distanceTo(p), 0.5, { kind: 'wheel', rid, start: p.clone() });
-    // Rock samples, on the ground or in a cup, while outside and a hand is free for one.
-    if (placeNow() === 'surface') for (const s of st.scene?.samples || []) {
-      if ((s.at !== 'ground' && s.at !== 'tray') || mine(s.id)) continue;
+    // Rock samples where you are: on the ground or in a cup outside, on the floor in the hall.
+    for (const s of st.scene?.samples || []) {
+      if (!reachable(s) || mine(s.id)) continue;
       offer(samplePos(s, b).distanceTo(p), GRAB_SAMPLE, { kind: 'sample', id: s.id });
     }
     // The Hauler's rail: grab it to get on.
@@ -504,7 +504,10 @@ export function buildFixtures(THREE, world, { rig, camera, send, sfx = () => {},
   const handVel = [V(), V()], handWas = [V(), V()];
   const mine = id => deskSamples.includes(id) || held.some(h => h?.kind === 'sample' && h.id === id) || falling.some(f => f.id === id);
   const sizeOf = id => { let h = 7; for (const ch of id) h = (h * 31 + ch.charCodeAt(0)) % 9973; return 0.17 + h / 9973 * 0.12; };
+  // Can a sample be picked up from here? Outside: on the ground or in a cup. In the hall: on its floor.
+  const reachable = s => placeNow() === 'hall' ? s.at === 'ground' && !!s.inside : (s.at === 'ground' && !s.inside) || s.at === 'tray';
   function samplePos(s, out) {
+    if (s.inside) return out.set(s.x + ORIGIN.x, ORIGIN.y + sizeOf(s.id) * 0.3, s.z + ORIGIN.z);
     if (s.at === 'tray' && F.cups[s.slot]) return F.cups[s.slot].getWorldPosition(out).setY(out.y + 0.09);
     return out.set(s.x, world.height(s.x, s.z) + sizeOf(s.id) * 0.3, s.z);
   }
@@ -515,7 +518,7 @@ export function buildFixtures(THREE, world, { rig, camera, send, sfx = () => {},
     else held[i] = { kind: 'sample', id };
     pending.set(id, clock());
     samplePos(s, a);
-    if (s.at === 'ground') { world.puff?.(a, 8, 0.4); if (sfxAt) sfxAt('scrape', a, 0.8); else sfx('scrape'); }
+    if (s.at === 'ground' && !s.inside) { world.puff?.(a, 8, 0.4); if (sfxAt) sfxAt('scrape', a, 0.8); else sfx('scrape'); }
     else sfx('clink');
     if (i >= 0 && i !== DESK) pulse(i, 0.5, 40);
     send({ pick: id });
@@ -536,8 +539,13 @@ export function buildFixtures(THREE, world, { rig, camera, send, sfx = () => {},
       if (i >= 0 && i !== DESK) pulse(i, 0.8, 80);
       return;
     }
-    // Otherwise it falls.
-    falling.push({ id, p: p.clone(), v: V().fromArray(v).clampLength(0, 5), sent: false, t: clock() });
+    // Otherwise it falls: onto the regolith, or onto the hall floor.
+    falling.push({ id, p: p.clone(), v: V().fromArray(v).clampLength(0, 5), sent: false, t: clock(), hall: placeNow() === 'hall' });
+  }
+  // Tell the server where a sample came to rest: world coordinates outside, room coordinates in the hall.
+  function sendPut(id, p, hall) {
+    const x = hall ? p.x - ORIGIN.x : p.x, z = hall ? p.z - ORIGIN.z : p.z;
+    send({ put: id, x: +x.toFixed(2), z: +z.toFixed(2) });
   }
   // Q on a laptop, or a test: put down the last sample carried.
   let keyGot = null; // what E took, until E is let go
@@ -562,11 +570,13 @@ export function buildFixtures(THREE, world, { rig, camera, send, sfx = () => {},
   // A click on a sample (laptop, or pointing): take it into the desk hand.
   function deskPick(id) { return pickSample(id, DESK); }
   // Click targets for the laptop: one invisible ball per sample in view, the four cups and the port.
-  const sampleHits = Array.from({ length: 24 }, () => {
-    const m = add(outside, new THREE.SphereGeometry(0.22, 8, 6), ghost); m.visible = false; m.userData.sid = null;
+  const sampleHit = parent => {
+    const m = add(parent, new THREE.SphereGeometry(0.22, 8, 6), ghost); m.visible = false; m.userData.sid = null;
     target(m, () => !!m.userData.sid && running(), () => deskPick(m.userData.sid)).userData.pickup = true;
     return m;
-  });
+  };
+  const sampleHits = Array.from({ length: 24 }, () => sampleHit(outside));
+  const hallHits = interior ? Array.from({ length: 8 }, () => sampleHit(interior.group)) : []; // room coordinates
   F.cups.forEach((cup, n) => target(add(cup, new THREE.SphereGeometry(0.14, 8, 6), ghost, 0, 0.08, 0), () => deskSamples.length > 0 && slotFree(n), () => { letGoSample(DESK, deskSamples[0], cup.getWorldPosition(V()).setY(cup.getWorldPosition(V()).y + 0.08)); }));
   target(add(world.port, new THREE.SphereGeometry(0.3, 8, 6), ghost, F.portMouth.x, F.portMouth.y, F.portMouth.z), () => deskSamples.length > 0, () => { letGoSample(DESK, deskSamples[0], world.port.localToWorld(F.portMouth.clone())); });
   target(add(F.rail, new THREE.SphereGeometry(0.35, 8, 6), ghost), () => running(), () => onRail(DESK));
@@ -578,6 +588,8 @@ export function buildFixtures(THREE, world, { rig, camera, send, sfx = () => {},
     if (k >= 0) return camera.localToWorld(ov.set(...DESK_SAMPLES[k]));
     const i = held.findIndex(h => h?.kind === 'sample' && h.id === id);
     if (i >= 0 && handPts[i]) return ov.copy(handPts[i]).add(b.set(0, -0.03, 0));
+    const s = (st.scene?.samples || []).find(x => x.id === id);
+    if (s?.inside && s.at === 'ground') return samplePos(s, ov); // on the hall floor: drawn in the hall
     return null;
   };
   // The server's word on samples: a pick it refused goes back; a put it has taken stops falling.
@@ -599,7 +611,7 @@ export function buildFixtures(THREE, world, { rig, camera, send, sfx = () => {},
     for (const id of st.carry || []) {
       if (mine(id) || pending.has(id)) continue;
       if (!handPts[0] && !handPts[1] && deskSamples.length < 2) deskSamples.push(id);
-      else { camera.getWorldPosition(a); send({ put: id, x: +a.x.toFixed(2), z: +a.z.toFixed(2) }); }
+      else sendPut(id, camera.getWorldPosition(a), placeNow() === 'hall');
     }
     for (let n = falling.length - 1; n >= 0; n--) { const f = falling[n], s = at(f.id); if (f.sent && (!s || s.at !== 'hand' || clock() - f.t > 3)) falling.splice(n, 1); }
   }
@@ -614,23 +626,29 @@ export function buildFixtures(THREE, world, { rig, camera, send, sfx = () => {},
     for (const f of falling) {
       if (f.sent) continue;
       f.v.y -= 1.62 * dt; f.p.addScaledVector(f.v, dt);
-      const floor = world.height(f.p.x, f.p.z) + sizeOf(f.id) * 0.3;
+      if (f.hall && interior) { // walls and benches stop it: it lands in the room, not in them
+        const l = { x: f.p.x - ORIGIN.x, z: f.p.z - ORIGIN.z }, k = interior.clamp(l.x, l.z);
+        if (k.x !== l.x || k.z !== l.z) { f.p.x = k.x + ORIGIN.x; f.p.z = k.z + ORIGIN.z; f.v.x = f.v.z = 0; }
+      }
+      const floor = (f.hall ? ORIGIN.y : world.height(f.p.x, f.p.z)) + sizeOf(f.id) * 0.3;
       if (f.p.y <= floor) {
         f.p.y = floor; f.sent = true;
         world.puff?.(f.p, 8, 0.5);
         camera.getWorldPosition(c);
         if (f.p.distanceTo(c) < 4) { if (sfxAt) sfxAt('thud', f.p, 0.4, { mass: 0.6 }); else sfx('clank'); }
-        send({ put: f.id, x: +f.p.x.toFixed(2), z: +f.p.z.toFixed(2) });
+        sendPut(f.id, f.p, f.hall);
       }
     }
     // Click targets on the samples in view.
+    const hall = placeNow() === 'hall', set = hall ? hallHits : sampleHits;
     let n = 0;
-    if (placeNow() === 'surface') for (const s of st.scene?.samples || []) {
-      if (n >= sampleHits.length) break;
-      if ((s.at !== 'ground' && s.at !== 'tray') || mine(s.id)) continue;
-      const m = sampleHits[n++]; samplePos(s, m.position); m.userData.sid = s.id; m.visible = true;
+    for (const s of st.scene?.samples || []) {
+      if (n >= set.length) break;
+      if (!reachable(s) || mine(s.id)) continue;
+      const m = set[n++]; samplePos(s, m.position); if (hall) m.position.sub(ORIGIN); m.userData.sid = s.id; m.visible = true;
     }
-    for (; n < sampleHits.length; n++) { sampleHits[n].userData.sid = null; sampleHits[n].visible = false; }
+    for (; n < set.length; n++) { set[n].userData.sid = null; set[n].visible = false; }
+    for (const m of hall ? sampleHits : hallHits) { m.userData.sid = null; m.visible = false; }
     world.redrawSamples?.();
   }
 

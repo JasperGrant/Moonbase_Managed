@@ -35,7 +35,7 @@ export const CFG = {
   ride: { snapYaw: false, mountReach: 2.5 }, // riding the Hauler: turn with it (or hold heading and snap), how near to get on
   survey: { known: 30 },      // metres round the base that start explored on the Scientist's chart
   // Samples: what the mission is for. Four on the manifest, a tray of four cups on the Hauler.
-  sample: { manifest: 4, tray: 4, wanted: 250, extra: 100, dud: 0, drawRadius: 45, reach: 3, portReach: 2.5 },
+  sample: { manifest: 4, tray: 4, wanted: 250, extra: 100, dud: 0, drawRadius: 45, reach: 3 },
   // The astronaut starts inside the hall (room coordinates, see client/interior.js), facing up it, with
   // the tools lying round. The server sees them at door S until they go out.
   spawn: { inside: true, x: 0, z: -1.3, door: 'S' },
@@ -129,8 +129,10 @@ export const PLACES = {
   cracks: CRACK_ANGLES.map(deg => { const a = deg * Math.PI / 180; return { a, x: Math.cos(a) * 2.52, z: Math.sin(a) * 2.52 }; }),
   rover:  { x: 4, z: 9 },                 // the Hauler's start (kept under this name for the scenery code)
   rovers: { hauler: { x: 4, z: 9 }, scout: { x: -4, z: 8 } },
-  // The sample port: a hopper on the habitat's outside wall beside door S, at waist height.
-  port:   { x: 1.6, z: 2.32, ry: Math.atan2(1.6, 2.32) },
+  // The sample port: a hopper on the hall's east wall between the cabinet and the extinguisher, across from
+  // the rack of banked canisters on the end of the workbench, at waist height.
+  // Room coordinates (client/interior.js): samples are banked once they are brought home.
+  port:   { x: 3.24, z: -4.6, ry: -Math.PI / 2 },
   // Scenery only: nothing to fix here.
   depot:  { x: -9, z: -5 },
   dish:   { x: 10, z: -6 },

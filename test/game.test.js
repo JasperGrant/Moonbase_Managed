@@ -412,10 +412,20 @@ const kit = (g, tool) => {
   Object.assign(h, { x: 30, z: 30 }); at(g, { x: 30, z: 31 });
   g.act({ pick: first.id });
   assert.equal(first.at, 'hand'); assert.equal(g.tray[1], null, 'out of a cup and into a hand');
-  // Banking: only at the port.
+  // Banking: only at the port, which is in the hall.
   g.act({ bank: first.id });
-  assert.equal(first.at, 'hand', 'away from the port: refused');
-  at(g, { x: PLACES.port.x, z: PLACES.port.z + 1 });
+  assert.equal(first.at, 'hand', 'outside: refused');
+  inside(g);
+  // Let go in the hall: it lies on the hall floor, not outside the door, and can be taken up again indoors.
+  g.act({ put: first.id, x: 1.2, z: -6 });
+  assert.equal(first.at, 'ground'); assert.ok(first.inside, 'dropped indoors stays indoors');
+  assert.deepEqual([first.x, first.z], [1.2, -6]);
+  assert.ok(g.view('astronaut').scene.samples.some(x => x.id === first.id && x.inside), 'the astronaut sees it on the hall floor');
+  assert.ok(!g.view('sci').survey.samples.some(x => x.id === first.id), 'it is not on the field chart');
+  at(g, { x: 1.2, z: 2 }); g.act({ pick: first.id });
+  assert.equal(first.at, 'ground', 'a sample in the hall cannot be picked up from outside');
+  inside(g); g.act({ pick: first.id });
+  assert.equal(first.at, 'hand', 'picked up off the hall floor');
   const want = !!wanted(first.kind);
   g.act({ bank: first.id });
   assert.equal(first.at, 'banked');
@@ -423,8 +433,8 @@ const kit = (g, tool) => {
   assert.equal(g.view('sci').assay.kind, first.kind);
   assert.equal(g.view('astronaut').scene.port.banked, g.manifest.filter(m => m.got).length);
   // A lookalike is a dud.
-  Object.assign(dud, { x: PLACES.port.x, z: PLACES.port.z + 1 }); g.act({ pick: dud.id }); const sc = g.score;
-  g.act({ bank: dud.id });
+  at(g, dud); g.act({ pick: dud.id }); const sc = g.score;
+  inside(g); g.act({ bank: dud.id });
   assert.equal(dud.at, 'banked'); assert.equal(g.score, sc, 'a dud scores nothing');
   assert.equal(g.view('sci').assay.kind, 'dud'); assert.equal(g.result, null);
 }
@@ -454,7 +464,7 @@ const kit = (g, tool) => {
   for (const m of g.manifest) {
     const s = g.samples.find(x => x.kind === m.kind && x.at === 'ground');
     at(g, s); g.act({ pick: s.id });
-    at(g, { x: PLACES.port.x, z: PLACES.port.z + 1 }); g.act({ bank: s.id });
+    inside(g); g.act({ bank: s.id });
   }
   inside(g);
   assert.deepEqual(g.view('sci').manifest.map(m => m.got), [true, true, true, true]);
