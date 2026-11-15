@@ -55,7 +55,8 @@ function watch(p, name) {
 async function openOwn(name, url, size = { width: 960, height: 540 }) { // software GL: keep the pixel count down
   const b = await chromium.launch({ args: GL });
   browsers.push(b);
-  const p = await (await b.newContext({ viewport: size })).newPage();
+  const c = await b.newContext({ viewport: size }); await c.addInitScript({ path: new URL('./briefed.js', import.meta.url).pathname });
+  const p = await c.newPage();
   watch(p, name);
   await p.goto(BASE + url);
   return p;
@@ -528,6 +529,7 @@ try {
   step('radio both ways, with a microphone');
   browser = await chromium.launch({ args: [...GL, ...MIC] });
   ctx = await browser.newContext({ viewport: { width: 960, height: 540 } });
+  await ctx.addInitScript({ path: new URL('./briefed.js', import.meta.url).pathname });
   // Reset from the admin connection: the 2-player game is forgotten. Then a 4-player game, so the
   // Earth side can be the Mission Ops seat alone, which has no 3D scene to starve the astronaut's.
   await admin('reset');

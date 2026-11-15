@@ -20,6 +20,7 @@ import { createLobby } from '/lobby.js';
 import { isHeadset } from '/device.js';
 import { music } from '/music.js';
 import { makeCueOverlay } from '/hand.js';
+import { BRIEFINGS, briefHTML } from '/shared/guide.js';
 
 const REACH = 3.2;        // metres: how far away the mouse can work something
 const REACH_VR = 1.6;     // metres: pointing in VR is a fallback for grabbing, so it only works close up
@@ -153,23 +154,96 @@ const board = new THREE.Group(); board.name = 'Board_Status';
   const post = new THREE.Mesh(new THREE.LatheGeometry([[0.0, 0], [0.18, 0], [0.18, 0.03], [0.04, 0.06], [0.03, 1.3], [0.0, 1.3]].map(([x, y]) => new THREE.Vector2(x, y)), 16), steel);
   post.name = 'Post'; board.add(post);
 }
+// ---------- the briefing on the start screen: once per seat, and from the Briefing link ----------
+{
+  const sheet = document.getElementById('briefSheet');
+  document.getElementById('briefBody').innerHTML = briefHTML('astronaut');
+  sheet.addEventListener('click', e => { if (e.target === sheet || e.target.closest('[data-close]')) sheet.hidden = true; });
+  document.getElementById('briefBtn').addEventListener('click', e => { e.preventDefault(); sheet.hidden = false; });
+  let seen = false;
+  try { seen = sessionStorage.getItem('moonbase-brief-astronaut') === '1'; sessionStorage.setItem('moonbase-brief-astronaut', '1'); } catch { /* no storage: show it each time */ }
+  if (!seen) sheet.hidden = false;
+}
+
+// ---------- the BRIEFING board: the astronaut's card, in the hall, while they wait for GO ----------
+// A headset goes straight to this page and never sees the seat picker, so this is where the astronaut is
+// told who they are and how to play (docs/SPEC-guidance.md, role briefings). It stands beside the status
+// board, turned toward the spawn point, and shows the headset's or the laptop's controls.
+const briefCanvas = document.createElement('canvas');
+briefCanvas.width = 1280; briefCanvas.height = 1195;
+const brief2d = briefCanvas.getContext('2d');
+const briefTex = new THREE.CanvasTexture(briefCanvas);
+briefTex.colorSpace = THREE.SRGBColorSpace;
+const briefBoard = new THREE.Group(); briefBoard.name = 'Board_Brief';
+{
+  const face = new THREE.Mesh(new THREE.PlaneGeometry(1.5, 1.4), new THREE.MeshBasicMaterial({ map: briefTex, toneMapped: false }));
+  face.name = 'Face'; face.position.set(0, 1.5, 0.031); briefBoard.add(face);
+  const steel = new THREE.MeshStandardMaterial({ color: PAL.hex.console, roughness: 0.7, metalness: 0.35 });
+  const back = new THREE.Mesh(new THREE.BoxGeometry(1.56, 1.46, 0.06), steel); back.position.set(0, 1.5, 0); briefBoard.add(back);
+  for (const x of [-0.6, 0.6]) {
+    const leg = new THREE.Mesh(new THREE.LatheGeometry([[0.0, 0], [0.12, 0], [0.12, 0.025], [0.03, 0.05], [0.025, 0.8], [0.0, 0.8]].map(([a, b]) => new THREE.Vector2(a, b)), 12), steel);
+    leg.position.x = x; leg.name = 'Leg'; briefBoard.add(leg);
+  }
+  briefBoard.position.set(1.6, 0, 0.55); briefBoard.rotation.y = -0.55; // right of the status board, clear of airlock W, angled to the start point
+}
+let briefKey = '';
+// Draw the card with body type `size` px; false if it ran off the bottom.
+function briefFace(how, size) {
+  const b = BRIEFINGS.astronaut, g = brief2d, W = briefCanvas.width, H = briefCanvas.height, L = 50, R = W - 50, lh = Math.round(size * 1.24);
+  g.fillStyle = PAL.dial; g.fillRect(0, 0, W, H);
+  g.strokeStyle = PAL.bezel; g.lineWidth = 16; g.strokeRect(8, 8, W - 16, H - 16);
+  g.strokeStyle = PAL.inkDim; g.lineWidth = 2; g.strokeRect(26, 26, W - 52, H - 52);
+  g.textAlign = 'left'; g.textBaseline = 'alphabetic'; g.fillStyle = PAL.inkDial;
+  let y = 84;
+  g.font = `40px ${FONT.label}`; g.fillText('BRIEFING: ' + b.title, L, y); y += 54;
+  const para = (text, italic) => { g.font = `${italic ? 'italic ' : ''}${size}px ${FONT.type}`; for (const l of wrapText(g, text, R - L)) { g.fillText(l, L, y); y += lh; } };
+  const head = t => { y += 14; g.font = `21px ${FONT.label}`; g.globalAlpha = 0.72; g.fillText(t, L, y); g.globalAlpha = 1; y += lh + 2; };
+  para(b.story, true);
+  head('YOUR JOB'); para(b.job);
+  head(how === 'laptop' ? 'YOUR CONTROLS: LAPTOP' : 'YOUR CONTROLS: HEADSET');
+  for (const [k, v] of b.controls[how]) {
+    g.font = `19px ${FONT.label}`; g.globalAlpha = 0.72; g.fillText(k, L, y); g.globalAlpha = 1;
+    g.font = `bold ${size - 2}px ${FONT.type}`;
+    const lines = wrapText(g, v, R - L - 240); lines.forEach((l, n) => g.fillText(l, L + 240, y + n * lh)); y += Math.max(1, lines.length) * lh + 4;
+  }
+  head('WHO YOU TALK TO'); para(b.talk);
+  return y < H - 34;
+}
+function wrapText(g, text, maxW) {
+  const out = []; let line = '';
+  for (const word of text.split(' ')) { const t = line ? line + ' ' + word : word; if (g.measureText(t).width > maxW && line) { out.push(line); line = word; } else line = t; }
+  if (line) out.push(line);
+  return out;
+}
+function drawBrief() {
+  briefBoard.visible = !!state && state.phase === 'lobby';
+  if (!briefBoard.visible) return;
+  const how = mode === 'desk' ? 'laptop' : 'headset', key = how + '|' + fontsLoaded;
+  if (key === briefKey) return;
+  briefKey = key;
+  for (let size = 34; size >= 18; size--) if (briefFace(how, size)) break; // the largest type that fits
+  briefTex.needsUpdate = true;
+}
 const boardAt = interior.toWorld(ROOM.arrive.x, ROOM.arrive.z - 1.9);
 board.position.set(boardAt.x, 0, boardAt.z); board.rotation.y = 0; // faces +z, toward the astronaut
+board.add(briefBoard);
 scene.add(board);
 let boardKey = '', wasGo = false;
 const iAmReady = () => !!state && (state.ready || []).includes('astronaut');
 function drawBoard() {
   const s = state;
-  board.visible = !!s && s.phase === 'lobby' && where === 'in';
+  board.visible = !!s && (s.phase === 'lobby' || s.phase === 'run') && where === 'in';
+  drawBrief();
   if (!s) return;
   // The moment Mission Ops calls GO: a two-note chime and a pulse in both hands.
   const go = s.phase === 'lobby' && iAmReady();
   if (go && !wasGo) { radio.sfx('go'); pulse(0, 0.8, 120); pulse(1, 0.8, 120); }
   wasGo = go;
   if (!board.visible) return;
+  if (s.phase === 'run') return drawMission(s);
   const n = s.countdown == null ? null : Math.max(1, Math.ceil(s.countdown));
   const lamps = CREW.map(r => (s.ready || []).some(h => covers(h, r)) ? 'go' : s.crew.some(h => covers(h, r)) ? 'seat' : 'off');
-  const key = [lamps, n, go, s.suited].join('|');
+  const key = ['lobby', lamps, n, go, s.suited].join('|');
   if (key === boardKey) return;
   boardKey = key;
   const g = board2d, W = boardCanvas.width, H = boardCanvas.height;
@@ -178,7 +252,7 @@ function drawBoard() {
   g.strokeStyle = PAL.bakelite; g.lineWidth = 3; g.strokeRect(20, 20, W - 40, H - 40);
   for (const [x, y] of [[34, 34], [W - 34, 34], [34, H - 34], [W - 34, H - 34]]) { g.fillStyle = PAL.bezel; g.beginPath(); g.arc(x, y, 8, 0, 7); g.fill(); }
   g.textAlign = 'center'; g.textBaseline = 'middle';
-  g.fillStyle = PAL.ink; g.font = 'bold 30px "Michroma", "Arial Narrow", sans-serif';
+  g.fillStyle = PAL.ink; g.font = `bold 30px ${FONT.label}`;
   g.fillText('FLIGHT STATUS', W / 2, 66);
   // One jewel lamp per seat: dark empty, amber taken, green GO.
   const names = { astronaut: 'ASTRO', ops: 'OPS', sci: 'SCI', tech: 'TECH' };
@@ -187,18 +261,45 @@ function drawBoard() {
     g.fillStyle = PAL.bakelite; g.beginPath(); g.arc(x, y, 30, 0, 7); g.fill();
     g.fillStyle = st === 'go' ? PAL.green : st === 'seat' ? PAL.amber : PAL.greenOff; g.beginPath(); g.arc(x, y, 22, 0, 7); g.fill();
     if (st !== 'off') { g.fillStyle = 'rgba(255,240,210,0.35)'; g.beginPath(); g.arc(x - 7, y - 7, 7, 0, 7); g.fill(); }
-    g.fillStyle = PAL.ink; g.font = 'bold 22px "Courier Prime", monospace'; g.fillText(names[r], x, y + 50);
+    g.fillStyle = PAL.ink; g.font = `bold 22px ${FONT.type}`; g.fillText(names[r], x, y + 50);
   });
   // The countdown in Nixie digits: dark tubes until there is one.
   g.fillStyle = PAL.bakelite; g.fillRect(W / 2 - 110, 236, 220, 132);
   for (let k = 0; k < 2; k++) {
     const x = W / 2 - 52 + k * 104;
-    g.fillStyle = PAL.nixieOff; g.font = 'bold 108px "Courier Prime", monospace'; g.fillText('8', x, 304);
+    g.fillStyle = PAL.nixieOff; g.font = `bold 108px ${FONT.type}`; g.fillText('8', x, 304);
     const d = n == null ? null : String(n).padStart(2, '0')[k];
     if (d != null) { g.shadowColor = PAL.nixie; g.shadowBlur = 18; g.fillStyle = PAL.nixie; g.fillText(d, x, 304); g.shadowBlur = 0; }
   }
-  g.fillStyle = go ? PAL.green : PAL.ink; g.font = 'bold 28px "Courier Prime", monospace';
+  g.fillStyle = go ? PAL.green : PAL.ink; g.font = `bold 28px ${FONT.type}`;
   g.fillText(n != null ? 'LAUNCH' : go ? 'GO FOR EVA' : s.suited ? 'AWAIT GO FROM MISSION OPS' : 'NOT SUITED', W / 2, 412);
+  boardTex.needsUpdate = true;
+}
+
+// The MISSION face, while a mission runs: what it is for, how far along, and that oxygen refills in here.
+function drawMission(s) {
+  const t = s.tally || { banked: 0, wanted: CFG.sample.manifest }, dark = s.powered === false || !!s.scene?.dark;
+  const key = ['run', t.banked, t.wanted, dark, fontsLoaded].join('|');
+  if (key === boardKey) return;
+  boardKey = key;
+  const g = board2d, W = boardCanvas.width, H = boardCanvas.height;
+  g.fillStyle = PAL.console; g.fillRect(0, 0, W, H);
+  g.strokeStyle = PAL.bezel; g.lineWidth = 16; g.strokeRect(8, 8, W - 16, H - 16);
+  g.strokeStyle = PAL.bakelite; g.lineWidth = 3; g.strokeRect(20, 20, W - 40, H - 40);
+  for (const [x, y] of [[34, 34], [W - 34, 34], [34, H - 34], [W - 34, H - 34]]) { g.fillStyle = PAL.bezel; g.beginPath(); g.arc(x, y, 8, 0, 7); g.fill(); }
+  g.textAlign = 'center'; g.textBaseline = 'middle';
+  g.fillStyle = PAL.ink; g.font = `bold 30px ${FONT.label}`; g.fillText('MISSION', W / 2, 66);
+  g.font = `bold 32px ${FONT.type}`; g.fillText(`BRING ${t.wanted} SAMPLES HOME`, W / 2, 140);
+  // banked OF wanted, on Nixie tubes
+  g.fillStyle = PAL.bakelite; g.fillRect(W / 2 - 210, 190, 140, 132); g.fillRect(W / 2 + 70, 190, 140, 132);
+  for (const [x, d] of [[W / 2 - 140, String(t.banked)], [W / 2 + 140, String(t.wanted)]]) {
+    g.font = `bold 108px ${FONT.type}`;
+    g.fillStyle = PAL.nixieOff; g.fillText('8', x, 258);
+    g.shadowColor = PAL.nixie; g.shadowBlur = 18; g.fillStyle = PAL.nixie; g.fillText(d, x, 258); g.shadowBlur = 0;
+  }
+  g.fillStyle = PAL.inkDim; g.font = `24px ${FONT.label}`; g.fillText('OF', W / 2, 258);
+  g.fillStyle = dark ? PAL.amber : PAL.ink; g.font = `bold 28px ${FONT.type}`;
+  g.fillText(dark ? 'BASE DARK: NO REFILL' : 'OXYGEN REFILLS IN HERE', W / 2, 400);
   boardTex.needsUpdate = true;
 }
 
@@ -1375,6 +1476,7 @@ renderer.setAnimationLoop(() => {
   radio.listen(headPos, tmpV);
   shake *= 0.86;
   if (mode === 'desk') camera.rotation.z = (Math.random() - 0.5) * shake;
+  drawBoard(); // the status board, the MISSION face and the briefing, in the hall
   drawResultBoard();
   debriefStep(Math.min(0.25, now - armFrame), now); // real time, like the arm and the airlock: a second of reading is a second on a slow machine too
   // On a laptop the radio key swings the arm up. In a headset it is on your own arm (see followArm).

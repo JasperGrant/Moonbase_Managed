@@ -1,6 +1,6 @@
 # Spec: light text guidance
 
-Status: written. The hand (below) is built (`client/hand.js`); the rest is not started. Audited against `main` at `02f587d` (the sample run is in). Read [CLAUDE.md](../CLAUDE.md), [DESIGN.md](DESIGN.md) and [SPEC-sample-run.md](SPEC-sample-run.md) first. This spec adds words; it changes no rule, no role and nothing a seat is allowed to know.
+Status: written. The hand (below) is built (`client/hand.js`). Phase 1 is built: the briefings and teletype lines in `client/shared/guide.js`, the pop-up on every seat (the astronaut's on its start screen and on a BRIEFING board in the hall), the console strips, and the MISSION face on the hall board. Phases 2 and on are not started. Audited against `main` at `02f587d` (the sample run is in). Read [CLAUDE.md](../CLAUDE.md), [DESIGN.md](DESIGN.md) and [SPEC-sample-run.md](SPEC-sample-run.md) first. This spec adds words; it changes no rule, no role and nothing a seat is allowed to know.
 
 **How it is checked:** no tests, screenshots or measurements in this pass, and `test/` is left alone. Each phase must boot with `npm start` and play without errors in the browser console. The crew playtests it.
 

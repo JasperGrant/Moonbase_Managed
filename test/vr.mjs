@@ -52,7 +52,8 @@ const SHOTS = !!process.env.VR_SHOTS;
 
 // The two media flags give the page a pretend microphone and say yes to its permission prompt, so that keying the radio really transmits.
 const browser = await chromium.launch({ args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist', '--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream'] });
-const page = await (await browser.newContext({ viewport: { width: 1280, height: 640 } })).newPage();
+const xrCtx = await browser.newContext({ viewport: { width: 1280, height: 640 } }); await xrCtx.addInitScript({ path: new URL('./briefed.js', import.meta.url).pathname });
+const page = await xrCtx.newPage();
 page.on('pageerror', e => problems.push(`page: ${e.message}\n${(e.stack || '').split('\n').slice(1, 3).join('\n')}`));
 page.on('console', m => { if (m.text().startsWith('DBG')) console.log(m.text()); if (m.type() === 'error' || /GL_INVALID|WebGL: INVALID/.test(m.text())) problems.push(`page: ${m.text()}`); });
 await page.addInitScript({ path: path.join(ROOT, 'test', 'fakexr.js') });

@@ -9,6 +9,7 @@ import { drawTool, drawFault, drawGlyph, drawSample } from '/shared/icons.js';
 import { FIELD, CRATERS, BOULDERS, LANDMARKS } from '/shared/field.js';
 import { seatTaken, seatRefused, kicked } from '/seat.js';
 import { createLobby } from '/lobby.js';
+import { briefHTML, lineText, pickLine } from '/shared/guide.js';
 import { music } from '/music.js';
 import { PAL, FONT, SAMPLE_COL, nixie, jewel, fontsReady } from '/shared/palette.js';
 
@@ -23,11 +24,6 @@ const clock = s => `${Math.floor(Math.max(0, s) / 60)}:${String(Math.floor(Math.
 // Colours and type: the 1960s palette (docs/DESIGN.md). The lobby keeps its own look.
 const C = { bg: PAL.consoleDeep, line: PAL.rule, ink: PAL.ink, dim: PAL.inkDim, green: PAL.green, amber: PAL.amber, red: PAL.red, blue: PAL.blue };
 
-const BRIEF = {
-  ops: '<b>You are the voice, the kit and the tally.</b> The only voice the astronaut hears: hold SPACE to talk. The astronaut holds one thing in each hand (a tool or a rock sample): your HANDS panel shows which. The mission is to bring rock samples home. Your TOOL LOG says roughly where each tool lies; your SAMPLE LOG says what is in hand, in the tray and banked. When they are suited up, you call them GO.',
-  tech: '<b>You have the EYES and the WHEELS.</b> Two rovers, two cameras, both at once: the Scout on W A S D, the Hauler on the arrows. C and / switch each camera between first and third person. The astronaut rides the Hauler. You have no map: the Scientist does.',
-  sci: '<b>You have the CHART and the FIELD GUIDE.</b> Only you know what a sample looks like. The chart sharpens wherever a rover drives. POWER and AIR say how bad a fault is.',
-};
 
 const net = connect(role);
 const radio = has('ops') ? new Radio(net) : null;
@@ -40,7 +36,8 @@ $('roleName').textContent = ROLES[role];
 document.title = `Moonbase: ${ROLES[role]}`;
 
 // ---------- build the static parts once ----------
-const briefs = ['ops', 'tech', 'sci'].filter(has).map(r => `<p class="brief">${role === 'all' ? `<b>${ROLES[r]}.</b> ` : ''}${BRIEF[r]}</p>`).join('');
+// The briefing card (client/shared/guide.js): who you are, what to do, your controls, who you talk to.
+const briefs = briefHTML(role);
 // The briefing and the mission plan open over the lobby, from a button in your own panel.
 $('sheet').innerHTML = `<h3>Briefing</h3>${briefs}<div id="plan"></div><button class="big" data-close>Back to the lobby</button>`;
 $('planSheet').addEventListener('click', e => { if (e.target === $('planSheet') || e.target.closest('[data-close]')) $('planSheet').hidden = true; });
@@ -64,18 +61,20 @@ const lobby = createLobby($('lobbyView'), {
 
 const tabs = (id, names) => `<div class="tabs" data-tabs="${id}">${names.map((n, i) => `<button type="button" class="${i ? '' : 'on'}" data-tab="${i}">${n}</button>`).join('')}</div>`;
 $('run').classList.toggle('all', role === 'all');
+const strip = id => `<div class="teletype" id="tt_${id}" hidden><i></i><span></span></div>`;
 $('run').innerHTML = [
-  has('ops') && `<div class="panel ops"><h3>Mission Ops</h3>
+  role === 'all' && strip('all'),
+  has('ops') && `<div class="panel ops"><h3>Mission Ops</h3>${role === 'all' ? '' : strip('ops')}
     <button id="ptt">HOLD SPACE TO TALK TO THE ASTRONAUT</button>
     <h2>Hands</h2><canvas id="handsCv" class="pic" width="560" height="150"></canvas>
     <h2>Tool log</h2><canvas id="toolCv" class="pic" width="560" height="330"></canvas>
     <p class="hint">CLICK A TOOL TO LIGHT A BEACON OVER IT FOR THE ASTRONAUT. CLICK IT AGAIN TO PUT IT OUT.</p>
     <h2>Sample log</h2><canvas id="sampleCv" class="pic" width="560" height="150"></canvas></div>`,
-  has('tech') && `<div class="panel tech"><h3>Technician</h3>
+  has('tech') && `<div class="panel tech"><h3>Technician</h3>${role === 'all' ? '' : strip('tech')}
     <div class="camwrap"><canvas id="cam"></canvas><canvas id="camHud"></canvas></div>
     <canvas id="techCv" class="pic" width="920" height="210"></canvas>
     <p class="hint" id="camHint"></p></div>`,
-  has('sci') && `<div class="panel sci"><h3>Scientist</h3>
+  has('sci') && `<div class="panel sci"><h3>Scientist</h3>${role === 'all' ? '' : strip('sci')}
     ${tabs('sci', ['SURVEY', 'GUIDE', 'POWER', 'AIR'])}
     <div data-pane="sci0"><canvas id="surveyCv" class="pic" width="560" height="660"></canvas>
       <p class="hint">CLICK THE CHART TO STAND A BEACON THERE FOR THE ASTRONAUT. CLICK THE BEACON TO PUT IT OUT.</p></div>
@@ -91,6 +90,7 @@ $('run').addEventListener('click', e => {
   if (!b) return;
   const id = b.parentElement.dataset.tabs, n = Number(b.dataset.tab);
   tabOn[id] = n;
+  if (id === 'sci' && n === 1) done.guide = true; // the GUIDE tab: the goal line has done its job
   for (const x of b.parentElement.children) x.classList.toggle('on', x === b);
   for (const pane of $('run').querySelectorAll(`[data-pane^="${id}"]`)) pane.hidden = pane.dataset.pane !== id + n;
   if (state) render();
@@ -108,6 +108,42 @@ setInterval(() => { $('link').textContent = net.open ? '' : 'NO LINK TO SERVER';
 // ---------- render ----------
 let testSlow = 1; // tests only (moonbase.drawEvery): redraw the instruments this many times less often
 const TOAST = { alarm: 'ALARM', solve: 'FIXED', hit: 'METEOR HIT', power: 'POWER BACK', gen: 'GENERATOR RUNNING', blackout: 'BASE DARK', found: 'SAMPLE BANKED', dud: 'DUD' };
+// ---------- the teletype strip (docs/SPEC-guidance.md, phase 1) ----------
+// What this seat has done, so its lines retire; and the line each strip is typing out.
+const done = { found: false, guide: false, scout: false, hauler: false, missions: 0 };
+let ttPhase = '';
+const strips = role === 'all' ? ['all'] : [role];
+const tt = {}; // seat -> { id, text, shown, at }
+function briefOnce() {
+  let seen = false;
+  try { seen = sessionStorage.getItem('moonbase-brief-' + role) === '1'; sessionStorage.setItem('moonbase-brief-' + role, '1'); } catch { /* no storage: show it each time */ }
+  if (!seen) $('planSheet').hidden = false;
+}
+function teletype(s) {
+  if (ttPhase === 'run' && s.phase === 'results') done.missions++;
+  ttPhase = s.phase;
+  if (s.tally?.banked > 0) done.found = true;
+  for (const seat of strips) {
+    const el = $('tt_' + seat); if (!el) continue;
+    const id = pickLine(seat, s, done), cur = tt[seat];
+    if (!cur || cur.id !== id) {
+      tt[seat] = { id, text: lineText(id, role === 'all'), shown: 0, at: performance.now() };
+      el.hidden = !id;
+      if (id) { el.classList.add('new'); setTimeout(() => el.classList.remove('new'), 1200); }
+    }
+  }
+}
+// About 30 characters a second, with a soft clatter.
+setInterval(() => {
+  for (const seat of strips) {
+    const t = tt[seat], el = $('tt_' + seat);
+    if (!t || !el || t.shown >= t.text.length) continue;
+    t.shown = Math.min(t.text.length, Math.floor((performance.now() - t.at) / 33));
+    el.querySelector('span').textContent = t.text.slice(0, t.shown);
+    if (t.shown % 2 === 0 && t.text[t.shown - 1] !== ' ') tone(1500 + Math.random() * 500, 0.012, 0.012, 'square');
+  }
+}, 33);
+
 function render() {
   const s = state;
   $('clock').textContent = clock(s.timeLeft ?? CFG.roundSeconds);
@@ -135,11 +171,13 @@ function render() {
     shown = view;
     music.mood(view === 'run' ? 'run' : 'calm');
     lobby.show(view === 'lobby');
+    if (view === 'lobby') briefOnce();
     if (view !== 'lobby') $('planSheet').hidden = true;
     for (const id of ['run', 'results']) $(id).hidden = id !== view;
     if (view === 'lobby') { $('toast').textContent = ''; $('toast').className = ''; }
   }
   lobby.update(s);
+  teletype(s);
   if (s.phase === 'lobby') renderPlan(s);
   if (view === 'run' && testSlow === 1) renderRun(s); // under moonbase.drawEvery the frame loop alone redraws
   if (view === 'results') renderResults(s);
@@ -152,7 +190,7 @@ function renderPlan(s) {
   const canEdit = has('ops');
   $('plan').innerHTML = `<h3>Mission</h3>
     <div class="vehicles">${Object.entries(MODES).map(([k, name]) =>
-      `<label class="pick ${k === s.mode ? 'sel' : ''} ${canEdit ? '' : 'off'}" data-mode="${k}"><b>${name}</b><span>${k === 'demo' ? 'The same five things break in the same order. For judges.' : 'Random faults and meteor showers.'}</span></label>`).join('')}</div>
+      `<label class="pick ${k === s.mode ? 'sel' : ''} ${canEdit ? '' : 'off'}" data-mode="${k}"><b>${name}</b>${k === 'demo' ? '' : '<span>Random faults and meteor showers.</span>'}</label>`).join('')}</div>
     <p class="hint">${canEdit ? 'The mission starts when all four seats are ready.' : 'Mission Ops picks the mission. It starts when all four seats are ready.'}</p>`;
 }
 $('plan').addEventListener('click', e => {
@@ -327,7 +365,7 @@ function drawHands(s) {
 // Mission Ops has the radio's sound effects. The other seats get a few small tones of their own, once the
 // page has been clicked (browsers need a gesture before they play sound).
 let actx = null;
-addEventListener('pointerdown', () => { if (!actx && !radio) { try { actx = new (window.AudioContext || window.webkitAudioContext)(); } catch { /* no sound */ } } });
+addEventListener('pointerdown', () => { if (!actx) { try { actx = new (window.AudioContext || window.webkitAudioContext)(); } catch { /* no sound */ } } });
 function tone(f, dur, vol, type = 'sine', at = 0) {
   if (!actx) return;
   const t = actx.currentTime + at, o = actx.createOscillator(), gn = actx.createGain();
@@ -719,7 +757,7 @@ if (has('tech')) {
   const BIND = { scout: ['KeyW', 'KeyS', 'KeyA', 'KeyD'], hauler: ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'] };
   const ALL = new Set(Object.values(BIND).flat());
   const which = code => Object.keys(BIND).find(id => BIND[id].includes(code));
-  const sendDrive = id => { const [u, d, l, r] = BIND[id]; net.send({ t: 'rover', id, throttle: (keys.has(u) ? 1 : 0) - (keys.has(d) ? 1 : 0), steer: (keys.has(l) ? 1 : 0) - (keys.has(r) ? 1 : 0) }); };
+  const sendDrive = id => { const [u, d, l, r] = BIND[id]; if ([u, d, l, r].some(k => keys.has(k))) done[id] = true; net.send({ t: 'rover', id, throttle: (keys.has(u) ? 1 : 0) - (keys.has(d) ? 1 : 0), steer: (keys.has(l) ? 1 : 0) - (keys.has(r) ? 1 : 0) }); };
   addEventListener('keydown', e => { if (!ALL.has(e.code) || e.target.closest?.('input, textarea')) return; e.preventDefault(); if (!keys.has(e.code)) { keys.add(e.code); sendDrive(which(e.code)); } });
   addEventListener('keyup', e => { if (keys.delete(e.code)) sendDrive(which(e.code)); });
   addEventListener('blur', () => { if (keys.size) { keys.clear(); sendDrive('scout'); sendDrive('hauler'); } });

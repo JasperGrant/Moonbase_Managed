@@ -41,7 +41,8 @@ const GL = ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swifts
 const browsers = [];
 async function open(url, size) { // a browser of its own each: software GL starves a shared one
   const b = await chromium.launch({ args: GL }); browsers.push(b);
-  const p = await (await b.newContext({ viewport: size })).newPage();
+  const c = await b.newContext({ viewport: size }); await c.addInitScript({ path: new URL('./briefed.js', import.meta.url).pathname });
+  const p = await c.newPage();
   p.on('pageerror', e => problems.push(`page ${url}: ${e.message}`));
   await p.goto(`http://localhost:${PORT}${url}`);
   return p;

@@ -41,7 +41,8 @@ const problems = [];
 const check = (ok, what) => { if (!ok) problems.push(what); return ok; };
 const browser = await chromium.launch({ args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist', '--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream'] });
 try {
-  const page = await (await browser.newContext({ viewport: { width: 960, height: 540 } })).newPage();
+  const c = await browser.newContext({ viewport: { width: 960, height: 540 } }); await c.addInitScript({ path: new URL('./briefed.js', import.meta.url).pathname });
+  const page = await c.newPage();
   page.on('pageerror', e => problems.push('page: ' + e.message));
   await page.goto(`http://localhost:${PORT}/astronaut`);
   await page.waitForTimeout(1500);

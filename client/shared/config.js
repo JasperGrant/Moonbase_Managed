@@ -151,7 +151,7 @@ export const PLACES = {
 // the first). A meteor entry is the moment the warning starts; impacts begin CFG.meteorWarnSeconds later.
 // A shower breaks nothing itself: caught in the open, the astronaut's suit starts leaking.
 export const SCRIPTS = {
-  // The same things in the same order every time, for judges.
+  // The demo mission: the same things in the same order every time.
   demo: [
     { ev: 'dust' },
     { ev: 'wheel', which: 'scout' },

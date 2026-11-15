@@ -289,3 +289,19 @@ body.period { background:var(--p-bakelite); }
 .period .log .solve, .period .log .power, .period .log .gen { color:var(--p-green); }
 .period .log .mistake, .period .log .miss, .period .log .hit, .period .log .blackout { color:var(--p-red); }
 .period .log .spawn, .period .log .alarm, .period .log .meteor { color:var(--p-dim); }
+
+/* ---------- guidance (docs/SPEC-guidance.md) ---------- */
+/* The teletype strip: one line of what to do now, at the top of each console panel (one across the top in 2-player mode). */
+.teletype { display:flex; align-items:center; gap:10px; min-height:34px; margin:0 0 12px; padding:6px 12px; background:var(--p-deep); border:1px solid var(--p-bezel); border-radius:2px; box-shadow:inset 0 1px 3px rgba(0,0,0,.5); font-family:var(--p-type); font-weight:700; font-size:14px; letter-spacing:.06em; color:var(--p-ink); white-space:nowrap; overflow:hidden; }
+.teletype i { flex:none; width:10px; height:10px; border-radius:50%; background:var(--p-amber-off); border:2px solid var(--p-bezel); }
+.teletype.new i { background:var(--p-amber); box-shadow:0 0 5px rgba(224,163,71,.7); }
+.teletype span::after { content:'_'; opacity:.6; }
+#run > .teletype { grid-column:1 / -1; }
+/* The briefing card: a cream card with engraved headings, on the briefing sheet. */
+.brief-card { background:var(--p-dial); color:var(--p-ink-dial); border:1px solid var(--p-bezel); outline:3px solid var(--p-deep); padding:16px 20px; margin:0 0 14px; font-family:var(--p-type); font-size:14px; line-height:1.45; }
+.brief-card h4 { font-family:var(--p-label); font-weight:400; letter-spacing:.24em; font-size:15px; margin:0 0 8px; color:var(--p-ink-dial); }
+.brief-card h5 { font-family:var(--p-label); font-weight:400; letter-spacing:.18em; font-size:10px; margin:12px 0 4px; color:var(--p-ink-dial); opacity:.72; text-transform:uppercase; }
+.brief-card p { margin:0; } .brief-card .story { font-style:italic; }
+.brief-card table { border-collapse:collapse; width:100%; }
+.brief-card th { font-family:var(--p-label); font-weight:400; font-size:9px; letter-spacing:.14em; text-align:left; vertical-align:top; padding:3px 12px 3px 0; white-space:nowrap; color:var(--p-ink-dial); opacity:.72; }
+.brief-card td { padding:3px 0; border-bottom:1px dotted rgba(36,34,30,.25); }

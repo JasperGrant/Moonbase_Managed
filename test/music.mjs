@@ -25,6 +25,7 @@ const step = what => console.log('  ' + what);
 
 const browser = await chromium.launch({ args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
 const ctx = await browser.newContext({ viewport: { width: 960, height: 540 } });
+await ctx.addInitScript({ path: new URL('./briefed.js', import.meta.url).pathname });
 // Headless Chromium lets any page play sound. A real browser does not until the person has clicked or
 // pressed a key on that page, so put that rule back.
 // (Not navigator.userActivation: Playwright's evaluate() counts as a gesture, so the test's own
