@@ -575,7 +575,6 @@ const kit = (g, tool) => {
 // ---------- the demo mission, played well, is a win ----------
 {
   const g = new Game(rng);
-  g.setRoverFaults(true); // the whole demo, the wheel included
   g.start();
   g.oxygen = g.o2Max;
   // The crew's sample run, in one go: fetch every sample the manifest wants, from where the chart showed it.
@@ -587,7 +586,7 @@ const kit = (g, tool) => {
   inside(g);
   assert.deepEqual(g.view('sci').manifest.map(m => m.got), [true, true, true, true]);
   const peak = { n: 0 };
-  let busy = 0, fixes = 0;
+  let busy = 0, fixes = 0, wheel = false;
   for (let t = 0; t < CFG.roundSeconds * 10 + 50 && g.phase === 'run'; t++) {
     g.tick(0.1);
     peak.n = Math.max(peak.n, Object.keys(g.faults).length);
@@ -595,6 +594,7 @@ const kit = (g, tool) => {
     if (busy-- > 0) continue;
     const type = Object.keys(g.faults)[0];
     if (!type) continue;
+    if (type === 'wheel') wheel = true;
     const tool = { dust: 'brush', wheel: 'tire', hull: 'welder', suit: 'patch' }[type];
     if (tool && !g.has(tool)) { kit(g, tool); busy = 60; continue; }
     if (type === 'dust') { at(g, PLACES.panels[1]); for (let c = 0; c < DUST_CELLS; c++) g.act({ fix: 'dust', cell: c }); }
@@ -608,7 +608,8 @@ const kit = (g, tool) => {
   assert.equal(g.phase, 'results');
   assert.equal(g.result.won, true, g.result.reason);
   assert.equal(peak.n, 1, 'one fault at a time, all mission');
-  assert.ok(fixes >= 4, 'the director kept finding things to break, one by one');
+  assert.ok(fixes >= 3, 'the director kept finding things to break, one by one');
+  assert.ok(!wheel, 'rover faults are off by default: no wheel broke');
   assert.equal(g.result.wanted, 4);
   assert.ok(g.score >= 4 * CFG.sample.wanted + fixes * CFG.fixPoints);
   console.log(`good crew, demo mission: banked ${g.result.wanted}/4, fixed ${g.result.fixed}, score ${g.score}`);
