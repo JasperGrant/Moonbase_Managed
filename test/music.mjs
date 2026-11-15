@@ -191,6 +191,32 @@ try {
     check(s.playing && near(s.at, clockPos(s.length), 1.0, s.length), `${url}: the theme is not playing, or not in step with the clock: ` + JSON.stringify(s));
     await p.close();
   }
+
+  step('the MUSIC checkbox silences the theme on this browser, and is remembered');
+  {
+    const p = await open('/ops');
+    await until(p, s => s.length > 0);
+    await p.keyboard.press('Shift');
+    s = await until(p, s => s.playing && s.gain > 0.3, 8);
+    check(s.enabled && s.gain > 0.3, 'the theme should be audible to begin with: ' + JSON.stringify(s));
+    check(await p.isChecked('#musicBox input'), 'the MUSIC box should start ticked');
+    await p.uncheck('#musicBox input');
+    s = await until(p, s => s.gain < 0.02, 8);
+    check(!s.enabled && s.gain < 0.02 && s.volume < 0.02, 'unticking the box should fade the theme to silence: ' + JSON.stringify(s));
+    await p.close();
+    const q = await open('/admin');
+    await until(q, s => s.length > 0);
+    check(!(await q.isChecked('#musicBox input')), 'the choice should carry over to another page in this browser');
+    await q.keyboard.press('Shift');
+    await q.waitForTimeout(2500);
+    s = await status(q);
+    check(s.gain < 0.02 && s.volume < 0.02, 'and the other page should stay silent too: ' + JSON.stringify(s));
+    if (process.env.MUSIC_SHOT) await q.screenshot({ path: process.env.MUSIC_SHOT, clip: { x: 0, y: 490, width: 200, height: 50 } }).catch(() => {});
+    await q.check('#musicBox input');
+    s = await until(q, s => s.gain > 0.3, 8);
+    check(s.enabled && s.gain > 0.3, 'ticking it again should bring the theme back: ' + JSON.stringify(s));
+    await q.close();
+  }
 } catch (e) {
   problems.push('music test: ' + e.message);
 } finally {
