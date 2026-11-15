@@ -16,6 +16,7 @@ import { FAULTS, TOOLS, PLACES, CFG } from '/shared/config.js';
 import { drawTool } from '/shared/icons.js';
 import { PAL } from '/shared/palette.js';
 import { makeCueSprite } from '/hand.js';
+import { tag, TAG_W } from '/labels.js';
 import { loadGlove, loadPeriod, MODELS } from '/shared/assets.js';
 import { HALL, COR, SOLIDS, SHELVES, ROOM } from '/interior.js';
 import { CHAMBER } from '/airlock.js';
@@ -59,6 +60,16 @@ const DECOYS = {
   'grease-gun': { mass: 1.2, at: [0.45, 0.96, -4.3] },
 };
 const BIG = id => id === 'tire' || id === 'gen';
+// Where each tool's tag is tied on (docs/SPEC-guidance.md, phase 2): position and rotation in the tool's own
+// frame, the tag's face toward whichever side is up when the tool lies at rest (BODY.rest), so a tool on the
+// floor or a bench shows its name, and turned over shows what it is for.
+const TAG_AT = {
+  brush:  { p: [0, 0.0195, -0.22], r: [-Math.PI / 2, 0, 0] },              // flat on the back of the head
+  patch:  { p: [0, -0.163, -0.047], r: [0, 0, -Math.PI / 2] },            // hung off the bottom edge, face up with the kit's
+  welder: { p: [0.036, 0.02, -0.11], r: [0, Math.PI / 2, 0] },             // along the barrel, on the side that lies up
+  tire:   { p: [0.022, 0, 0], r: [0, Math.PI / 2, 0] },                    // tied across the spokes at the hub
+  gen:    { p: [0.02, 0.03, 0.152], r: [0, 0, 0] },                       // hung on the front, the face the hall sees
+};
 
 export function buildFixtures(THREE, world, { rig, camera, send, sfx = () => {}, sfxAt = null, pulse = () => {}, phys = null, interior = null, where = () => 'out', onRail = () => false, rideCue = () => null }) {
   const F = world.fixtures;
@@ -146,12 +157,21 @@ export function buildFixtures(THREE, world, { rig, camera, send, sfx = () => {},
     tools.gen = g;
   }
   for (const id in tools) { tools[id].name = 'Tool_' + id; tools[id].traverse(o => { if (o.isMesh) o.castShadow = true; }); }
+  for (const id in TAG_AT) { // the name tags, after the shadows: a tag is too thin to cast one
+    const t = tag(THREE, id), { p, r } = TAG_AT[id];
+    t.position.set(...p); t.rotation.set(...r); tools[id].add(t);
+  }
 
   // ---------- the decoys: NASA hand tools, the same shapes as the old shadow board ----------
   for (const [id, d] of Object.entries(DECOYS)) {
     const g = new THREE.Group(); g.name = 'Decoy_' + id;
     const [sx, sy, sz] = MODELS[id].size;
     g.userData = { decoy: true, tip: new THREE.Vector3(), hit: [sx + 0.06, sy + 0.06, sz + 0.06, 0], size: [sx, sy, sz] };
+    // Tied to one side by its loop, lying flat beside it: front WRENCH and so on, back SPARE.
+    const t = tag(THREE, id), along = sz >= sx;
+    if (along) t.position.set(sx / 2 + TAG_W / 2 - 0.01, -sy / 2 + 0.003, sz * 0.2);
+    else { t.position.set(sx * 0.2, -sy / 2 + 0.003, sz / 2 + TAG_W / 2 - 0.01); t.rotation.y = -Math.PI / 2; }
+    t.rotation.x = -Math.PI / 2; t.rotation.order = 'YXZ'; g.add(t);
     loadPeriod(THREE, id, { rough: 0.55, metal: 0.6, merge: true }).then(m => {
       const box = new THREE.Box3().setFromObject(m), mid = box.getCenter(V());
       m.position.sub(mid); g.add(m);

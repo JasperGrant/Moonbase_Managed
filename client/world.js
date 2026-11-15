@@ -12,6 +12,7 @@ import { buildDust } from '/dust.js';
 import { loadPeriod, loadModel } from '/shared/assets.js';
 import { buildAvatar } from '/avatar.js';
 import { buildAirlock, CHAMBER } from '/airlock.js';
+import { plate as namePlate } from '/labels.js';
 
 // The base sits on the Connecting Ridge between Shackleton and de Gerlache craters at the lunar
 // south pole (89.45 S, 222.69 E), an Artemis III candidate region. The ground beyond the pad and
@@ -647,6 +648,10 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
     panel.lookAt(panel.position.clone().add(sunFlat)); // local +z is the face you brush
     panel.name = 'Panel_Solar';
     scene.add(panel);
+    if (p === PLACES.panels[1]) { // SOLAR ARRAY, on the middle post, facing the side you brush from
+      const yaw = Math.atan2(sunFlat.x, sunFlat.z), pl = namePlate(THREE, 'solar', 0.34);
+      pl.position.set(p.x + Math.sin(yaw) * 0.066, 0.5, p.z + Math.cos(yaw) * 0.066); pl.rotation.y = yaw; scene.add(pl);
+    }
     panel.updateMatrixWorld();
     dustPanels.push(panel);
   }
@@ -878,6 +883,10 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
       grip.rotation.z = Math.PI / 2; grip.name = 'Grip_Rail';
       grip.userData.glow = (on, t) => { gripMat.emissiveIntensity = on ? 0.55 + 0.25 * Math.sin(t * 5) : 0; };
       rover.userData.grip = grip;
+      const railPlate = namePlate(THREE, 'rail', 0.36); // RIDER: HOLD RAIL, hung under the grip tape
+      railPlate.position.set(0, 1.36, -1.3); railPlate.rotation.y = Math.PI; rover.add(railPlate);
+      const trayPlate = namePlate(THREE, 'tray', 0.36); // SAMPLE TRAY, on the aft bay under the cups
+      trayPlate.position.set(0, 0.88, -1.231); trayPlate.rotation.y = Math.PI; rover.add(trayPlate);
       rover.userData.rail = new THREE.Object3D(); rover.userData.rail.position.set(0, 1.42, -1.3); rover.add(rover.userData.rail);
       rover.userData.plate = new THREE.Object3D(); rover.userData.plate.position.set(P.x, P.y, P.z); rover.add(rover.userData.plate);
       // The tray: four open sample cups on the aft bay.
@@ -982,6 +991,8 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
     const tex = new THREE.CanvasTexture(cv); tex.colorSpace = THREE.SRGBColorSpace;
     const plateM = new THREE.Mesh(new THREE.PlaneGeometry(0.34, 0.13), new THREE.MeshBasicMaterial({ map: tex, toneMapped: false }));
     plateM.name = 'Counter_Port'; plateM.position.set(-0.05, 1.56, -0.135); port.add(plateM);
+    const portPlate = namePlate(THREE, 'port', 0.26); // SAMPLE PORT, on the collar's front lip, tipped up
+    portPlate.position.set(0, 0.99, 0.232); portPlate.rotation.x = -0.55; port.add(portPlate);
     port.userData = { hinge, lamp: lampP, cv, tex, mouth: new THREE.Vector3(0, 1.06, 0.02), key: '', flashUntil: 0, flash: '', lastN: 0 };
     // Not added to the scene here: it stands in the hall, in room coordinates (client/astronaut.js adds it there).
   }
