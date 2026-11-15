@@ -275,6 +275,9 @@ try {
   const pitch = await astro.evaluate(() => Math.abs(window.moonbase.camera.rotation.x));
   if (pitch > 0.2) problems.push(`astronaut: camera pitched ${pitch.toFixed(2)} rad right after entering (pointer-lock jump)`);
   await astro.evaluate(installHelpers);
+  // Software WebGL draws about a frame a second, and every scripted step waits on frames, so the mission's
+  // clock outran the script. Draw one frame in 8 during the mission; the logic still runs every frame.
+  await astro.evaluate(() => window.moonbase.drawEvery(8));
 
   // Ready up. The astronaut does not: entering the game (the desk button here) tells the server they are
   // suited, and Mission Control (2-player mode, so the crew is complete) calls them GO from their panel
@@ -355,6 +358,7 @@ try {
   // leaves first: the crew goes to the lobby, the astronaut is back at the READY board, and the
   // console keeps its results up with the CREW IN LOBBY lamp lit until it leaves too.
   step('the debrief and the way back to the lobby');
+  await astro.evaluate(() => window.moonbase.drawEvery(1)); // every frame drawn again for the checks that look at pictures
   const ctlOut = await ctl.evaluate(() => ({ button: !!document.querySelector('#results [data-lobby]'), lamp: document.getElementById('crewLamp')?.classList.contains('on'), left: document.getElementById('debriefLeft')?.textContent }));
   if (!ctlOut.button || ctlOut.lamp || !(Number(ctlOut.left) > 0)) problems.push('console: the results should have BACK TO LOBBY, the lamp off and the seconds left: ' + JSON.stringify(ctlOut));
   const cuff = await astro.evaluate(async () => { for (let i = 0; i < 40 && !window.moonbase.arm.shown?.debrief; i++) await new Promise(r => setTimeout(r, 100)); return { debrief: window.moonbase.debrief(), shown: window.moonbase.arm.shown, board: window.moonbase.resultBoard.visible }; });

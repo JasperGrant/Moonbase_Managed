@@ -1096,6 +1096,7 @@ let snapWaiting = null;
 const snap = () => new Promise(resolve => { snapWaiting = resolve; });
 let lastFrame = performance.now() / 1000, mainCalls = 0;
 let armFrame = lastFrame;
+let drawEvery = 1, skipped = 0; // see moonbase.drawEvery
 renderer.setAnimationLoop(() => {
   const now = performance.now() / 1000, dt = Math.min(0.05, now - lastFrame);
   lastFrame = now;
@@ -1168,6 +1169,9 @@ renderer.setAnimationLoop(() => {
   if (!arm.tracked) arm.update(Math.min(0.25, now - armFrame), keyed || (!!debrief && !!mode)); // real time, so the arm is as quick on a slow machine
   armFrame = now;
   if (arm.group.visible) drawGauges(now);
+  // Tests only (moonbase.drawEvery): on a machine with software WebGL, draw one frame in n so the game's
+  // logic keeps pace with a scripted mission. Matrices still update, so aiming and clicking stay right.
+  if (drawEvery > 1 && ++skipped % drawEvery && !snapWaiting) { scene.updateMatrixWorld(); return; }
   renderScope();
   choosePortal(now);
   keepStencil(!!chosen);
@@ -1181,6 +1185,7 @@ renderer.setAnimationLoop(() => {
 // For debugging from the browser console, and for the tests: moonbase.state(), moonbase.fx.targets() ...
 window.moonbase = { resetStanding: () => { standing = 1.2; }, state: () => state, fx, world, interior, radio, rig, camera, net, board, THREE, scene, use: () => use(null), headset: () => headset, sendPose, myPose, teleport, turnRig,
   where: () => where, placeInside, showPlace, renderer, phys, forcePortal: false,
+  drawEvery: n => { drawEvery = Math.max(1, n | 0); }, // tests: draw one frame in n (the logic still runs every frame)
   // For the tests: stand the head at (x, z) in a place ('in': room coordinates, 'out': world), facing yaw (0 = north).
   standAt(to, x, z, yaw = 0) { cycle = null; showPlace(to); rig.rotation.set(0, yaw, 0); rig.position.set(0, 0, 0); rig.updateMatrixWorld(true); camera.getWorldPosition(headPos); const p = to === 'in' ? interior.toWorld(x, z) : { x, z }; rig.position.x = p.x - headPos.x; rig.position.z = p.z - headPos.z; rig.updateMatrixWorld(true); },
   airlock: () => cycle && { ...cycle }, door: () => door, portal: () => chosen && { to: chosen.to, glass: chosen.glass.name, calls: portalCalls }, calls: () => ({ portalMs, main: mainCalls, portal: chosen ? portalCalls : 0, physicsMs: phys.stepMs, bodies: phys.count() }), outage: on => { debugOutage = on; }, wreck: on => { debugDamage = on; },
