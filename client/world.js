@@ -379,7 +379,7 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
 
   // ---------- rocks ----------
   // Two shapes (jagged, rounded), each displaced by noise, instanced many times.
-  const SITES = [...Object.values(PLACES.doors).map(d => ({ x: d.x + Math.sin(d.ry) * 2, z: d.z + Math.cos(d.ry) * 2 })), ...PLACES.panels, ...Object.values(PLACES.rovers), PLACES.depot, PLACES.dish, PLACES.drill, PLACES.port];
+  const SITES = [...Object.values(PLACES.doors).map(d => ({ x: d.x + Math.sin(d.ry) * 2, z: d.z + Math.cos(d.ry) * 2 })), ...PLACES.panels, ...Object.values(PLACES.rovers), PLACES.depot, PLACES.dish, PLACES.drill];
   const SOLIDS = [...FIELD_BOULDERS.map(b => ({ x: b.x, z: b.z, r: b.r })), ...LANDMARKS];
   const keepClear = (x, z, m) => Math.hypot(x, z) > 4.5 + m && SITES.every(s => Math.hypot(x - s.x, z - s.z) > 2.8 + m) && SOLIDS.every(o => Math.hypot(x - o.x, z - o.z) > o.r + m + 0.5);
   // A rock: a sphere pushed about by noise (low-frequency lumps plus ridged creases), stretched to its
@@ -960,7 +960,7 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
     dustGeo.attributes.position.needsUpdate = true;
   }
 
-  // ---------- the sample port: a hopper on the habitat wall beside door S ----------
+  // ---------- the sample port: a hopper on the hall's east wall (the page puts it in the hall) ----------
   const port = new THREE.Group(); port.name = 'Port_Sample';
   {
     const P = PLACES.port;
@@ -983,7 +983,7 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
     const plateM = new THREE.Mesh(new THREE.PlaneGeometry(0.34, 0.13), new THREE.MeshBasicMaterial({ map: tex, toneMapped: false }));
     plateM.name = 'Counter_Port'; plateM.position.set(-0.05, 1.56, -0.135); port.add(plateM);
     port.userData = { hinge, lamp: lampP, cv, tex, mouth: new THREE.Vector3(0, 1.06, 0.02), key: '', flashUntil: 0, flash: '', lastN: 0 };
-    scene.add(port);
+    // Not added to the scene here: it stands in the hall, in room coordinates (client/astronaut.js adds it there).
   }
   function drawPort(banked, wanted) {
     const u = port.userData, key = banked + '/' + wanted;
@@ -1035,11 +1035,16 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
     'dusty-pale': new THREE.MeshStandardMaterial({ map: sampleTex(S.dusty, S.anorDust, 'grain'), roughness: 0.95, metalness: 0 }),
   };
   const SAMPLE_MAX = 16;
-  const sampleIM = {};
+  const sampleIM = {}, carriedIM = {};
+  const carried = new THREE.Group(); carried.name = 'Samples_Carried'; scene.add(carried);
   for (const look of LOOKS) {
     const im = new THREE.InstancedMesh(sampleGeo[look], sampleMat[look], SAMPLE_MAX);
     im.name = 'Samples_' + look; im.count = 0; im.castShadow = true; im.receiveShadow = true; im.frustumCulled = false;
     scene.add(im); sampleIM[look] = im;
+    // The same rock in a hand, falling, or lying on the hall floor: drawn wherever you are, inside or out.
+    const held = new THREE.InstancedMesh(sampleGeo[look], sampleMat[look], SAMPLE_MAX);
+    held.name = 'Samples_Carried_' + look; held.count = 0; held.castShadow = true; held.receiveShadow = true; held.frustumCulled = false;
+    carried.add(held); carriedIM[look] = held;
   }
   // The orange soil sits on a stained patch of ground.
   const stainTex = canvasTexture(THREE, 128, 128, (d, w, h, g) => {
@@ -1054,31 +1059,41 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
   const hashId = id => { let h = 7; for (const c of id) h = (h * 31 + c.charCodeAt(0)) % 9973; return h / 9973; };
   const sampleSize = id => 0.17 + hashId(id) * 0.12;
   const sPos = new THREE.Vector3(), sQ = new THREE.Quaternion(), sE = new THREE.Euler(), sS = new THREE.Vector3(), sM = new THREE.Matrix4(), nrm = new THREE.Vector3(), UPV = new THREE.Vector3(0, 1, 0);
-  let sampleOverride = null; // (id) => a world position for a sample in a hand or falling, or null to hide it
+  let sampleOverride = null; // (id) => a world position for a sample in a hand, falling or indoors; null: the server's word
   let lastSamples = [];
   function drawSamples(list) {
     lastSamples = list || [];
-    const counts = {}; for (const l of LOOKS) counts[l] = 0;
+    const counts = {}, held = {}; for (const l of LOOKS) counts[l] = held[l] = 0;
     let stainN = 0;
     for (const s of lastSamples) {
+      const o = sampleOverride ? sampleOverride(s.id) : null;
+      if (o) { // in a hand, falling, or on the hall floor: the batch that is drawn in both places
+        const im = carriedIM[s.look]; if (!im || held[s.look] >= SAMPLE_MAX) continue;
+        const h = hashId(s.id + 'r');
+        sE.set(h * 0.6, h * 6.28, (h - 0.5) * 0.5);
+        im.setMatrixAt(held[s.look]++, sM.compose(sPos.copy(o), sQ.setFromEuler(sE), sS.setScalar(sampleSize(s.id))));
+        continue;
+      }
+      if (s.inside) continue; // indoors, and nobody said where: not drawn on the Moon
       const im = sampleIM[s.look]; if (!im || counts[s.look] >= SAMPLE_MAX) continue;
       const size = sampleSize(s.id), h = hashId(s.id + 'r');
       let place = null;
-      const o = sampleOverride ? sampleOverride(s.id) : null;
-      if (o) place = sPos.copy(o);
-      else if (s.at === 'ground') place = sPos.set(s.x, height(s.x, s.z) + size * 0.3, s.z);
+      if (s.at === 'ground') place = sPos.set(s.x, height(s.x, s.z) + size * 0.3, s.z);
       else if (s.at === 'tray' && rover.userData.cups[s.slot]) { rover.userData.cups[s.slot].getWorldPosition(sPos); sPos.y += 0.09; place = sPos; }
       if (!place) continue;
       sE.set(h * 0.6, h * 6.28, (h - 0.5) * 0.5);
-      sM.compose(place, sQ.setFromEuler(sE), sS.setScalar(s.at === 'tray' && !o ? Math.min(size, 0.13) : size));
+      sM.compose(place, sQ.setFromEuler(sE), sS.setScalar(s.at === 'tray' ? Math.min(size, 0.13) : size));
       im.setMatrixAt(counts[s.look]++, sM);
-      if (s.look === 'ochre-beads' && s.at === 'ground' && !o) {
+      if (s.look === 'ochre-beads' && s.at === 'ground') {
         normalAt(s.x, s.z, nrm); sQ.setFromUnitVectors(UPV, nrm);
         sM.compose(sPos.set(s.x, height(s.x, s.z) + 0.01, s.z), sQ, sS.setScalar(1 + h));
         stains.setMatrixAt(stainN++, sM);
       }
     }
-    for (const l of LOOKS) { sampleIM[l].count = counts[l]; sampleIM[l].instanceMatrix.needsUpdate = true; }
+    for (const l of LOOKS) {
+      sampleIM[l].count = counts[l]; sampleIM[l].instanceMatrix.needsUpdate = true;
+      carriedIM[l].count = held[l]; carriedIM[l].visible = held[l] > 0; carriedIM[l].instanceMatrix.needsUpdate = true; // empty: no draw call
+    }
     stains.count = stainN; stains.instanceMatrix.needsUpdate = true;
   }
 
@@ -1103,6 +1118,8 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
     puff(p, n = 10, speed = 0.6) { for (let i = 0; i < n; i++) { const a = Math.random() * 6.28; kick(p.x, p.y + 0.05, p.z, Math.cos(a) * speed * Math.random(), 0.3 + Math.random() * speed, Math.sin(a) * speed * Math.random()); } },
     // Where a sample in a hand (or falling) is drawn: (id) => world position, or null to leave it to the server's word.
     set sampleOverride(fn) { sampleOverride = fn; },
+    // The group that draws those: not part of the surface, so it is not hidden indoors.
+    carriedSamples: carried,
     redrawSamples() { drawSamples(lastSamples); },
     drawSamples,
     // Call every frame.

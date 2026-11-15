@@ -316,19 +316,26 @@ export class Game {
     } else if (a.pick !== undefined) {
       // A sample off the ground or out of a cup. Two hands: two samples, or a sample and a tool.
       const s = this.sample(a.pick);
-      if (!s || this.astro.inside || this.handsFree < 1) return;
-      if (s.at === 'ground') { if (!this.near(s, CFG.sample.reach)) return; }
-      else if (s.at === 'tray') { if (!this.near(this.rovers.hauler, 4)) return; this.tray[s.slot] = null; delete s.slot; }
+      if (!s || this.handsFree < 1) return;
+      if (s.at === 'ground') { if (s.inside ? !this.astro.inside : this.astro.inside || !this.near(s, CFG.sample.reach)) return; }
+      else if (s.at === 'tray') { if (this.astro.inside || !this.near(this.rovers.hauler, 4)) return; this.tray[s.slot] = null; delete s.slot; }
       else return;
       s.at = 'hand';
       this.carry.push(s.id);
     } else if (a.put !== undefined) {
-      // Let go of a sample: it lies where it came to rest (near the astronaut), or outside the door if dropped indoors.
+      // Let go of a sample: it lies where it came to rest, near the astronaut outside, or on the hall floor
+      // (room coordinates) if dropped indoors.
       const s = this.sample(a.put);
       if (!s || s.at !== 'hand') return;
       this.unCarry(s.id);
       s.at = 'ground';
-      const ok = num(a.x) && num(a.z) && !this.astro.inside && Math.hypot(a.x - this.astro.x, a.z - this.astro.z) < 6 && Math.hypot(a.x, a.z) <= CFG.bounds;
+      if (this.astro.inside) {
+        const ok = num(a.x) && num(a.z) && Math.abs(a.x) < 6 && a.z > -18 && a.z < 3;
+        s.inside = true; s.x = ok ? a.x : 0; s.z = ok ? a.z : -1.3;
+        return;
+      }
+      delete s.inside;
+      const ok = num(a.x) && num(a.z) && Math.hypot(a.x - this.astro.x, a.z - this.astro.z) < 6 && Math.hypot(a.x, a.z) <= CFG.bounds;
       s.x = ok ? a.x : this.astro.x; s.z = ok ? a.z : this.astro.z;
     } else if (a.tray !== undefined) {
       const s = this.sample(a.tray);
@@ -338,7 +345,7 @@ export class Game {
       s.at = 'tray'; s.slot = a.slot; this.tray[a.slot] = s.id;
     } else if (a.bank !== undefined) {
       const s = this.sample(a.bank);
-      if (!s || s.at !== 'hand' || this.astro.inside || !this.near(PLACES.port, CFG.sample.portReach)) return;
+      if (!s || s.at !== 'hand' || !this.astro.inside) return; // the port is in the hall: samples come home
       this.bank(s);
     } else if (a.fix === 'dust') {
       const f = this.faults.dust;
@@ -425,8 +432,8 @@ export class Game {
   // in a hand or a cup. Only what it looks like: never whether it is real.
   samplesNear(points) {
     const r = CFG.sample.drawRadius;
-    return this.samples.filter(s => s.at === 'hand' || s.at === 'tray' || (s.at === 'ground' && points.some(p => Math.hypot(p.x - s.x, p.z - s.z) < r)))
-      .map(s => ({ id: s.id, look: s.look, x: s.x, z: s.z, at: s.at, ...(s.at === 'tray' ? { slot: s.slot } : {}) }));
+    return this.samples.filter(s => s.at === 'hand' || s.at === 'tray' || (s.at === 'ground' && (s.inside || points.some(p => Math.hypot(p.x - s.x, p.z - s.z) < r))))
+      .map(s => ({ id: s.id, look: s.look, x: s.x, z: s.z, at: s.at, ...(s.at === 'tray' ? { slot: s.slot } : {}), ...(s.inside && s.at === 'ground' ? { inside: true } : {}) }));
   }
 
   // What can physically be seen out on the surface: the astronaut's eyes and the rover cameras.
@@ -461,7 +468,7 @@ export class Game {
       pct: Math.round(100 * this.seen.reduce((n, v) => n + v, 0) / this.seen.length),
       rovers: { scout: { x: rv.scout.x, z: rv.scout.z, ry: rv.scout.ry }, hauler: { x: rv.hauler.x, z: rv.hauler.z, ry: rv.hauler.ry } },
       astro: a.inside ? { x: 0, z: 0, ry: a.ry, inside: true } : a.riding || this.seenAt(a.x, a.z) ? { x: a.x, z: a.z, ry: a.ry, riding: !!a.riding } : null,
-      samples: this.samples.filter(s => s.at === 'ground' && s.kind !== 'dud' && this.seenAt(s.x, s.z)).map(s => ({ id: s.id, kind: s.kind, x: s.x, z: s.z })),
+      samples: this.samples.filter(s => s.at === 'ground' && !s.inside && s.kind !== 'dud' && this.seenAt(s.x, s.z)).map(s => ({ id: s.id, kind: s.kind, x: s.x, z: s.z })),
       tools: Object.entries(this.tools).filter(([, t]) => t.at === 'loose' && !t.inside && this.seenAt(t.x, t.z)).map(([id, t]) => ({ id, x: t.x, z: t.z })),
       fault: null,
     };
