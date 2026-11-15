@@ -335,7 +335,7 @@ export function buildArm(THREE) {
   function draw(info) {
     const s = info.state;
     const o2 = s ? Math.round(s.oxygen) : null, t = s ? Math.max(0, Math.ceil(s.timeLeft)) : null, alarms = info.alarms || 0;
-    const held = info.held || '';
+    const held = Array.isArray(info.held) ? info.held : [null, info.held || null]; // [left, right]
     const level = info.zoom > 1.01 ? Math.max(1, Math.min(5, Math.round(info.zoom - 1))) : 0;
     const debrief = !!info.debrief;
     const sm = info.samples;
@@ -392,10 +392,13 @@ export function buildArm(THREE) {
     if (info.radio === 'rx') speaker(506, 196, BLUE);
     else microphone(506, 198, radio ? radio[1] : PAL.inkDim, info.radio === 'tx', info.radio === 'dead' ? RED : info.radio === 'nomic' ? AMBER : null);
 
-    // The hand: one jewel lamp, lit while a tool is held, and that tool's silhouette beside it (a decoy is
-    // just the lamp: it is not one of the five).
-    jewel(g, 470, 330, 11, 'green', !!held);
-    if (['brush', 'patch', 'welder', 'tire', 'gen'].includes(held)) drawTool(g, held, 520, 326, 40, PAL.ink);
+    // The hands, left and right: a jewel lamp each, lit while that hand holds something, and the tool's
+    // silhouette beside it (a decoy lights the lamp and shows nothing). Icons only on the cuff.
+    held.forEach((id, n) => {
+      const x = 452 + n * 82;
+      jewel(g, x, 330, 10, 'green', !!id);
+      if (['brush', 'patch', 'welder', 'tire', 'gen'].includes(id)) drawTool(g, id, x + 36, 326, 34, PAL.ink);
+    });
     at(592, 96, 0.78, () => warning(0, 0, alarms > 0)); // one thing goes wrong at a time
     // The samples: a rock, and one pip for each the mission wants, lit as each is banked.
     if (sm) {

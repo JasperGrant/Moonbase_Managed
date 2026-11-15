@@ -66,7 +66,7 @@ main { padding:14px 16px; }
 .termrow { display:flex; gap:6px; margin-top:6px; }
 .termrow input { flex:1; background:#000; color:var(--green); border:1px solid var(--line); border-radius:4px; padding:.5em; font:inherit; font-size:18px; letter-spacing:.2em; text-transform:uppercase; }
 
-#map { width:100%; max-width:460px; aspect-ratio:1; display:block; background:#000; border:1px solid var(--line); border-radius:4px; }
+#map { width:100%; max-width:640px; aspect-ratio:1; display:block; background:#000; border:1px solid var(--line); border-radius:4px; }
 #cam { width:100%; aspect-ratio:16/9; display:block; background:#000; border:1px solid var(--line); border-radius:4px; margin-top:10px; }
 .hint { color:var(--dim); font-size:12px; margin:.5em 0 0; }
 

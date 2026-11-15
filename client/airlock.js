@@ -10,7 +10,10 @@
 // Porthole_Inner, Porthole_Outer, Lamp_Status, Dial_Pressure, Floor_Trigger.
 import { PAL } from '/shared/palette.js';
 
-export const CHAMBER = { width: 1.5, depth: 1.3, height: 2.4, door: { hw: 0.55, hh: 1.95 }, port: { y: 1.4, r: 0.17 } };
+export const CHAMBER = { width: 1.5, depth: 1.3, height: 2.4, door: { hw: 0.55, hh: 1.95 }, port: { y: 1.4, r: 0.17 },
+  // How far each outdoor chamber stands off its hatch on the habitat model: the model's skin (and its painted
+  // door) bulges up to 6 cm out there, and showed through the inner hatch and the back wall.
+  outset: 0.1 };
 export const OPEN = 1.9; // radians a hatch swings when open
 
 // The painted inside of the chamber, drawn once per page and shared by every chamber.
@@ -134,8 +137,11 @@ export function buildAirlock(THREE, { id = 'S', shell = true, castShadow = false
   }
   if (shell) {
     const sh = (geo, x, y, z) => { const m = mesh(geo, M.shell, x, y, z); m.castShadow = castShadow; m.receiveShadow = true; return m; };
-    for (const sx of [-1, 1]) sh(new THREE.BoxGeometry(0.08, AH + 0.1, D + 0.08), sx * (AW / 2 + 0.04), (AH + 0.1) / 2, D / 2);
-    sh(new THREE.BoxGeometry(AW + 0.16, 0.1, D + 0.08), 0, AH + 0.05, D / 2);
+    // The shell stands 5 mm off the inner walls and roof (sharing their faces, the two fought), and runs back
+    // past the inner end, over the gap to the habitat's skin (CHAMBER.outset).
+    const back = CHAMBER.outset + 0.1, len = D + 0.04 + back, mid = (D + 0.04 - back) / 2;
+    for (const sx of [-1, 1]) sh(new THREE.BoxGeometry(0.08, AH + 0.1, len), sx * (AW / 2 + 0.045), (AH + 0.1) / 2, mid);
+    sh(new THREE.BoxGeometry(AW + 0.17, 0.1, len), 0, AH + 0.055, mid);
     // the front face round the outer doorway, seen from the Moon
     const front = mesh(doorway(), M.shell, 0, 0, D + 0.04); front.receiveShadow = true;
     mesh(new THREE.BoxGeometry(AW + 0.24, 0.08, 0.08), M.leaf, 0, AH + 0.06, D + 0.06).castShadow = castShadow; // drip rail

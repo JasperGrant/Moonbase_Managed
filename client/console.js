@@ -24,7 +24,7 @@ const clock = s => `${Math.floor(Math.max(0, s) / 60)}:${String(Math.floor(Math.
 const C = { bg: PAL.consoleDeep, line: PAL.rule, ink: PAL.ink, dim: PAL.inkDim, green: PAL.green, amber: PAL.amber, red: PAL.red, blue: PAL.blue };
 
 const BRIEF = {
-  ops: '<b>You are the voice, the kit and the tally.</b> The only voice the astronaut hears: hold SPACE to talk. The mission is to bring rock samples home. Your TOOL LOG says roughly where each tool lies; your SAMPLE LOG says what is in hand, in the tray and banked. When they are suited up, you call them GO.',
+  ops: '<b>You are the voice, the kit and the tally.</b> The only voice the astronaut hears: hold SPACE to talk. The astronaut holds one thing in each hand (a tool or a rock sample): your HANDS panel shows which. The mission is to bring rock samples home. Your TOOL LOG says roughly where each tool lies; your SAMPLE LOG says what is in hand, in the tray and banked. When they are suited up, you call them GO.',
   tech: '<b>You have the EYES and the WHEELS.</b> Two rovers, two cameras, both at once: the Scout on W A S D, the Hauler on the arrows. The astronaut rides the Hauler. You have no map: the Scientist does.',
   sci: '<b>You have the CHART and the FIELD GUIDE.</b> Only you know what a sample looks like. The chart sharpens wherever a rover drives. POWER and AIR say how bad a fault is.',
 };
@@ -67,6 +67,7 @@ $('run').classList.toggle('all', role === 'all');
 $('run').innerHTML = [
   has('ops') && `<div class="panel ops"><h3>Mission Ops</h3>
     <button id="ptt">HOLD SPACE TO TALK TO THE ASTRONAUT</button>
+    <h2>Hands</h2><canvas id="handsCv" class="pic" width="560" height="150"></canvas>
     <h2>Tool log</h2><canvas id="toolCv" class="pic" width="560" height="330"></canvas>
     <h2>Sample log</h2><canvas id="sampleCv" class="pic" width="560" height="150"></canvas></div>`,
   has('tech') && `<div class="panel tech"><h3>Technician</h3>
@@ -272,6 +273,7 @@ function dial(g, x, y, r, value, max, name, { redBelow = 0, redAbove = Infinity,
 // One row per tool: its silhouette, a jewel lamp (green in the astronaut's hand, amber lying somewhere,
 // dark used up), and where it lies, engraved. Ops knows roughly where; the astronaut has to look.
 function drawKit(s) {
+  drawHands(s);
   const cv = $('toolCv'), g = cv.getContext('2d'), W = cv.width, H = cv.height;
   panelBg(g, W, H);
   const ids = Object.keys(TOOLS), row = (H - 20) / ids.length;
@@ -284,8 +286,24 @@ function drawKit(s) {
     g.globalAlpha = 1;
     jewel(g, row + 34, y, 8, at === 'hand' ? 'green' : 'amber', at !== 'gone');
     label(g, TOOLS[t].name.toUpperCase(), row + 56, y - 11, 13, C.dim, 'left');
-    const where = at === 'hand' ? 'IN HAND' : at === 'gone' ? (t === 'tire' ? 'FITTED' : 'USED') : info.area || '';
+    const hand = (s.hands || []).indexOf(t), where = at === 'hand' ? (hand === 0 ? 'LEFT HAND' : hand === 1 ? 'RIGHT HAND' : 'IN HAND') : at === 'gone' ? (t === 'tire' ? 'FITTED' : 'USED') : info.area || '';
     label(g, where, row + 56, y + 11, 17, at === 'gone' ? C.dim : C.ink, 'left');
+  });
+}
+
+// The astronaut's two hands, left and right: a recessed bay each with the tool in it, a lamp under each lit
+// while it holds one. (A decoy fills a hand on the astronaut's page but the server does not hear of it.)
+function drawHands(s) {
+  const cv = $('handsCv'), g = cv.getContext('2d'), W = cv.width, H = cv.height;
+  panelBg(g, W, H);
+  const u = 96, gap = 60, x0 = (W - (2 * u + gap)) / 2, y0 = 12;
+  (s.hands || [null, null]).forEach((t, i) => {
+    const x = x0 + i * (u + gap);
+    g.fillStyle = PAL.bakelite; g.fillRect(x, y0, u, u);
+    g.strokeStyle = PAL.bezel; g.lineWidth = 2; g.strokeRect(x + 1, y0 + 1, u - 2, u - 2);
+    if (t) drawTool(g, t, x + u / 2, y0 + u / 2, u - 26, C.ink);
+    jewel(g, x + u / 2 - 14, y0 + u + 20, 6, 'green', !!t);
+    label(g, i ? 'R' : 'L', x + u / 2 + 6, y0 + u + 21, 13, C.dim, 'left');
   });
 }
 
@@ -689,7 +707,7 @@ if (has('tech')) {
 function paintPtt() {
   const b = $('ptt'); if (!b) return;
   b.className = talking ? 'tx' : rx ? 'rx' : '';
-  b.textContent = talking ? 'TRANSMITTING... (1.3 s to the Moon)' : rx ? 'ASTRONAUT IS TRANSMITTING' : 'HOLD SPACE TO TALK TO THE ASTRONAUT';
+  b.textContent = talking ? 'TRANSMITTING...' : rx ? 'ASTRONAUT IS TRANSMITTING' : 'HOLD SPACE TO TALK TO THE ASTRONAUT';
 }
 if (has('ops')) {
   const rb = $('radioBtn');

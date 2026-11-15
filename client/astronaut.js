@@ -22,7 +22,7 @@ import { music } from '/music.js';
 const REACH = 3.2;        // metres: how far away the mouse can work something
 const REACH_VR = 1.6;     // metres: pointing in VR is a fallback for grabbing, so it only works close up
 const CROUCH = 0.9;       // metres: eye height while C is held on a laptop
-const WALK = 2.4;         // m/s
+const WALK = 4.0;         // m/s: a brisk lunar lope (the play area is 45 m in every direction)
 const GRAVITY = 1.62;     // m/s^2, lunar
 
 const net = connect('astronaut');
@@ -127,7 +127,7 @@ function alarms() {
 }
 function drawGauges(now) {
   arm.draw({ state, status: status(now), debrief: !!debrief, zoom: scopeOn() ? zoom : 1, total: CFG.roundSeconds, radio: radioState(),
-    alarms: alarms(), held: running() ? fx.inHand || '' : '', samples: running() && state.tally ? state.tally : null });
+    alarms: alarms(), held: running() ? fx.hands : [null, null], samples: running() && state.tally ? state.tally : null });
   arm.signal(radioState(), now);
 }
 function show(what, seconds) { flash = what; flashUntil = performance.now() / 1000 + seconds; }
@@ -340,13 +340,14 @@ function use(controller, holding = false) {
 const useAny = controller => use(controller);
 
 // ---------- hands and controllers ----------
-// Controllers: grip grabs (tools off the rack and the belt, plugs, the wheel, the generator cord),
-// right trigger points at things within arm's reach, left trigger talks, sticks walk and turn, A hops.
+// Controllers: hold the trigger (or the grip) on something to take it in that hand (a loose tool, one in
+// each hand; plugs, the wheel, the generator cord) and let go to drop or throw it. With nothing in reach
+// the right trigger points at things within arm's reach and the left trigger talks. Sticks walk and turn, A hops.
 // Hand tracking (put the controllers down): pinch on something to grab it, point the right hand and
 // pinch to use the hatch or the READY board, pinch at the ground to teleport there, pinch the left
 // hand in empty air and drag it sideways to turn, hold the left hand up to your helmet to talk, and
 // pinch both empty hands and pull them apart to zoom the visor (push them together to zoom back out).
-const TELEPORT_MAX = 8;   // metres per hop
+const TELEPORT_MAX = 14;  // metres per hop
 const TURN_STEP = 0.1;    // metres of left-hand drag per 30-degree snap turn
 const HELMET = 0.22;      // metres from the head that counts as "hand on helmet"
 const ZOOM_MAX = 6;       // visor magnification with the hands pulled wide apart
@@ -397,7 +398,7 @@ function teleport(p) {
   camera.getWorldPosition(headPos);
   rig.position.x += p.x - headPos.x;
   rig.position.z += p.z - headPos.z;
-  floorY = where === 'in' ? 0 : world.height(p.x, p.z); rig.position.y = floorY + hopY;
+  if (where === 'out') { grounded = true; vy = 0; rig.position.y = world.height(p.x, p.z); }
 }
 // A hand's sideways offset from the head, in metres, positive to the right.
 function lateral(controller) {
@@ -437,7 +438,7 @@ for (const i of [0, 1]) {
     }
   });
   c.addEventListener('disconnected', () => {
-    if (c.userData.grabbed) { c.userData.grabbed = false; fx.release(i, handPoint(i, new THREE.Vector3())); }
+    if (c.userData.grabbed) { c.userData.grabbed = null; fx.release(i, handPoint(i, new THREE.Vector3())); }
     c.userData.isHand = c.userData.pinched = c.userData.zoomed = false;
     marker.visible = false; leftDrag = null; endZoomGrab();
     if (pressed === c) pressed = null;
@@ -446,8 +447,10 @@ for (const i of [0, 1]) {
   c.addEventListener('selectstart', () => {
     music.unlock(); // a trigger pull or a pinch is a gesture the browser counts, and the page's click listeners never see it
     const other = controllers[1 - i];
-    // A bare hand that pinches on something grabs it. That is not a zoom, a turn or a teleport.
-    if (c.userData.isHand && running() && fx.grab(i, handPoint(i, new THREE.Vector3()))) { c.userData.grabbed = true; return; }
+    // A trigger pulled, or a bare hand pinched, on something in reach grabs it and holds it until it lets
+    // go. That is not a zoom, a turn, a teleport, the radio or a point at the panel.
+    if (c.userData.grabbed) return; // already holding on with the grip
+    if (running() && fx.grab(i, handPoint(i, new THREE.Vector3()))) { c.userData.grabbed = 'select'; return; }
     c.userData.pinched = true;
     // Both bare hands pinched: this is a zoom, not a turn, a teleport or a panel press.
     if (c.userData.isHand && other.userData.isHand && other.userData.pinched) {
@@ -461,7 +464,7 @@ for (const i of [0, 1]) {
   });
   c.addEventListener('selectend', () => {
     if (pressed === c) pressed = null;
-    if (c.userData.grabbed) { c.userData.grabbed = false; fx.release(i, handPoint(i, new THREE.Vector3())); return; }
+    if (c.userData.grabbed === 'select') { c.userData.grabbed = null; fx.release(i, handPoint(i, new THREE.Vector3())); return; }
     const wasZoom = c.userData.zoomed, act = c.userData.pinched && !wasZoom;
     c.userData.pinched = c.userData.zoomed = false;
     endZoomGrab();
@@ -470,9 +473,9 @@ for (const i of [0, 1]) {
     // hand of a two-handed zoom does not fire on its way in. The ring shows where you will land.
     if (c.userData.isHand && act && !useAny(c) && groundTarget(c, hitPoint)) teleport(hitPoint);
   });
-  // The grip button closes the hand on whatever is within reach of it.
-  c.addEventListener('squeezestart', () => { if (running() && fx.grab(i, handPoint(i, new THREE.Vector3()))) c.userData.grabbed = true; });
-  c.addEventListener('squeezeend', () => { if (c.userData.grabbed) { c.userData.grabbed = false; fx.release(i, handPoint(i, new THREE.Vector3())); } });
+  // The grip button does the same as the trigger. Whichever closed the hand is the one that opens it.
+  c.addEventListener('squeezestart', () => { if (!c.userData.grabbed && running() && fx.grab(i, handPoint(i, new THREE.Vector3()))) c.userData.grabbed = 'squeeze'; });
+  c.addEventListener('squeezeend', () => { if (c.userData.grabbed === 'squeeze') { c.userData.grabbed = null; fx.release(i, handPoint(i, new THREE.Vector3())); } });
   rig.add(c);
   controllers.push(c);
 
@@ -759,10 +762,13 @@ let chosen = null, portalCalls = 0, portalMs = 0, shadowsStale = true;
 function choosePortal(now) {
   if (chosen) { chosen.mask.visible = chosen.punch.visible = false; chosen = null; }
   collectMats(now);
-  if ((!mode && !window.moonbase?.forcePortal) || window.moonbase?.noPortal) return;
+  if ((!mode && !window.moonbase?.forcePortal) || window.moonbase?.noPortal || !portalAllowed()) return;
   camera.getWorldPosition(headPos);
-  const cam = renderer.xr.isPresenting ? renderer.xr.getCamera() : camera;
-  cam.updateMatrixWorld(); projView.multiplyMatrices(cam.projectionMatrix, cam.matrixWorldInverse); frustum.setFromProjectionMatrix(projView);
+  // In a headset, the camera given this frame's head pose and both eyes' frustum. (Not the XR ArrayCamera:
+  // its updateMatrixWorld() drops the rig, which put the frustum at the world's origin and no porthole in it.)
+  rig.updateMatrixWorld(true);
+  if (renderer.xr.isPresenting) renderer.xr.updateCamera(camera); else camera.updateMatrixWorld();
+  projView.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse); frustum.setFromProjectionMatrix(projView);
   let best = Infinity;
   for (const p of portals) {
     if (p.to === where) continue;                         // it looks into the place you are already in
@@ -779,6 +785,27 @@ function choosePortal(now) {
   if (chosen) chosen.mask.visible = chosen.punch.visible = true;
 }
 const isShown = m => { for (let o = m; o; o = o.parent) if (!o.visible) return false; return true; };
+// In a headset three.js draws into its own multisampled render target, and at the end of every render() it
+// throws that target's depth and stencil away (and, without WEBGL_multisampled_render_to_texture, its
+// multisampled colour too, after copying it out). The stencil the glass wrote in the main pass would be gone
+// before the porthole pass reads it. So, while a porthole is drawn: the target keeps its depth and stencil
+// after the main pass (resolveDepthBuffer), and the porthole pass draws no shadow maps, which would bind
+// another framebuffer in between. Without the extension there is no way to keep the colour: no porthole.
+let xrKeep = null; // { rt, depth, stencil } while the main pass is told to keep its depth and stencil
+const xrTarget = () => (renderer.xr.isPresenting ? renderer.getRenderTarget() : null);
+function portalAllowed() {
+  const rt = xrTarget();
+  return !rt || !(rt.samples > 0) || renderer.extensions.has('WEBGL_multisampled_render_to_texture');
+}
+function keepStencil(on) {
+  if (on) {
+    const rt = xrTarget(); if (!rt) return;
+    xrKeep = { rt, depth: rt.resolveDepthBuffer, stencil: rt.resolveStencilBuffer };
+    rt.resolveDepthBuffer = rt.resolveStencilBuffer = true;
+  } else if (xrKeep) {
+    xrKeep.rt.resolveDepthBuffer = xrKeep.depth; xrKeep.rt.resolveStencilBuffer = xrKeep.stencil; xrKeep = null;
+  }
+}
 // After the main draw: the other place, through the chosen glass.
 // Saved as an Euler, not a quaternion: copying a quaternion back makes three.js rewrite the rig's Euler, and a
 // yaw past 90 degrees comes back as (pi, pi - yaw, pi), which turns the mouse and the keys round backwards.
@@ -807,7 +834,9 @@ function renderPortal() {
   // A colour background makes three.js clear the frame (and the stencil) even with autoClear off.
   const bg = scene.background; scene.background = null;
   renderer.autoClear = false;
-  renderer.shadowMap.autoUpdate = false; renderer.shadowMap.needsUpdate = other === 'out' && shadowsStale; shadowsStale = false;
+  renderer.shadowMap.autoUpdate = false;
+  if (!renderer.xr.isPresenting) { renderer.shadowMap.needsUpdate = other === 'out' && shadowsStale; shadowsStale = false; }
+  keepStencil(false); // this pass is the last one: the target may drop its depth and stencil after it
   const t0 = performance.now();
   renderer.render(scene, camera);
   portalMs = performance.now() - t0;
@@ -945,7 +974,7 @@ function placeInside() {
   }
   showPlace('in');
   door = CFG.spawn.door;
-  rig.position.y = 0; vy = 0; floorY = 0; hopY = 0; riding = false; rideWas = null;
+  rig.position.y = 0; vy = 0; grounded = true; riding = false; rideWas = null;
   rig.rotation.set(0, 0, 0);
   rig.updateMatrixWorld(true);
   camera.getWorldPosition(headPos);
@@ -1017,7 +1046,7 @@ function clampWalk() {
 // Stand on the footplate at the back and hold the rail. The Technician drives; the rig is carried with the
 // Hauler (turning with it, or holding its heading with CFG.ride.snapYaw), its floor is the plate, and the
 // horizon stays level: only the height changes. Get off once it has stopped: push the stick (E on a laptop).
-let riding = false, rideAt = 0, rideWas = null, floorY = 0, hopY = 0, rumbleAt = 0;
+let riding = false, rideAt = 0, rideWas = null, rideFloor = 0, rumbleAt = 0;
 const plateW = new THREE.Vector3(), rideM = new THREE.Matrix4(), rideT = new THREE.Matrix4();
 const haulerStopped = () => Math.abs(state?.rovers?.hauler?.v || 0) < 0.25;
 function mount(i) {
@@ -1031,7 +1060,7 @@ function mount(i) {
   riding = true; rideAt = performance.now() / 1000; rideWas = null;
   // Onto the plate in one frame: an instant move is comfortable, a glide is not.
   rig.position.x += plateW.x - headPos.x; rig.position.z += plateW.z - headPos.z;
-  floorY = plateW.y; hopY = 0; vy = 0; rig.position.y = floorY;
+  rideFloor = plateW.y; vy = 0; grounded = true; rig.position.y = rideFloor;
   radio.sfxAt('clank', plateW, 1);
   if (i === 0 || i === 1) pulse(i, 1, 90);
   return true;
@@ -1045,8 +1074,8 @@ function dismount(side = -1) {
   const x = plateW.x + Math.cos(yaw) * 1.4 * sx, z = plateW.z - Math.sin(yaw) * 1.4 * sx;
   camera.getWorldPosition(headPos);
   rig.position.x += x - headPos.x; rig.position.z += z - headPos.z;
-  floorY = world.height(x, z); rig.position.y = floorY;
-  tmpV.set(x, floorY, z); world.puff(tmpV, 14, 0.7);
+  vy = 0; grounded = true; rig.position.y = world.height(x, z);
+  tmpV.set(x, rig.position.y, z); world.puff(tmpV, 14, 0.7);
   radio.sfxAt('thud', tmpV, 0.6, { mass: 80 }); pulse(0, 0.6, 60); pulse(1, 0.6, 60);
   return true;
 }
@@ -1069,7 +1098,7 @@ function rideStep(dt, now) {
     rig.position.x += (cx * cs + cz * sn) - dx; rig.position.z += (-cx * sn + cz * cs) - dz;
   }
   world.fixtures.plate.getWorldPosition(plateW);
-  floorY = plateW.y;
+  rideFloor = plateW.y;
   // A motor hum and the regolith under the wheels, through the suit; a faint buzz in a hand on the rail.
   const v = Math.abs(h.userData.v || 0);
   if (v > 0.3 && now > rumbleAt) {
@@ -1078,7 +1107,16 @@ function rideStep(dt, now) {
     for (const i of [0, 1]) if (fx.holding(i)?.kind === 'rail') pulse(i, 0.08 + v * 0.03, 40);
   }
 }
-let vy = 0, turnArmed = true, lastPose = 0, shake = 0;
+let vy = 0, turnArmed = true, lastPose = 0, shake = 0, grounded = true;
+const footV = new THREE.Vector3();
+// The height of the ground under the head: the drawn lunar surface outside, the floor (0) indoors
+// and in an airlock.
+function floorY() {
+  if (riding) return rideFloor;
+  if (where !== 'out' || cycle) return 0;
+  camera.getWorldPosition(footV);
+  return world.ground ? world.ground(footV.x, footV.z) : 0;
+}
 function control(dt, now) {
   let mx = 0, mz = 0, jump = false, ptt = mode === 'desk' && !!keys.tab;
   const waiting = mode === 'vr' && !!state && state.phase === 'lobby'; // before the start, by the status board: look around, but stay put
@@ -1121,22 +1159,18 @@ function control(dt, now) {
   rig.position.x += (-mz * fwd.x + mx * -fwd.z) * speed;
   rig.position.z += (-mz * fwd.z + mx * fwd.x) * speed;
 
-  if (jump && hopY === 0) vy = 2.0; // a slow, floaty lunar hop
+  // Feet on the ground: follow it over craters and slopes; a hop is a slow, floaty lunar arc.
+  const floor = floorY();
+  if (jump && grounded) { vy = 2.0; grounded = false; }
   vy -= GRAVITY * dt;
-  hopY = Math.max(0, hopY + vy * dt);
-  if (hopY === 0) vy = 0;
+  let y = rig.position.y + vy * dt;
+  if (grounded && y - floor < 0.3) y = floor; // walking downhill: stay on the slope rather than drift off it
+  if (y <= floor) { y = floor; vy = 0; grounded = true; } else grounded = false;
+  rig.position.y = y;
 
   // Stay inside the play area and outside the habitat walls; or, indoors, inside the hall; or in an airlock.
   if (riding) rideStep(dt, now);
   clampWalk();
-  // Feet on the ground: the floor under the head, eased so a crater lip is a ramp and not a step. Indoors and
-  // in an airlock chamber the floor is flat at 0, so the swap between twins cannot be seen.
-  if (!riding) {
-    camera.getWorldPosition(headPos);
-    const want = where === 'in' || inChamber || Math.hypot(headPos.x, headPos.z) < CFG.habRadius + 0.6 ? 0 : world.height(headPos.x, headPos.z);
-    floorY += (want - floorY) * Math.min(1, dt * 10);
-  }
-  rig.position.y = floorY + hopY;
 
   keyed = ptt;
   if (ptt !== talking && radio.micOk) { talking = ptt; radio.setTalking(ptt); }
@@ -1155,11 +1189,24 @@ function headHeight() {
   standing = Math.min(2.1, Math.max(standing, h)); // the tallest they have stood this session
   return h / standing * 1.65;
 }
+// Where each hand is, left then right, in the body's frame: x to the right, y up from the floor, z ahead,
+// scaled like the head height. For the figure the rover camera shows. null for a hand not being tracked.
+const armPos = new THREE.Vector3();
+function arms() {
+  if (!renderer.xr.isPresenting) return [null, null];
+  const k = 1.65 / standing, round = v => Math.round(v * 100) / 100;
+  return ['left', 'right'].map(side => {
+    const i = controllers.findIndex(c => c.userData.hand === side), c = controllers[i];
+    if (!c || !c.visible) return null;
+    handPoint(i, armPos).sub(headPos);
+    return [round((armPos.x * -fwd.z + armPos.z * fwd.x) * k), round((armPos.y + headPos.y - rig.position.y) * k), round((armPos.x * fwd.x + armPos.z * fwd.z) * k)];
+  });
+}
 function myPose() {
   const h = headHeight();
   camera.getWorldDirection(fwd); fwd.y = 0; fwd.normalize();
   const d = PLACES.doors[door] || PLACES.doors.S, inside = where === 'in';
-  return { x: inside ? d.x : headPos.x, z: inside ? d.z : headPos.z, ry: Math.atan2(fwd.x, fwd.z), h, inside, door, riding };
+  return { x: inside ? d.x : headPos.x, z: inside ? d.z : headPos.z, ry: Math.atan2(fwd.x, fwd.z), h, inside, door, riding, arms: arms() };
 }
 function sendPose() { net.send({ t: 'pose', ...myPose() }); }
 
@@ -1257,9 +1304,11 @@ renderer.setAnimationLoop(() => {
   if (arm.group.visible) drawGauges(now);
   renderScope();
   choosePortal(now);
+  keepStencil(!!chosen);
   renderer.render(scene, camera);
   mainCalls = renderer.info.render.calls;
   renderPortal();
+  keepStencil(false);
   if (snapWaiting) { snapWaiting(renderer.domElement.toDataURL('image/png')); snapWaiting = null; } // must follow the draw in the same frame
 });
 

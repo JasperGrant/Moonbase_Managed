@@ -59,7 +59,7 @@ const BASE = [
   { x: 0, z: 0, r: 2.7 },                                                // the habitat's core
   { x: 3.2, z: 0, r: 1.5 }, { x: 4.9, z: 0, r: 1.5 }, { x: 6.6, z: 0, r: 1.5 }, // the long module
   { x: -3.4, z: 0, r: 1.4 },                                             // the short one
-  ...Object.values(PLACES.doors).map(d => ({ x: d.x + Math.sin(d.ry) * 0.65, z: d.z + Math.cos(d.ry) * 0.65, r: 0.95 })), // the airlock chambers
+  ...Object.values(PLACES.doors).map(d => ({ x: d.x + Math.sin(d.ry) * (0.65 + 0.35), z: d.z + Math.cos(d.ry) * (0.65 + 0.35), r: 0.95 })), // the airlock chambers (stood off the skin)
   ...PLACES.panels.flatMap(p => [{ x: p.x, z: p.z, r: 1.2 }, { x: p.x + 3.6, z: p.z, r: 1.4 }]), // both rows of solar panels
 ];
 

@@ -199,15 +199,15 @@ function installHelpers() {
   const need = async place => place ? through(place) : { ok: true };
   window.smoke = {
     sleep, until, face, work, through,
-    // Pick a tool up from wherever it lies (one at a time: clicking it puts down whatever is in the hand).
+    // Pick a tool up from wherever it lies, into the free hand (with both full, a click puts down the right hand's tool).
     async carry(id) {
-      if (mb.fx.inHand === id) return { ok: true };
+      if (mb.fx.hands.includes(id)) return { ok: true };
       const pose = mb.fx.toolState(id);
       if (!pose || pose.state === 'gone') return { ok: false, why: `the ${id} is not there to take` };
       const r0 = await need(pose.place === 'hall' ? 'in' : 'out'); if (!r0.ok) return r0;
       const r = await work(toolBox(id), `the ${id}`, 30);
       if (!r.ok) return r;
-      return (await until(s => s.held === id, 8)) ? { ok: true } : { ok: false, why: `the server never put the ${id} in the hand` };
+      return (await until(s => s.hands.includes(id), 8)) ? { ok: true } : { ok: false, why: `the server never put the ${id} in the hand` };
     },
     async dust() { const r = await need('out'); return r.ok ? work(m => F.dustCells.includes(m), 'a dusty cell', 60) : r; },
     async pullWheel() { const r = await need('out'); return r.ok ? work(m => owns(F.wheel, m), 'the broken wheel', 20) : r; },
@@ -578,5 +578,5 @@ try {
 }
 
 if (problems.length) { console.error('SMOKE FAILED\n' + problems.join('\n')); process.exit(1); }
-console.log(`smoke passed: the demo mission was played to a win through the laptop controls (tools found in the hall, one at a time, through the walk-in airlock, Mission Control calling GO); hand gestures, visor zoom, wrist gauges, the airlock swap and the radio both ways work. ${SHOTS ? `Screenshots in ${path.relative(ROOT, OUT)}/` : 'No screenshots taken (SMOKE_SHOTS=1 for those).'}`);
+console.log(`smoke passed: the demo mission was played to a win through the laptop controls (tools found in the hall, one in each hand, through the walk-in airlock, Mission Control calling GO); hand gestures, visor zoom, wrist gauges, the airlock swap and the radio both ways work. ${SHOTS ? `Screenshots in ${path.relative(ROOT, OUT)}/` : 'No screenshots taken (SMOKE_SHOTS=1 for those).'}`);
 process.exit(0);

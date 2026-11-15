@@ -1,5 +1,5 @@
 // Moonbase server for a laptop: serves the pages and runs the game over one WebSocket.
-// The game rules and the 1.3 s delay are in hub.js, shared with the Cloudflare worker.
+// The game rules are in hub.js, shared with the Cloudflare worker.
 import http from 'node:http';
 import https from 'node:https';
 import fs from 'node:fs';

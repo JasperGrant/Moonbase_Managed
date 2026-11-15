@@ -3,12 +3,13 @@
 // is downloaded, so the page works offline and on Cloudflare as is. Swap in real models here
 // later without touching the game logic.
 import { CFG, PLACES, CABLE_COLORS, SOCKET_SHAPES, DUST_COLS, DUST_ROWS, CRACK_POINTS, HAULER, LOOKS } from '/shared/config.js';
-import { CRATERS, BOULDERS, LANDMARKS } from '/shared/field.js';
+import { CRATERS, BOULDERS as FIELD_BOULDERS, LANDMARKS } from '/shared/field.js';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { drawShape } from '/shared/icons.js';
 import { HORIZON, TERRAIN, SUN_AZ_DEG } from '/shared/horizon.js';
 import { PAL, CABLE_HEX, SAMPLE_COL, FONT, nixie } from '/shared/palette.js';
 import { loadPeriod, loadModel } from '/shared/assets.js';
+import { buildAvatar } from '/avatar.js';
 import { buildAirlock, CHAMBER } from '/airlock.js';
 
 // The base sits on the Connecting Ridge between Shackleton and de Gerlache craters at the lunar
@@ -215,7 +216,6 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
   const dark = new THREE.MeshStandardMaterial({ color: PAL.hex.consoleDeep, roughness: 0.85, metalness: 0.2 });
   const steel = new THREE.MeshStandardMaterial({ color: PAL.hex.aluminium, roughness: 0.42, metalness: 0.85 });
   const solar = new THREE.MeshStandardMaterial({ map: solarTex, roughness: 0.22, metalness: 0.55 });
-  const visor = new THREE.MeshStandardMaterial({ color: 0xc89a3e, metalness: 1, roughness: 0.12 });
   const orange = new THREE.MeshStandardMaterial({ color: PAL.hex.orange, roughness: 0.75 });
   const warmGlow = new THREE.MeshBasicMaterial({ color: 0xe8b872, toneMapped: false });
   const windowGlow = new THREE.MeshBasicMaterial({ color: 0xe8b872, toneMapped: false });
@@ -271,7 +271,7 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
   }
   // Under and round each airlock chamber the ground is dug a few centimetres below its grate floor
   // (y = 0.004): the fine undulation used to come up through the floor in patches of regolith.
-  const chamberMid = Object.values(PLACES.doors).map(d => ({ x: d.x + Math.sin(d.ry) * CHAMBER.depth / 2, z: d.z + Math.cos(d.ry) * CHAMBER.depth / 2 }));
+  const chamberMid = Object.values(PLACES.doors).map(d => { const k = CHAMBER.outset + CHAMBER.depth / 2; return { x: d.x + Math.sin(d.ry) * k, z: d.z + Math.cos(d.ry) * k }; });
   function heightRaw(x, z) {
     const r = Math.hypot(x, z);
     let h = ramp(r, 18, 70) * demAt(x, z);                      // real ground, blended in past the pad
@@ -321,6 +321,7 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
     scene.add(field);
   }
   const SEG = 160;
+  const groundAt = height; // the height of the ground as drawn: the lattice mesh is exactly what height() reads
   const groundGeo = new THREE.PlaneGeometry(SIZE, SIZE, SEG, SEG);
   groundGeo.rotateX(-Math.PI / 2);
   {
@@ -374,10 +375,13 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
   // ---------- rocks ----------
   // Two shapes (jagged, rounded), each displaced by noise, instanced many times.
   const SITES = [...Object.values(PLACES.doors).map(d => ({ x: d.x + Math.sin(d.ry) * 2, z: d.z + Math.cos(d.ry) * 2 })), ...PLACES.panels, ...Object.values(PLACES.rovers), PLACES.depot, PLACES.dish, PLACES.drill, PLACES.port];
-  const SOLIDS = [...BOULDERS.map(b => ({ x: b.x, z: b.z, r: b.r })), ...LANDMARKS];
+  const SOLIDS = [...FIELD_BOULDERS.map(b => ({ x: b.x, z: b.z, r: b.r })), ...LANDMARKS];
   const keepClear = (x, z, m) => Math.hypot(x, z) > 4.5 + m && SITES.every(s => Math.hypot(x - s.x, z - s.z) > 2.8 + m) && SOLIDS.every(o => Math.hypot(x - o.x, z - o.z) > o.r + m + 0.5);
-  function rockGeo(detail, amp, seed, squash = 0.72) {
-    // Icosahedron geometry is unindexed (flat shaded); weld shared vertices first so normals smooth.
+  // A rock: a sphere pushed about by noise (low-frequency lumps plus ridged creases), stretched to its
+  // own proportions, then cut by random fracture planes so it has flat broken faces like a boulder
+  // that spalled off a crater rim. Normalised to a radius of about 1, centred.
+  function rockGeo(detail, seed, { amp = 0.3, cuts = 6, depth = [0.5, 0.85], squash = [1, 0.75, 1], ridged = 1 } = {}) {
+    // Icosahedron geometry is unindexed; weld shared vertices so the noise moves them together.
     const raw = new THREE.IcosahedronGeometry(1, detail), rp = raw.attributes.position;
     const index = [], verts = [], seen = new Map();
     for (let i = 0; i < rp.count; i++) {
@@ -389,50 +393,83 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3));
     g.setIndex(index);
-    const p = g.attributes.position, v = new THREE.Vector3(), uv = new Float32Array(p.count * 2), sq = new THREE.Vector3(1, squash, 1);
+    const planes = Array.from({ length: cuts }, () => {
+      const u = rnd() * 2 - 1, a = rnd() * Math.PI * 2, r = Math.sqrt(1 - u * u);
+      return { n: new THREE.Vector3(r * Math.cos(a), u, r * Math.sin(a)), d: depth[0] + rnd() * (depth[1] - depth[0]) };
+    });
+    const p = g.attributes.position, v = new THREE.Vector3();
+    const box = new THREE.Box3();
     for (let i = 0; i < p.count; i++) {
       v.fromBufferAttribute(p, i);
-      const n = N.fbm(v.x * 1.6 + seed, v.y * 1.6, v.z * 1.6, 3) + 0.35 * N.fbm(v.x * 5 + seed, v.y * 5, v.z * 5, 2);
-      uv[i * 2] = Math.atan2(v.z, v.x) / Math.PI; uv[i * 2 + 1] = v.y;
-      v.multiplyScalar(1 + n * amp).multiply(sq);
+      const lump = N.fbm(v.x * 1.3 + seed, v.y * 1.3 + seed * 0.7, v.z * 1.3, 4);
+      const crease = 1 - Math.abs(N.noise3(v.x * 3.1 + seed, v.y * 3.1, v.z * 3.1 - seed));
+      v.multiplyScalar(1 + amp * (lump + ridged * 0.45 * (crease - 0.5)));
+      v.set(v.x * squash[0], v.y * squash[1], v.z * squash[2]);
+      for (const pl of planes) { const out = v.dot(pl.n) - pl.d; if (out > 0) v.addScaledVector(pl.n, -out); }
       p.setXYZ(i, v.x, v.y, v.z);
+      box.expandByPoint(v);
+    }
+    const c = box.getCenter(new THREE.Vector3()), size = box.getSize(new THREE.Vector3()), k = 2 / Math.max(size.x, size.y, size.z);
+    const uv = new Float32Array(p.count * 2);
+    for (let i = 0; i < p.count; i++) {
+      v.fromBufferAttribute(p, i).sub(c).multiplyScalar(k);
+      p.setXYZ(i, v.x, v.y, v.z);
+      uv[i * 2] = Math.atan2(v.z, v.x) / Math.PI; uv[i * 2 + 1] = v.y;
     }
     g.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
     g.computeVertexNormals();
+    g.computeBoundingBox();
+    g.userData.bottom = g.boundingBox.min.y; // how far the base sits below the centre, in unit scale
     return g;
   }
   const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler(), v3 = new THREE.Vector3(), sc = new THREE.Vector3(), c3 = new THREE.Color();
-  // Decoration: small rocks over the whole field, big ones only outside it (the field's big rocks are BOULDERS).
-  function scatter(geo, count, rMin, rMax, sMin, sMax, bury) {
+  // Scatter `count` copies of one shape. Each copy gets its own stretch, turn and tilt, so no two match.
+  function scatter(geo, count, rMin, rMax, sMin, sMax, { bury = 0.25, tilt = 0.5 } = {}) {
     const im = new THREE.InstancedMesh(geo, rockMat, count);
     for (let i = 0; i < count; i++) {
       let x, z, s, n = 0;
-      do { const a = rnd() * Math.PI * 2, r = rMin + Math.pow(rnd(), 1.4) * (rMax - rMin); x = Math.cos(a) * r; z = Math.sin(a) * r; s = sMin + rnd() * rnd() * (sMax - sMin); } while ((!keepClear(x, z, s) || (s > 0.6 && Math.hypot(x, z) < CFG.bounds + 4)) && ++n < 50);
-      e.set(rnd() * 0.5, rnd() * Math.PI * 2, rnd() * 0.5);
-      m4.compose(v3.set(x, height(x, z) + s * (0.55 - bury), z), q.setFromEuler(e), sc.set(s * (0.8 + rnd() * 0.5), s, s * (0.8 + rnd() * 0.5)));
+      do { const a = rnd() * Math.PI * 2, r = rMin + Math.pow(rnd(), 1.4) * (rMax - rMin); x = Math.cos(a) * r; z = Math.sin(a) * r; s = sMin + rnd() * rnd() * (sMax - sMin); } while ((!keepClear(x, z, s) || (s > 0.6 && Math.hypot(x, z) < CFG.bounds + 4)) && ++n < 50); // nothing you could walk through inside the play area
+      e.set((rnd() - 0.5) * 2 * tilt, rnd() * Math.PI * 2, (rnd() - 0.5) * 2 * tilt, 'YXZ');
+      sc.set(s * (0.65 + rnd() * 0.75), s * (0.55 + rnd() * 0.6), s * (0.65 + rnd() * 0.75));
+      m4.compose(v3.set(x, groundAt(x, z) - geo.userData.bottom * sc.y * (1 - bury), z), q.setFromEuler(e), sc);
       im.setMatrixAt(i, m4);
-      const t = 0.75 + rnd() * 0.4;
-      im.setColorAt(i, c3.setRGB(t, t * (0.98 + rnd() * 0.03), t * 0.95));
+      const t = 0.72 + rnd() * 0.42;
+      im.setColorAt(i, c3.setRGB(t, t * (0.97 + rnd() * 0.04), t * (0.93 + rnd() * 0.04)));
     }
     im.castShadow = im.receiveShadow = true;
     scene.add(im);
     return im;
   }
-  const jagged = rockGeo(3, 0.4, 3), rounded = rockGeo(2, 0.22, 11), tooth = rockGeo(2, 0.3, 23, 1.9);
-  scatter(jagged, 70, CFG.bounds + 6, 400, 0.6, 2.6, 0.25);
-  scatter(rounded, 90, CFG.bounds + 6, 300, 0.6, 1.6, 0.3);
-  scatter(rounded, 900, 2.5, CFG.bounds + 6, 0.05, 0.3, 0.2);
-  // The field's boulders (client/shared/field.js): solid, on the chart, and how people give directions.
+  // Eight shapes. Boulders: angular blocks, slabs, many-faceted chunks, knobbly breccia and a weathered
+  // rounded one. Pebbles: three small, sharp shapes. Out in the field only knee-high rocks are walked through;
+  // every big one is a solid BOULDER (client/shared/field.js) so nothing blocks you that you cannot see.
+  const ROCKS = [
+    rockGeo(3, 101, { amp: 0.30, cuts: 9, squash: [1.25, 0.80, 0.90] }),
+    rockGeo(3, 202, { amp: 0.32, cuts: 6, squash: [1.60, 0.55, 0.90] }),
+    rockGeo(3, 303, { amp: 0.26, cuts: 13, depth: [0.45, 0.75], squash: [0.95, 1.00, 1.10] }),
+    rockGeo(3, 404, { amp: 0.50, cuts: 4, squash: [1.10, 0.75, 1.35], ridged: 1.6 }),
+    rockGeo(2, 505, { amp: 0.24, cuts: 2, depth: [0.7, 0.9], squash: [1.00, 0.70, 1.15], ridged: 0.3 }),
+  ];
+  const TOOTH = rockGeo(2, 909, { amp: 0.30, cuts: 6, squash: [0.7, 1.5, 0.8] });
+  const PEBBLES = [
+    rockGeo(1, 606, { amp: 0.30, cuts: 5, squash: [1.30, 0.70, 0.90] }),
+    rockGeo(1, 707, { amp: 0.35, cuts: 4, squash: [0.90, 0.60, 1.20] }),
+    rockGeo(1, 808, { amp: 0.25, cuts: 7, squash: [1.10, 0.85, 1.00] }),
+  ];
+  [24, 18, 18, 16, 0].forEach((n, i) => n && scatter(ROCKS[i], n * 3, CFG.bounds + 6, 400, 0.6, 2.6, { bury: 0.3, tilt: 0.45 }));  // big, past the field
+  [20, 14, 16, 18, 22].forEach((n, i) => scatter(ROCKS[i], n * 3, 3, CFG.bounds + 6, 0.25, 0.6, { bury: 0.35, tilt: 0.6 }));    // knee-high, over the field
+  [400, 380, 380].forEach((n, i) => scatter(PEBBLES[i], n, 2.5, CFG.bounds + 6, 0.05, 0.3, { bury: 0.2, tilt: Math.PI }));      // small, any way up
+  // The field's boulders: solid, on the chart, and how people give directions.
   {
-    const by = { jagged: [], rounded: [], tooth: [] };
-    for (const b of BOULDERS) by[b.shape].push(b);
+    const shapes = { jagged: ROCKS[0], rounded: ROCKS[4], tooth: TOOTH }, by = { jagged: [], rounded: [], tooth: [] };
+    for (const b of FIELD_BOULDERS) by[b.shape].push(b);
     for (const [shape, list] of Object.entries(by)) {
       if (!list.length) continue;
-      const im = new THREE.InstancedMesh(shape === 'jagged' ? jagged : shape === 'tooth' ? tooth : rounded, rockMat, list.length);
+      const geo = shapes[shape], im = new THREE.InstancedMesh(geo, rockMat, list.length);
       im.name = 'Boulders_' + shape;
       list.forEach((b, i) => {
-        const tilt = Math.sin(b.x * 3.1 + b.z) * 0.12;
-        m4.compose(v3.set(b.x, height(b.x, b.z) + b.s * (shape === 'tooth' ? 0.65 : 0.25), b.z), q.setFromEuler(e.set(tilt, b.ry, -tilt * 0.6)), sc.set(b.s * 0.55, b.s * 0.55, b.s * 0.5));
+        const tilt = Math.sin(b.x * 3.1 + b.z) * 0.12, s = b.s * 0.5;
+        m4.compose(v3.set(b.x, groundAt(b.x, b.z) - geo.userData.bottom * s * 0.75, b.z), q.setFromEuler(e.set(tilt, b.ry, -tilt * 0.6, 'YXZ')), sc.set(s * 1.1, s, s));
         im.setMatrixAt(i, m4);
         const t = 0.78 + Math.abs(Math.sin(b.x * 7.7 + b.z * 3.3)) * 0.25;
         im.setColorAt(i, c3.setRGB(t, t * 0.99, t * 0.95));
@@ -552,7 +589,7 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
     const apronMat = new THREE.MeshStandardMaterial({ map: apronTex, roughness: 0.9, metalness: 0.05 });
     for (const [id, d] of Object.entries(PLACES.doors)) {
       const a = buildAirlock(THREE, { id, shell: true, castShadow: shadows });
-      a.root.position.set(d.x, 0, d.z); a.root.rotation.y = d.ry;
+      a.root.position.set(d.x, 0, d.z); a.root.rotation.y = d.ry; a.root.translateZ(CHAMBER.outset); // clear of the model's skin
       a.setOuter(1); a.setInner(0); a.setLamp('green'); a.setPressure(0);
       hab.add(a.root);
       doors[id] = a;
@@ -991,11 +1028,16 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
   // ---------- the samples: rocks out on the field, one instanced batch per look ----------
   // Bigger than life (15 to 30 cm) so a camera can pick one out at 10 m. Every page sees only the look.
   const sampleGeo = {
-    'pale-flecked': rockGeo(0, 0.35, 41), 'pale-plain': rockGeo(2, 0.1, 43),
-    'dark-pitted': rockGeo(2, 0.16, 47), 'dark-smooth': rockGeo(2, 0.08, 53, 0.45),
-    'ochre-beads': rockGeo(1, 0.32, 59, 0.6), 'foil-scrap': rockGeo(1, 0.55, 61, 0.5),
-    'frost-blue': rockGeo(2, 0.2, 67), 'dusty-pale': rockGeo(2, 0.18, 71),
+    'pale-flecked': rockGeo(1, 41, { amp: 0.35, cuts: 8, squash: [1.1, 0.8, 0.9] }),                      // angular
+    'pale-plain': rockGeo(2, 43, { amp: 0.1, cuts: 1, depth: [0.8, 0.95], squash: [1, 0.8, 1], ridged: 0 }), // rounded and plain
+    'dark-pitted': rockGeo(2, 47, { amp: 0.16, cuts: 2, depth: [0.75, 0.9], ridged: 0.3 }),
+    'dark-smooth': rockGeo(2, 53, { amp: 0.08, cuts: 2, depth: [0.7, 0.9], squash: [1.3, 0.45, 1], ridged: 0 }), // a slab
+    'ochre-beads': rockGeo(1, 59, { amp: 0.32, cuts: 2, squash: [1, 0.6, 1], ridged: 0.2 }),
+    'foil-scrap': rockGeo(1, 61, { amp: 0.55, cuts: 5, squash: [1.2, 0.35, 1], ridged: 1.4 }),
+    'frost-blue': rockGeo(2, 67, { amp: 0.2, cuts: 3, ridged: 0.4 }),
+    'dusty-pale': rockGeo(2, 71, { amp: 0.18, cuts: 4 }),
   };
+  for (const g of Object.values(sampleGeo)) g.scale(0.5, 0.5, 0.5); // rockGeo is two metres across: the samples are 15 to 30 cm
   const sampleTex = (base, spot, kind) => canvasTexture(THREE, 128, 64, (d, w, h, g) => {
     g.fillStyle = base; g.fillRect(0, 0, w, h);
     const r = seededDots(kind);
@@ -1097,22 +1139,11 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
     scene.add(F);
   }
 
-  // ---------- astronaut figure, shown in the rover camera ----------
-  const avatar = new THREE.Group();
-  {
-    mesh(new THREE.CapsuleGeometry(0.27, 0.7, 4, 12), whitePlain, 0, 1.0, 0, avatar);
-    for (const s of [-1, 1]) { mesh(new THREE.CapsuleGeometry(0.1, 0.55, 4, 8), whitePlain, s * 0.36, 1.1, 0, avatar).rotation.z = s * 0.25; mesh(new THREE.CapsuleGeometry(0.12, 0.7, 4, 8), whitePlain, s * 0.15, 0.4, 0, avatar); }
-    mesh(new THREE.SphereGeometry(0.25, 16, 12), whitePlain, 0, 1.72, 0, avatar);
-    mesh(new THREE.SphereGeometry(0.19, 16, 12, 0, Math.PI * 2, 0, Math.PI * 0.6), visor, 0, 1.72, 0.1, avatar).rotation.x = Math.PI / 2 - 0.3;
-    mesh(new THREE.BoxGeometry(0.5, 0.65, 0.3), whitePlain, 0, 1.2, -0.32, avatar);
-    mesh(new THREE.BoxGeometry(0.3, 0.14, 0.06), new THREE.MeshBasicMaterial({ color: PAL.hex.phosphor, toneMapped: false }), 0, 1.25, 0.29, avatar);
-    mesh(new THREE.BoxGeometry(0.1, 0.1, 0.1), orange, 0, 1.55, -0.5, avatar);
-  }
+  // ---------- astronaut figure, shown in the rover camera: it walks, crouches and reaches (client/avatar.js) ----------
+  const figure = buildAvatar(THREE, { shadows, ground: (x, z) => groundAt(x, z) });
+  const avatar = figure.group;
   avatar.visible = false;
   scene.add(avatar);
-  // The NASA astronaut replaces the capsules (unrigged, in a T-pose: fine at rover-camera distance).
-  loadPeriod(THREE, 'astronaut', { merge: true, cast: shadows, rough: 0.85 }).then(m => { avatar.clear(); avatar.add(m); })
-    .catch(e => console.warn('astronaut', e));
 
   // ---------- scenery from the NASA set: an old Viking lander, cargo at the fuel depot ----------
   const props = new THREE.Group(); props.name = 'Scenery';
@@ -1133,7 +1164,7 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
   prop('support-cradle', depot, -2.6, -1.0, -0.2, { by: { spstob_fss_1: { rough: 0.7 } } });
 
   return {
-    rover, rovers, avatar, sun, height, hab, port, follow, normalAt,
+    rover, rovers, avatar, figure, sun, height, hab, port, follow, normalAt, ground: groundAt, // ground(x, z): the height of the ground as drawn
     // Handles for the astronaut's hands (stations.js). Vectors are local to their fixture group.
     doors,
     fixtures: { board, sockets, plugs, plugRest, dustCells, crack, crackPts, wheel: rover.userData.wheel, hub: rover.userData.hub,

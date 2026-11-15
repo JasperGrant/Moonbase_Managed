@@ -2,6 +2,13 @@
 import { CFG, PLACES } from './config.js';
 import { LANDMARKS as FIELD_MARKS } from './field.js';
 
+// The astronaut's hands are [left, right]: a tool id or null, one tool in each. Which hand a take fills:
+// the one asked for if it is empty, else the right, else the left. -1 if both are full.
+export function freeHand(hands, want) {
+  if (want === 0 || want === 1) return hands[want] ? -1 : want;
+  return !hands[1] ? 1 : !hands[0] ? 0 : -1;
+}
+
 // Is the astronaut safe from a meteor shower? Inside (the hall or an airlock chamber), or crouched
 // beside the rover. pose: { x, z, h, inside } with h the head height in metres. rover: { x, z }.
 export function sheltered(pose, rover) {

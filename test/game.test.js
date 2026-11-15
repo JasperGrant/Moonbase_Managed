@@ -11,18 +11,18 @@ const run = (g, seconds) => { for (let t = 0; t < Math.round(seconds * 10) && g.
 const at = (g, p) => { g.astro = { ...g.astro, x: p.x, z: p.z, h: 1.65, inside: false }; };
 const inside = g => { g.astro = { ...g.astro, x: PLACES.doors.S.x, z: PLACES.doors.S.z, h: 1.65, inside: true, door: 'S' }; };
 const fresh = (mode = 'demo') => { const g = new Game(rng); g.setMode(mode); g.start(); g.script = []; return g; }; // no director: the test breaks things itself
-// Put whatever is in the hand down where you stand, then fetch `tool` from wherever it lies.
+// Put whatever is in the hands down where you stand, then fetch `tool` from wherever it lies.
 const kit = (g, tool) => {
-  if (g.held) g.act({ drop: g.held });
+  for (const t of g.hands.filter(Boolean)) g.act({ drop: t });
   const t = g.tools[tool];
   if (t.inside) inside(g); else at(g, t);
   g.act({ take: tool });
 };
 
-// ---------- one tool at a time, found where it lies ----------
+// ---------- two hands, one tool in each, found where it lies ----------
 {
   const g = fresh();
-  assert.equal(g.held, null, 'the astronaut starts empty-handed');
+  assert.deepEqual(g.hands, [null, null], 'the astronaut starts empty-handed');
   assert.ok(g.astro.inside, 'and inside the hall');
   for (const [id, t] of Object.entries(g.tools)) {
     assert.ok(t.at === 'loose' && t.inside && t.area, `${id} lies somewhere in the hall`);
@@ -30,14 +30,18 @@ const kit = (g, tool) => {
   }
   at(g, { x: 6, z: 6 });
   g.act({ take: 'brush' });
-  assert.equal(g.held, null, 'a tool in the hall cannot be picked up from outside');
+  assert.deepEqual(g.hands, [null, null], 'a tool in the hall cannot be picked up from outside');
   inside(g);
   g.act({ take: 'brush' });
-  assert.equal(g.held, 'brush');
-  g.act({ take: 'welder' });
-  assert.ok(g.held === 'brush' && g.tools.welder.at === 'loose', 'one hand, one tool: the welder stays where it is');
-  g.act({ drop: 'brush' }); g.act({ take: 'welder' });
-  assert.ok(g.held === 'welder' && g.tools.brush.at === 'loose' && g.tools.brush.inside);
+  assert.deepEqual(g.hands, [null, 'brush'], 'a take with no hand named fills the right hand');
+  g.act({ take: 'welder', hand: 1 });
+  assert.ok(g.tools.welder.at === 'loose', 'the right hand is full: the welder stays where it is');
+  g.act({ take: 'welder', hand: 0 });
+  assert.deepEqual(g.hands, ['welder', 'brush'], 'one tool in each hand');
+  g.act({ take: 'patch' });
+  assert.ok(g.tools.patch.at === 'loose' && !g.has('patch'), 'both hands full: refused');
+  g.act({ drop: 'brush' });
+  assert.ok(g.hands[1] === null && g.has('welder') && g.tools.brush.at === 'loose' && g.tools.brush.inside);
   g.act({ rest: 'brush', inside: true, x: 2.9, y: 0, z: -10.4 });
   assert.equal(g.tools.brush.area, 'EAST WALL', 'where a tool comes to rest is logged by area');
   // Carried outside and dropped in the field: it lies there, and has to be fetched from there.
@@ -45,12 +49,12 @@ const kit = (g, tool) => {
   g.act({ drop: 'welder' });
   assert.ok(!g.tools.welder.inside && g.tools.welder.area === 'OUTSIDE SOLAR', g.tools.welder.area);
   inside(g); g.act({ take: 'welder' });
-  assert.equal(g.held, null, 'a tool lying outside cannot be picked up from inside');
+  assert.ok(!g.has('welder'), 'a tool lying outside cannot be picked up from inside');
   at(g, PLACES.panels[0]); g.act({ take: 'welder' });
-  assert.equal(g.held, 'welder');
+  assert.ok(g.has('welder'));
   g.act({ rest: 'welder', inside: false, x: 1e9, y: 0, z: 0 });
   g.act({ take: 'nonsense' }); g.act({ drop: 'patch' }); g.act(null); g.act('x'); g.act({ fix: 'dust', cell: 0 });
-  assert.equal(g.held, 'welder');
+  assert.ok(g.has('welder'));
   const free = new Game(rng); free.setMode('free'); free.start();
   const spots = Object.values(free.tools).map(t => `${t.x},${t.z}`);
   assert.equal(new Set(spots).size, spots.length, 'free play puts every tool on its own spot');
@@ -98,7 +102,7 @@ const kit = (g, tool) => {
   assert.ok(g.faults.wheel, 'no tire: refused');
   kit(g, 'tire'); at(g, g.rover);
   g.act({ fix: 'wheel', fit: true });
-  assert.ok(!g.faults.wheel && g.held === null && g.tools.tire.at === 'gone', 'the tire is used up');
+  assert.ok(!g.faults.wheel && !g.has('tire') && g.tools.tire.at === 'gone', 'the tire is used up');
   run(g, CFG.tireRestockSeconds + 1);
   assert.ok(g.tools.tire.at === 'loose' && g.tools.tire.inside && g.tools.tire.area === 'CORRIDOR', 'a new tire turns up at the cargo end of the hall');
 }
@@ -155,13 +159,13 @@ const kit = (g, tool) => {
   for (const role of ['ops', 'tech', 'sci', 'all']) {
     const v = g.view(role);
     assert.equal(v.powered, false);
-    for (const k of ['oxygen', 'timeLeft', 'held', 'tools', 'radar', 'rover', 'scene', 'power', 'leak', 'wiring', 'meteor', 'ev']) assert.ok(!(k in v), `${role} sees ${k} during a blackout`);
+    for (const k of ['oxygen', 'timeLeft', 'hands', 'tools', 'radar', 'rover', 'scene', 'power', 'leak', 'wiring', 'meteor', 'ev']) assert.ok(!(k in v), `${role} sees ${k} during a blackout`);
   }
   assert.equal(g.view('astronaut').scene.dark, true, 'the base goes dark for the astronaut');
 
   // The generator: 25 s of power, once.
   g.act({ gen: true });
-  assert.ok(g.powered && g.blackout && g.held === null && g.tools.gen.at === 'gone');
+  assert.ok(g.powered && g.blackout && !g.has('gen') && g.tools.gen.at === 'gone');
   assert.ok('power' in g.view('sci'));
   hub.message(ops, new Uint8Array(64).buffer, true);
   await new Promise(r => setTimeout(r, CFG.delayMs + 200));
@@ -247,8 +251,8 @@ const kit = (g, tool) => {
   for (const t of ['dust', 'board', 'hull', 'suit']) g.break(t);
   const only = (role, allowed) => { for (const k of Object.keys(g.view(role))) assert.ok(allowed.includes(k), `${role} sees ${k}`); };
   const common = ['t', 'n', 'phase', 'mode', 'crew', 'score', 'result', 'powered', 'ev', 'timeLeft', 'oxygen', 'o2Max'];
-  only('astronaut', [...common, 'held', 'tools', 'scene', 'suit', 'rover']);
-  only('ops', [...common, 'held', 'tools']);
+  only('astronaut', [...common, 'hands', 'tools', 'scene', 'suit', 'rover']);
+  only('ops', [...common, 'hands', 'tools']);
   only('tech', [...common, 'radar', 'rover', 'scene', 'astro', 'meteor']);
   only('sci', [...common, 'power', 'leak', 'drain', 'wiring']);
   assert.ok(!('text' in g.view('ops').ev), 'nobody is told in words what broke');
@@ -277,7 +281,7 @@ const kit = (g, tool) => {
     const job = plan();
     if (!job) continue;
     const tool = { dust: 'brush', wheel: 'tire', hull: 'welder', suit: 'patch' }[job];
-    if (tool && g.held !== tool) { kit(g, tool); carrying = tool; busy = 60; continue; } // a trip into the hall for it: 6 s
+    if (tool && !g.has(tool)) { kit(g, tool); carrying = tool; busy = 60; continue; } // a trip into the hall for it: 6 s
     if (job === 'dust') { at(g, PLACES.panels[1]); for (let c = 0; c < DUST_CELLS; c++) g.act({ fix: 'dust', cell: c }); }
     if (job === 'board') { inside(g); g.faults.board.cables.forEach((c, i) => g.act({ fix: 'board', cable: i, socket: c.socket })); }
     if (job === 'wheel') { at(g, g.rover); g.act({ fix: 'wheel', pull: true }); g.act({ fix: 'wheel', fit: true }); }

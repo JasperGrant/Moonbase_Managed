@@ -314,4 +314,15 @@ function setup(opts = {}) {
   assert.equal(hub.admins().length, 1);
 }
 
+// The astronaut's pose carries the hands for the rover camera's figure, and whether they are indoors.
+{
+  const { hub, join, say } = setup();
+  const a = join('astronaut');
+  say(a, { t: 'pose', x: 1, z: 2, ry: 0.5, h: 1.6, inside: true, door: 'S', arms: [[-0.3, 1.1, 0.4], [0.2, 'x', 0]] });
+  assert.deepEqual(hub.game.astro, { x: 1, z: 2, ry: 0.5, h: 1.6, inside: true, door: 'S', arms: [[-0.3, 1.1, 0.4], null] }, 'a hand that is not three numbers is not tracked');
+  say(a, { t: 'pose', x: 1, z: 2, ry: 0.5, arms: [[9, 1, 0]] });
+  assert.deepEqual(hub.game.astro.arms, [null, null], 'a hand out of reach of the body is dropped');
+  assert.equal(hub.game.astro.inside, false);
+}
+
 console.log('all lobby and admin tests passed');

@@ -8,7 +8,8 @@
 // The server decides what counted (server/game.js). Nothing here changes the game by itself.
 //
 // The tools are physics bodies (client/physics.js): they lie where they were left, fall, tumble and
-// can be thrown. The astronaut holds one at a time, in either hand; the other hand stays free for work.
+// can be thrown. The astronaut has two hands and holds one tool in each (docs/design/hands-and-avatar.md):
+// hold the trigger or the grip on a tool to take it, let go to drop it or throw it.
 import { FAULTS, TOOLS, PLACES, CFG } from '/shared/config.js';
 // Samples: picked off the ground (or out of a cup on the Hauler) like a tool, two hands' worth at most, then
 // let go over a cup, over the port, or anywhere else to fall.
@@ -37,7 +38,8 @@ const GRAB_RAIL = 0.3;      // ... to the Hauler's rail to get on
 const CUP_SNAP = 0.22;      // metres: a sample let go this close to an empty cup goes in it
 const PORT_SNAP = 0.35;     // ... this close to the port's mouth goes in the port
 const DESK_SAMPLES = [[-0.26, -0.24, -0.55], [-0.12, -0.3, -0.5]]; // on a laptop, where carried samples sit in the view
-const DESK_HOLD = [0.24, -0.26, -0.55]; // on a laptop, where the held tool sits in the view
+// On a laptop, where the held tools sit in the view: the right hand's, then the left's (held[2], held[3]).
+const DESK_HOLD = { 2: [0.24, -0.26, -0.55], 3: [-0.24, -0.26, -0.55] };
 
 // Each tool's collider (client/physics.js parts, in the tool's own frame, -z away from the hand), how it
 // lies at rest, and how far its middle sits above what it lies on.
@@ -65,11 +67,15 @@ export function buildFixtures(THREE, world, { rig, camera, send, sfx = () => {},
   let st = { held: null, tools: null, scene: null, suit: false };
   const clock = () => performance.now() / 1000; // not the frame time: a click can land between two slow frames
   const hits = [];           // every mesh that can be pointed at
-  const held = [null, null, null]; // what each hand has hold of: 0 and 1 the hands in a headset, 2 the laptop's one hand
+  const held = [null, null, null, null]; // what each hand has hold of: 0 and 1 the hands in a headset, 2 and 3 a laptop's right and left
+  const sides = ['', ''];                // which side each headset hand is on, as of the last frame
   const sent = new Map();    // repairs already reported, so one sweep does not send a cell fifty times
   const once = (key, fn, every = 1) => { const t = clock(); if ((sent.get(key) || -9) + every > t) return false; sent.set(key, t); fn(); return true; };
   let refusedAt = -9, refused = '', selectedPlug = -1, plugCooldown = 0;
-  const DESK = 2;
+  const DESK = 2, DESK_L = 3;
+  const isDesk = i => i === DESK || i === DESK_L;
+  // The server's hand for one of ours: 0 left, 1 right.
+  const slotOf = i => i === DESK_L ? 0 : i === DESK ? 1 : sides[i] === 'left' ? 0 : 1;
 
   const ghost = new THREE.MeshBasicMaterial({ visible: false }); // never drawn, but the raycaster still finds it
   const mat = (color, o = {}) => new THREE.MeshStandardMaterial({ color, roughness: 0.6, metalness: 0.2, ...o });
@@ -185,27 +191,22 @@ export function buildFixtures(THREE, world, { rig, camera, send, sfx = () => {},
   }
   const running = () => !!st.tools;
   const isTool = h => h?.kind === 'tool';
-  // The tool (or decoy) in a hand, if any: there is only ever one.
-  const inHand = () => held.find(isTool)?.id || null;
+  // The tools (or decoys) in the hands, [left, right], ids or null.
+  const hands = () => { const out = [null, null]; held.forEach((h, i) => { if (isTool(h)) out[slotOf(i)] = h.id; }); return out; };
+  const inHand = () => held.find(isTool)?.id || null; // any one of them
+  const has = id => held.some(h => isTool(h) && h.id === id);
   const handOf = id => held.findIndex(h => isTool(h) && h.id === id);
 
-  // Pick a loose tool up into hand i (DESK on a laptop). One at a time: with a tool already in the other
-  // hand it stays where it is, the ring goes red, and the hand buzzes twice. On a laptop the one held is
-  // put down where you stand first.
+  // Pick a loose tool up into hand i: one tool in each hand. On a laptop (DESK) it goes in the free hand,
+  // right first; with both full, the right hand's tool is put down where you stand first.
   function take(id, i) {
     if (T[id]?.state !== 'loose') return false;
-    const other = inHand();
-    if (other && i === DESK) drop(held.findIndex(isTool), [0, 0, 0], true); // on a laptop, a click on another tool swaps
+    if (i === DESK) { if (held[DESK] && !held[DESK_L]) i = DESK_L; else if (held[DESK]) drop(DESK, [0, 0, 0], true); }
     if (held[i]) return false;
-    if (i === DESK && deskSamples.length >= 2) { refusedAt = clock(); refused = id; sfx('refuse'); return false; } // both hands full of rock
-    else if (other) {
-      refusedAt = clock(); refused = id; sfx('refuse');
-      if (i >= 0) { pulse(i, 1, 90); setTimeout(() => pulse(i, 1, 90), 160); }
-      return false;
-    }
+    if (isDesk(i) && deskSamples.length + [held[DESK], held[DESK_L]].filter(Boolean).length >= 2) { refusedAt = clock(); refused = id; sfx('refuse'); return false; } // both hands full
     const g = tools[id];
     held[i] = { kind: 'tool', id, grip: null };
-    if (BIG(id) && i !== DESK) {
+    if (BIG(id) && !isDesk(i)) {
       // Heavy things are held where the hand closed on them, not snapped to it.
       const obj = handObj[i];
       if (obj) { obj.updateWorldMatrix(true, false); g.updateWorldMatrix(true, false); held[i].grip = new THREE.Matrix4().copy(obj.matrixWorld).invert().multiply(g.matrixWorld); }
@@ -213,9 +214,9 @@ export function buildFixtures(THREE, world, { rig, camera, send, sfx = () => {},
     T[id].state = 'held'; T[id].took = clock(); T[id].trail.length = 0;
     rig.attach(g); // carried in the rig's frame, so it comes through the airlock with you
     if (phys) phys.hold(id);
-    if (!g.userData.decoy) send({ take: id });
+    if (!g.userData.decoy) send({ take: id, hand: slotOf(i) });
     sfx('click');
-    if (i >= 0 && i !== DESK) pulse(i, 0.7, 50);
+    if (i >= 0 && !isDesk(i)) pulse(i, 0.7, 50);
     return true;
   }
   // Open hand i: the tool is loose, with the hand's speed (dropped, or thrown).
@@ -240,12 +241,12 @@ export function buildFixtures(THREE, world, { rig, camera, send, sfx = () => {},
     return [(p1.x - p0.x) / dt, (p1.y - p0.y) / dt, (p1.z - p0.z) / dt];
   }
   function pullCord() {
-    if (tools.gen && T.gen.state !== 'gone' && (inHand() === 'gen' || near('gen', 2))) once('gen', () => { send({ gen: true }); sfx('clank'); }, 2);
+    if (tools.gen && T.gen.state !== 'gone' && (has('gen') || near('gen', 2))) once('gen', () => { send({ gen: true }); sfx('clank'); }, 2);
   }
   const near = (id, r) => { camera.getWorldPosition(a); return tools[id].getWorldPosition(b).distanceTo(a) < r; };
-  const need = type => { const t = FAULTS[type].tool; return !t || inHand() === t; };
+  const need = type => { const t = FAULTS[type].tool; return !t || has(t); };
   // Where each hand's held tool is drawn, set by update(): the controller, or the camera on a laptop.
-  const handObj = [null, null, camera];
+  const handObj = [null, null, camera, camera];
 
   // ---------- tool sounds: a clank where it lands, quieter and duller outside where there is no air ----------
   const hitAt = new Map();
@@ -264,7 +265,7 @@ export function buildFixtures(THREE, world, { rig, camera, send, sfx = () => {},
     if (!inside && k < 0 && a.distanceTo(b) > 3) return; // outside you hear it through your boots, close by
     const gain = Math.min(1, v / 3) * (inside ? 1 : 0.35);
     if (sfxAt) sfxAt('thud', a, gain, { mass }); else sfx('clank');
-    if (k >= 0 && k !== DESK) pulse(k, Math.min(1, 0.2 + v / 4), 30);
+    if (k >= 0 && !isDesk(k)) pulse(k, Math.min(1, 0.2 + v / 4), 30);
     if (!inside && p[1] < 0.4) { // a little dust where it hits the regolith, settling slowly
       const d = dust[dustNext++ % dust.length];
       d.position.copy(a); d.userData.born = t; d.visible = true; d.userData.size = 0.08 + Math.min(0.25, v * 0.04 * Math.sqrt(mass));
@@ -320,11 +321,11 @@ export function buildFixtures(THREE, world, { rig, camera, send, sfx = () => {},
     for (const [x0, x1, z0, z1, top] of SOLIDS) fixedBox('hall', x1 - x0, top, z1 - z0, (x0 + x1) / 2, top / 2, (z0 + z1) / 2);
     for (const d of Object.values(D)) chamber('hall', d.hall, false, true);
     // The Moon: the ground, the habitat's core and its two side modules, and the four chambers.
-    if (world.height) P.terrain(world.height, CFG.bounds + 4, 2); // on the field's own 2 m lattice
+    if (world.height) P.terrain(world.ground || world.height, CFG.bounds + 4, 2); // on the field's own 2 m lattice
     P.fixed('surface', new C.Cylinder(2.5, 2.5, 3.6, 16), 0, 1.8, 0);
     fixedBox('surface', 2.4, 2.6, 1.9, -3.4, 1.3, 0);
     fixedBox('surface', 5.2, 2.8, 2.9, 4.8, 1.4, 0);
-    for (const d of Object.values(D)) chamber('surface', d, true, false);
+    for (const d of Object.values(D)) chamber('surface', { x: d.x + Math.sin(d.ry) * CHAMBER.outset, z: d.z + Math.cos(d.ry) * CHAMBER.outset, ry: d.ry }, true, false); // as world.js stands them
   }
 
   // ---------- things to point at on the fixtures themselves ----------
@@ -367,7 +368,7 @@ export function buildFixtures(THREE, world, { rig, camera, send, sfx = () => {},
     if (!need('hull') || !st.scene?.hull || st.scene.hull.welded[i]) return false;
     return once('weld' + i, () => { send({ fix: 'hull', point: i }); sfx('weld'); });
   }
-  function patchSuit() { return !!st.suit && inHand() === 'patch' && once('patch', () => { sfx('click'); send({ fix: 'suit' }); }); }
+  function patchSuit() { return !!st.suit && has('patch') && once('patch', () => { sfx('click'); send({ fix: 'suit' }); }); }
 
   // ---------- the suit leak: a pulsing spot on your forearm ----------
   const spot = new THREE.Mesh(new THREE.SphereGeometry(0.04, 12, 8), new THREE.MeshBasicMaterial({ color: PAL.hex.red, toneMapped: false }));
@@ -474,12 +475,12 @@ export function buildFixtures(THREE, world, { rig, camera, send, sfx = () => {},
     if (g.parent !== rig) rig.attach(g);
     if (dt > 0 && obj) {
       obj.updateWorldMatrix(true, false);
-      if (i === DESK) want.compose(pW.set(...DESK_HOLD), qW.identity(), sW.set(1, 1, 1)).premultiply(obj.matrixWorld);
+      if (isDesk(i)) want.compose(pW.set(...DESK_HOLD[i]), qW.identity(), sW.set(1, 1, 1)).premultiply(obj.matrixWorld);
       else if (h.grip) want.multiplyMatrices(obj.matrixWorld, h.grip);
       else want.copy(obj.matrixWorld);
       want.premultiply(gripM.copy(rig.matrixWorld).invert()); // into the rig's frame
       want.decompose(pW, qW, sW);
-      const k = BIG(id) && i !== DESK ? 1 - Math.exp(-dt * HEAVY_LAG) : 1;
+      const k = BIG(id) && !isDesk(i) ? 1 - Math.exp(-dt * HEAVY_LAG) : 1;
       g.position.lerp(pW, k); g.quaternion.slerp(qW, k); g.scale.setScalar(1);
     }
     g.updateMatrixWorld(true);
@@ -512,7 +513,7 @@ export function buildFixtures(THREE, world, { rig, camera, send, sfx = () => {},
   const slotFree = n => !!st.scene && !st.scene.tray?.[n];
   function pickSample(id, i) {
     const s = (st.scene?.samples || []).find(x => x.id === id); if (!s) return false;
-    if (i === DESK) { if (deskSamples.length >= (inHand() ? 1 : 2)) { sfx('refuse'); return false; } deskSamples.push(id); }
+    if (i === DESK) { if (deskSamples.length + [held[DESK], held[DESK_L]].filter(Boolean).length >= 2) { sfx('refuse'); return false; } deskSamples.push(id); }
     else held[i] = { kind: 'sample', id };
     pending.set(id, clock());
     samplePos(s, a);
@@ -596,7 +597,7 @@ export function buildFixtures(THREE, world, { rig, camera, send, sfx = () => {},
       handPts[i] = hp;
     }
     // A sample held in a hand that has gone away (the controllers put down) falls.
-    held.forEach((h, i) => { if (h?.kind === 'sample' && i !== DESK && !handPts[i]) letGoSample(i, h.id, null); });
+    held.forEach((h, i) => { if (h?.kind === 'sample' && !isDesk(i) && !handPts[i]) letGoSample(i, h.id, null); });
     for (const f of falling) {
       if (f.sent) continue;
       f.v.y -= 1.62 * dt; f.p.addScaledVector(f.v, dt);
@@ -631,9 +632,10 @@ export function buildFixtures(THREE, world, { rig, camera, send, sfx = () => {},
 
     // Desk keys for the things you cannot point at, and Q to put the held tool down.
     patchSuit, pullCord,
+    // Q on a laptop puts down the right hand's tool, then the left's.
     dropHeld() {
-      const i = held.findIndex(isTool); if (i < 0) return false;
-      if (i === DESK) { // 0.6 m in front, with a small push forward
+      const i = [DESK, DESK_L, 1, 0].find(k => isTool(held[k])); if (i === undefined) return false;
+      if (isDesk(i)) { // 0.6 m in front, with a small push forward
         const g = tools[held[i].id];
         camera.getWorldPosition(a); camera.getWorldDirection(b); b.y = 0; b.normalize();
         rig.worldToLocal(c.copy(a).addScaledVector(b, 0.6).setY(Math.max(0.4, a.y - 0.45)));
@@ -644,15 +646,17 @@ export function buildFixtures(THREE, world, { rig, camera, send, sfx = () => {},
       } else drop(i);
       return true;
     },
-    // What is in the hand: the tool's (or decoy's) id, or null.
+    // What is in the hands: [left, right], the tools' (or decoys') ids or null; inHand is either one.
+    get hands() { return hands(); },
     get inHand() { return inHand(); },
     toolState: id => T[id] && { state: T[id].state, ...(phys ? phys.pose(id) : {}) },
     // Put a loose tool at room/world coordinates (tests and the console).
     layTool: (id, place, x, y, z) => lay(id, place, x, y, z),
-    // For the tests: put a tool straight into hand i (whatever was held is dropped where it is), or empty both hands.
+    // For the tests: put a tool straight into hand i (whatever that hand held is dropped where it is), or
+    // with no id empty both hands.
     give(id, i) {
-      held.forEach((h, k) => { if (isTool(h)) drop(k, [0, 0, 0], true); });
-      if (!id) return;
+      if (!id) { held.forEach((h, k) => { if (isTool(h)) drop(k, [0, 0, 0], true); }); return; }
+      if (isTool(held[i])) drop(i, [0, 0, 0], true);
       if (T[id].state === 'gone' && phys) phys.restore(id);
       T[id].state = 'loose';
       const obj = handObj[i] || camera; obj.getWorldPosition(a);
@@ -745,8 +749,9 @@ export function buildFixtures(THREE, world, { rig, camera, send, sfx = () => {},
       camera.getWorldPosition(headXZ);
       const place = placeNow();
       handObj[0] = hands[0]?.obj || null; handObj[1] = hands[1]?.obj || null;
-      // A tool held on a laptop moves to the desk hand; one held in a headset hand stays in that hand.
-      if (!vr) for (const i of [0, 1]) if (isTool(held[i])) { held[DESK] = held[i]; held[i] = null; held[DESK].grip = null; }
+      sides[0] = hands[0]?.side || sides[0]; sides[1] = hands[1]?.side || sides[1];
+      // Tools held in a headset move to the laptop's hands, on the same side, when the headset comes off.
+      if (!vr) for (const i of [0, 1]) if (isTool(held[i])) { const k = slotOf(i) ? DESK : DESK_L, to = held[k] ? (k === DESK ? DESK_L : DESK) : k; held[to] = held[i]; held[i] = null; held[to].grip = null; }
 
       // Held tools: placed in the rig's frame (so they come with you through an airlock), the light ones
       // in the hand, the heavy ones swinging after it. Their bodies follow, pushing loose things about.
@@ -865,7 +870,7 @@ export function buildFixtures(THREE, world, { rig, camera, send, sfx = () => {},
           ring.scale.setScalar((big ? 0.3 : what.kind === 'plug' || what.kind === 'cord' ? 0.09 : what.kind === 'rail' ? 0.18 : 0.14) * (0.94 + Math.sin(now * 8) * 0.06));
           ring.quaternion.copy(camera.getWorldQuaternion(q4));
           // Red if the other hand already has a tool: one at a time.
-          ring.material.color.setHex(what.kind === 'tool' && inHand() ? PAL.hex.red : PAL.hex.green);
+          ring.material.color.setHex(PAL.hex.green); // an empty hand can always take what its ring is on
         }
         if (name !== hover[i]) { hover[i] = name; if (name) pulse(i, 0.25, 20); }
       });
