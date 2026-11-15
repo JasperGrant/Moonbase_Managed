@@ -337,7 +337,10 @@ function targetInReach(controller) {
 function use(controller, holding = false) {
   const hit = targetInReach(controller);
   if (!hit || (holding && !hit.object.userData.hold)) return !!hit && !holding;
-  fx.click(hit.object, hit.point);
+  const hand = controller ? controllers.indexOf(controller) : -1;
+  // A bare hand's pinch acts on release, so it cannot hold a tool it pointed at: it has to reach for it.
+  if (hit.object.userData.tool && controller?.userData.isHand) return false;
+  fx.click(hit.object, hit.point, hand >= 0 ? hand : undefined);
   return true;
 }
 // Use whatever is being pointed at: a loose tool, something to fix. (The airlocks are walked into.)
@@ -453,6 +456,7 @@ for (const i of [0, 1]) {
     const other = controllers[1 - i];
     // A trigger pulled, or a bare hand pinched, on something in reach grabs it and holds it until it lets
     // go. That is not a zoom, a turn, a teleport, the radio or a point at the panel.
+    if (c.userData.grabbed && !fx.holding(i)) c.userData.grabbed = null; // what it held was taken from it (dropped by the server, a new mission)
     if (c.userData.grabbed) return; // already holding on with the grip
     if (running() && fx.grab(i, handPoint(i, new THREE.Vector3()))) { c.userData.grabbed = 'select'; return; }
     c.userData.pinched = true;
@@ -464,7 +468,11 @@ for (const i of [0, 1]) {
       return;
     }
     if (c.userData.hand === 'left') { if (c.userData.isHand) leftDrag = { x: lateral(c) }; return; }
-    if (!c.userData.isHand && useAny(c)) { pressed = c; nextUse = performance.now() / 1000 + 0.1; } // a bare hand acts when the pinch lets go, see below
+    if (!c.userData.isHand && useAny(c)) {
+      // Pointed at a loose tool: it is in this hand now, and comes out of it when the trigger lets go.
+      if (fx.holding(i)) { c.userData.grabbed = 'select'; return; }
+      pressed = c; nextUse = performance.now() / 1000 + 0.1;
+    } // a bare hand acts when the pinch lets go, see below
   });
   c.addEventListener('selectend', () => {
     if (pressed === c) pressed = null;
@@ -478,7 +486,7 @@ for (const i of [0, 1]) {
     if (c.userData.isHand && act && !c.userData.exitAim && !useAny(c) && groundTarget(c, hitPoint)) teleport(hitPoint);
   });
   // The grip button does the same as the trigger. Whichever closed the hand is the one that opens it.
-  c.addEventListener('squeezestart', () => { if (!c.userData.grabbed && running() && fx.grab(i, handPoint(i, new THREE.Vector3()))) c.userData.grabbed = 'squeeze'; });
+  c.addEventListener('squeezestart', () => { if (c.userData.grabbed && !fx.holding(i)) c.userData.grabbed = null; if (!c.userData.grabbed && running() && fx.grab(i, handPoint(i, new THREE.Vector3()))) c.userData.grabbed = 'squeeze'; });
   c.addEventListener('squeezeend', () => { if (c.userData.grabbed === 'squeeze') { c.userData.grabbed = null; fx.release(i, handPoint(i, new THREE.Vector3())); } });
   rig.add(c);
   controllers.push(c);
