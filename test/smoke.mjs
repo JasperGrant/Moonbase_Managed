@@ -3,8 +3,7 @@
 //
 //   1. Mission Control and the astronaut ready up and play the whole demo mission to a win the way a
 //      laptop player would: walk up to the thing, look at it, click. Every repair goes through the same
-//      raycast a mouse click does, the switchboard is reached through the airlock, and the socket for
-//      each cable is read off the Scientist's wiring diagram on the other page.
+//      raycast a mouse click does, and the tools are fetched from the hall through the airlock.
 //   2. On the astronaut's page: the hand-tracking gestures, the visor zoom, the wrist gauges with no
 //      microphone, and the airlock with the hall's outage lighting.
 //   3. In a second browser with a pretend microphone: the radio, both ways.
@@ -213,16 +212,6 @@ function installHelpers() {
     async pullWheel() { const r = await need('out'); return r.ok ? work(m => owns(F.wheel, m), 'the broken wheel', 20) : r; },
     async fitTire() { const r = await need('out'); return r.ok ? work(m => owns(F.hub, m), 'the bare hub', 20) : r; },
     async weld() { const r = await need('out'); return r.ok ? work(m => m.parent === F.crack, 'the crack', 30) : r; },
-    async plug(cable, socket) {
-      const r0 = await need('in'); if (!r0.ok) return r0;
-      const plug = F.plugs[cable].children.find(c => c.userData.click);
-      // The plug drops out of its socket on the next drawn frame. Wait until it is hanging where it can be picked up.
-      if (!(await until(() => F.plugs[cable].position.distanceTo(F.plugRest[cable]) < 0.01, 15))) return { ok: false, why: `the ${F.plugs[cable].userData.color} plug never dropped out of its socket` };
-      if (!(await face(plug)) || !mb.use()) return { ok: false, why: `could not pick up the ${F.plugs[cable].userData.color} plug` };
-      const sock = mb.fx.targets().filter(m => m.parent === F.board && m.userData.click).sort((a, b) => a.position.distanceTo(F.sockets[socket]) - b.position.distanceTo(F.sockets[socket]))[0];
-      if (!sock || !(await face(sock)) || !mb.use()) return { ok: false, why: `could not reach socket ${socket}` };
-      return (await until(s => s.scene.board === null || s.scene.board[cable].seated, 8)) ? { ok: true } : { ok: false, why: `the ${F.plugs[cable].userData.color} plug did not seat in socket ${socket}` };
-    },
     standAt(x, z) { mb.standAt(mb.where(), x, z, 0); mb.camera.rotation.x = 0; mb.sendPose(); },
   };
 }
@@ -317,17 +306,8 @@ try {
   const hits = await astro.evaluate(() => window.moonbase.state().suit);
   if (hits) problems.push('astronaut: hit by the shower while inside');
 
-  // The shower left dust, a hull breach and a tripped switchboard. The board first, while the Scientist
-  // still has a screen to read the wiring diagram from: it is in the hall, where we are.
-  const wiring = await ctl.evaluate(async () => { for (let i = 0; i < 50; i++) { const w = window.moonbase.state().wiring; if (w) return w; await new Promise(r => setTimeout(r, 100)); } return null; });
-  if (!wiring) problems.push('console: the Scientist has no wiring diagram for the tripped switchboard');
-  for (const w of wiring || []) {
-    await act(astro, `plug the ${w.color} cable into socket ${w.socket}`, ({ color, socket }) => {
-      const cable = window.moonbase.world.fixtures.plugs.findIndex(p => p.userData.color === color);
-      return window.smoke.plug(cable, socket);
-    }, w);
-  }
-  await waitFor(astro, 'the switchboard to be fixed', s => !s.scene.board, 8);
+  // The shower left dust and a hull breach. The switchboard is gone: nothing to read off the Scientist's screen.
+  if (await ctl.evaluate(() => 'wiring' in window.moonbase.state() || 'board' in (window.moonbase.state().power || {}))) problems.push('console: the Scientist still has a wiring diagram or board output');
   await act(astro, 'take the brush again', () => window.smoke.carry('brush'));
   await act(astro, 'brush the panels again', () => window.smoke.dust());
   await waitFor(astro, 'the panels to be clean again', s => !s.scene.dust, 8);
@@ -348,7 +328,7 @@ try {
 
   if (!result.won) problems.push(`mission lost: ${result.reason}`);
   if (result.fixed !== 6) problems.push(`expected all 6 faults fixed, got ${result.fixed}`);
-  if (result.hits || result.blackouts || result.mistakes) problems.push(`a clean run should have no hits, blackouts or wrong plugs: ${JSON.stringify(result)}`);
+  if (result.hits || result.blackouts) problems.push(`a clean run should have no hits or blackouts: ${JSON.stringify(result)}`);
   await shot(ctl, 'mission-control-results');
 
   // The debrief and the way back. Every seat has BACK TO LOBBY. The astronaut (on a laptop: hold X)
@@ -487,8 +467,8 @@ try {
 
   step('through the airlock, power outage lighting, things knocked loose');
   // Through the airlock: walk into the chamber, the hatch shuts behind, the swap happens with the head
-  // exactly where it was in the chamber, and the hatch in front opens onto the hall. The switchboard is
-  // mounted there, and the outage lighting runs.
+  // exactly where it was in the chamber, and the hatch in front opens onto the hall. There is no
+  // switchboard on its wall any more, and the outage lighting runs.
   const indoors = await astro.evaluate(async () => {
     const mb = window.moonbase, T = mb.THREE, wait = ms => new Promise(r => setTimeout(r, ms));
     if (mb.where() === 'in') { const r = await window.smoke.through('out'); if (!r.ok) return 'out: ' + r.why; }
@@ -500,7 +480,7 @@ try {
     const after = local();
     if (after.distanceTo(before) > 0.02) return `the head jumped ${after.distanceTo(before).toFixed(3)} m in the chamber during the swap`;
     if (!mb.interior.group.visible || mb.world.rover.visible) return 'inside, but the wrong place is being drawn';
-    if (mb.world.fixtures.board.parent !== mb.interior.mount) return 'no switchboard on the interior wall';
+    if (mb.world.fixtures.board || mb.interior.mount) return 'the switchboard is still on the interior wall';
     mb.outage(true);
     for (let i = 0; i < 900 && mb.interior.phase !== 'backup'; i++) await wait(100);
     if (mb.interior.phase !== 'backup') return 'backup lights never came on, stuck in ' + mb.interior.phase;

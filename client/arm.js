@@ -140,10 +140,12 @@ export function buildArm(THREE) {
     add(new THREE.TubeGeometry(path, 24, 0.0032, 8), cable);
     add(new THREE.CylinderGeometry(0.006, 0.006, 0.014, 12), aluminium, -0.163, -0.027, z(-0.16) - 0.005).rotation.z = Math.PI / 2 - 0.4;
   }
-  // The EXIT button, on a plate at the elbow end of the cuff: a red-collared plunger under a guard ring,
-  // and an engraved label. Hold a fingertip on it (client/astronaut.js) and the cap sinks, the lamp in it
-  // lights, and the headset session ends: the way back to the lobby without taking the headset off.
-  const EXIT_X = -FACE_W / 2 - 0.03, EXIT_Y = 0.006;
+  // The EXIT button, on a plate standing up from the top edge of the cuff at its elbow end: a red-collared
+  // plunger under a guard ring, and an engraved label. With the cuff held up to read, the top edge is the
+  // side the other hand reaches first. Hold a fingertip on it, or point at it and hold the trigger or the
+  // pinch (client/astronaut.js), and the cap sinks, the lamp in it lights, and the headset session ends:
+  // the way back to the lobby without taking the headset off.
+  const EXIT_X = -FACE_W / 2 + 0.026, EXIT_Y = FACE_H / 2 + 0.035; // the plate tucks behind the housing's top edge
   const exitButton = new THREE.Group();
   exitButton.name = 'Button_Exit';
   exitButton.position.set(EXIT_X, EXIT_Y, -0.006);
@@ -357,7 +359,7 @@ export function buildArm(THREE) {
 
     if (debrief) {
       // The debrief: one cream placard over both dials with a big tick (mission complete) or cross
-      // (mission failed), and an engraved arrow to the EXIT button at the elbow end of the cuff.
+      // (mission failed), and an engraved arrow up to the EXIT button on the top edge of the cuff.
       g.fillStyle = PAL.bezel; g.beginPath(); g.roundRect(44, 34, 402, 306, 6); g.fill();
       g.fillStyle = PAL.bakelite; g.beginPath(); g.roundRect(50, 40, 390, 294, 4); g.fill();
       const face = g.createRadialGradient(200, 120, 20, 245, 187, 260);
@@ -365,8 +367,8 @@ export function buildArm(THREE) {
       g.fillStyle = face; g.beginPath(); g.roundRect(54, 44, 382, 286, 3); g.fill();
       if (info.status === 'won') at(262, 187, 2.5, () => tick(0, 0, GREEN));
       else at(262, 187, 2.5, () => cross(0, 0, RED));
-      g.fillStyle = PAL.inkDial; g.lineJoin = 'round'; // the arrow, pointing out of the face toward EXIT
-      g.beginPath(); g.moveTo(68, 187); g.lineTo(100, 161); g.lineTo(100, 177); g.lineTo(124, 177); g.lineTo(124, 197); g.lineTo(100, 197); g.lineTo(100, 213); g.closePath(); g.fill();
+      g.fillStyle = PAL.inkDial; g.lineJoin = 'round'; // the arrow, pointing up out of the face toward EXIT
+      g.beginPath(); g.moveTo(98, 52); g.lineTo(124, 84); g.lineTo(108, 84); g.lineTo(108, 118); g.lineTo(88, 118); g.lineTo(88, 84); g.lineTo(72, 84); g.closePath(); g.fill();
     } else {
       // Suit oxygen: the needle on the dial, a bottle below the hub filled to the level left.
       const frac = s ? Math.max(0, Math.min(1, s.oxygen / s.o2Max)) : 0, low = s ? s.oxygen < 25 : false;

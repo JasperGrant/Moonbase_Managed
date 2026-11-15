@@ -20,7 +20,7 @@ export const PAL = {
   photoTint: '#e8dcc4', // multiplied into photo textures (the NASA models, the flight-deck panels) to warm them
 };
 
-// The four cable colours: muted, but still told apart at a glance (the socket shapes back them up).
+// Four muted wire colours, for the loose wiring that hangs in the hall when something breaks (client/damage.js).
 export const CABLE = { red: '#b0443a', blue: '#40698f', yellow: '#d0a93c', green: '#5e8a46' };
 
 const toHex = s => parseInt(s.slice(1), 16);

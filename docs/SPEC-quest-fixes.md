@@ -6,7 +6,7 @@ Four changes, in the order to build them. Each section says what changes for the
 | --- | --- | --- |
 | 1 | Remove the switchboard fault and every trace of it | Medium: touches the server, three client pages and four tests |
 | 2 | Make the EXIT button on the wrist cuff work in a real Quest | Small to medium: touch detection, plus a second way to press it |
-| 3 | The radio and the consoles keep working in a blackout | Small, plus one design decision (what a blackout costs instead) |
+| 3 | The radio and the consoles keep working in a blackout | **Set aside: not being built.** A blackout still cuts the radio and the consoles |
 | 4 | Brushing the solar panels looks and feels like brushing dust | Medium: a dust mask per panel, painted by the brush |
 
 ---
@@ -67,7 +67,7 @@ The EXIT button passes `test/vr.mjs` step 13 (a fake XR device with exact, never
 1. **Controllers: the touch point is not where the glove's fingers are drawn.** With controllers, the fingertip is taken as `(0, 0, -0.075)` in the glove group's frame: 7.5 cm out along the controller's ray. But `stations.js` places the glove model `CUFF_BEHIND` (0.148 m) *behind* the controller, so the drawn fingers sit near the controller itself. A player who puts the visible glove fingers on the cap is 5 to 8 cm short of the point that is tested. Check this first: draw a small marker at `tipPos` in a debug build and look.
 2. **Hand tracking: the left hand drops out when the right hand covers it.** The Quest loses or freezes a tracked hand when the other hand occludes it, which is exactly the pose for pressing a button on your own wrist. When the left wrist joint goes invisible, `followArm()` hides the cuff, `near` turns false, and `exitHeld` decays at three times the rate it builds, so 0.6 s is rarely reached.
 3. **The target is too small for real tracking.** 2.8 cm radius on a fingertip that jitters by 1-2 cm, measured to a point 1.2 cm above the cap.
-4. **Physical clash with controllers.** The cap sits at the elbow end of the cuff, right where the left controller's ring is. The right controller hits the left one before its tip reaches the cap.
+4. **Awkward to reach.** The cap sits off the elbow end of the cuff, the far side from the right hand when the cuff is held up to read.
 
 ### The fix
 
@@ -89,6 +89,8 @@ Make it pressable three ways, all of them ending in the same `pressExit` / `leav
 ---
 
 ## 3. The radio keeps working in a blackout
+
+> **Set aside.** This section is not being built; the blackout keeps its silence. It is left here for reference.
 
 ### What changes
 
@@ -127,7 +129,7 @@ Each of the three panels has six flat dust rectangles (`DUST_COLS` by `DUST_ROWS
 
 ### The rules stay where they are
 
-The server keeps its 18 cells (`DUST_CELLS`); nothing about the protocol changes. The astronaut's page sends `{ fix: 'dust', cell: i }` when the mask under cell `i`'s rectangle is less than 15 % covered. When the server says a cell is clean (another source of truth, such as a reset), clear that rectangle of the mask. When a new dust storm lands, refill the mask with a fresh layer.
+The server keeps its 18 cells (`DUST_CELLS`); nothing about the protocol changes. The astronaut's page sends `{ fix: 'dust', cell: i }` once the bristles have travelled 12 cm across cell `i`, or the mask under it is less than 35 % covered. (Built that way rather than at 15 % so the battery's 60 s still leaves time: one pass along each row of a panel cleans it, as before. What is left in a brushed cell then slumps down the panel and pours off its bottom edge.) When the server says a cell is clean (another source of truth, such as a reset), clear that rectangle of the mask. When a new dust storm lands, refill the mask with a fresh layer.
 
 On a laptop, holding the mouse on a panel with the brush paints the same strokes along where the crosshair moves.
 
@@ -145,9 +147,10 @@ Three panel planes instead of eighteen cells (fewer draw calls than today), one 
 
 ## Order of work
 
-1. Section 3 (smallest, and it changes what the blackout means for section 1).
-2. Section 1, which then has only the blackout left to light the hall for.
-3. Section 2.
-4. Section 4.
+1. Section 1.
+2. Section 2.
+3. Section 4.
+
+(Section 3 is set aside.)
 
 Run `npm test`, `npm run smoke:shots` and `npm run vr:shots` after each, and say in the PR what was checked on a real Quest and what was not.

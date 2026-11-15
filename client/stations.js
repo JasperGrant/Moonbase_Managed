@@ -2,7 +2,7 @@
 //
 // There are two ways to do each thing, and both end in the same message to the server:
 //   - physical (VR): find a tool lying in the hall, pick it up and bring it to the work. Sweep the brush
-//     over the dust, hold the welder on the crack, push a plug into a socket, pull the wheel off its hub.
+//     over the dust, hold the welder on the crack, pull the wheel off its hub.
 //   - pointing (mouse, or a VR trigger at arm's length): click the thing. This is the fallback
 //     that lets the game be tested, and played, without a headset.
 // The server decides what counted (server/game.js). Nothing here changes the game by itself.
@@ -21,8 +21,6 @@ import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.j
 const GRAB = 0.2;           // metres: how close a hand must be to a loose tool to take it...
 const GRAB_BIG = 0.35;      // ...the tire and the generator
 const GRAB_CORD = 0.14;     // ... the generator's pull handle
-const GRAB_PLUG = 0.18;     // ... a loose cable plug
-const SOCKET_SNAP = 0.11;   // metres: a held plug this close to a socket goes in (sockets are 0.25 apart)
 const WHEEL_PULL = 0.3;     // metres the broken wheel must be pulled before it comes off
 const CORD_PULL = 0.4;      // metres of generator cord
 const TIRE_FIT = 0.25;      // metres from the tire's centre to the bare hub
@@ -61,7 +59,7 @@ export function buildFixtures(THREE, world, { rig, camera, send, sfx = () => {},
   const held = [null, null, null]; // what each hand has hold of: 0 and 1 the hands in a headset, 2 the laptop's one hand
   const sent = new Map();    // repairs already reported, so one sweep does not send a cell fifty times
   const once = (key, fn, every = 1) => { const t = clock(); if ((sent.get(key) || -9) + every > t) return false; sent.set(key, t); fn(); return true; };
-  let refusedAt = -9, refused = '', selectedPlug = -1, plugCooldown = 0;
+  let refusedAt = -9, refused = '';
   const DESK = 2;
 
   const ghost = new THREE.MeshBasicMaterial({ visible: false }); // never drawn, but the raycaster still finds it
@@ -320,26 +318,18 @@ export function buildFixtures(THREE, world, { rig, camera, send, sfx = () => {},
   }
 
   // ---------- things to point at on the fixtures themselves ----------
-  F.dustCells.forEach((cell, i) => target(cell, () => !!st.scene?.dust?.[i], () => brushCell(i), true));
+  // Pointing at a dusty cell (a laptop, or a trigger at arm's length) runs the brush along it, the
+  // whole width of the cell at the height you pointed. In the hand, the brush wipes where it goes (below).
+  F.dustCells.forEach((cell, i) => target(cell, () => !!st.scene?.dust?.[i], point => {
+    if (!need('dust') || !st.scene?.dust?.[i]) return false;
+    if (!sent.has('dust' + i) || clock() - sent.get('dust' + i) > 1) { F.dust.sweepCell(i, point); sfxAt ? sfxAt('brush', point || worldPos(cell, b), 0.8) : sfx('brush'); }
+    return brushCell(i);
+  }, true));
   function brushCell(i) {
     if (!need('dust') || !st.scene?.dust?.[i]) return false;
-    return once('dust' + i, () => { send({ fix: 'dust', cell: i }); once('brushSfx', () => sfx('brush'), 0.09); });
+    return once('dust' + i, () => send({ fix: 'dust', cell: i }));
   }
-
-  const plugLoose = i => !!st.scene?.board && !st.scene.board[i].seated;
-  F.plugs.forEach((plug, i) => {
-    const box = add(plug, new THREE.BoxGeometry(0.13, 0.13, 0.2), ghost);
-    target(box, () => plugLoose(i), () => { selectedPlug = selectedPlug === i ? -1 : i; sfx('click'); });
-  });
-  F.sockets.forEach((p, j) => {
-    const disc = add(F.board, new THREE.BoxGeometry(0.16, 0.16, 0.06), ghost, p.x, p.y, p.z - 0.02);
-    target(disc, () => selectedPlug >= 0 && plugLoose(selectedPlug), () => { tryPlug(selectedPlug, j); selectedPlug = -1; });
-  });
-  function tryPlug(cable, socket) {
-    if (!plugLoose(cable) || st.scene.board.some(x => x.seated && x.socket === socket)) return;
-    sfx('click');
-    send({ fix: 'board', cable, socket });
-  }
+  const brushPrev = [null, null, null]; // where each hand's bristles were last frame, while they were on a panel
 
   const wheelHit = add(F.wheel, new THREE.SphereGeometry(0.45, 8, 6), ghost);
   target(wheelHit, () => st.scene?.wheel === 1, () => pullWheel());
@@ -408,7 +398,15 @@ export function buildFixtures(THREE, world, { rig, camera, send, sfx = () => {},
       fit.name = side === 'left' ? 'Hand_L' : 'Hand_R';
       fit.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(...GLOVE_FIT[side].map(a => new THREE.Vector3(...a))));
       g.add(fit); g.userData[side] = fit;
-      loadGlove(THREE, { mirror: side === 'right', emissive: 0x0e0e0c }).then(m => { m.position.x = -CUFF_BEHIND; fit.add(m); })
+      loadGlove(THREE, { mirror: side === 'right', emissive: 0x0e0e0c }).then(m => {
+        m.position.x = -CUFF_BEHIND; fit.add(m);
+        // The tip of the longest finger: what a controller presses buttons with (the EXIT on the cuff).
+        const box = new THREE.Box3().setFromObject(m, true);
+        const tip = new THREE.Object3D(); tip.name = 'Tip_Index';
+        fit.worldToLocal(tip.position.set(box.max.x, (box.min.y + box.max.y) / 2, (box.min.z + box.max.z) / 2));
+        tip.position.x -= 0.01; // just inside the fingertip, not past it
+        fit.add(tip); fit.userData.tip = tip;
+      })
         .catch(e => console.warn('glove model', e));
     }
     // A controller points where the fingers point, but the forearm behind it runs down and back to the
@@ -422,9 +420,6 @@ export function buildFixtures(THREE, world, { rig, camera, send, sfx = () => {},
   cord.name = 'Cord_Pull';
   cord.frustumCulled = false; cord.visible = false;
   world.rover.parent.add(cord);
-  // A ring on the socket a held plug is about to go into.
-  const socketRing = add(F.board, new THREE.TorusGeometry(0.07, 0.008, 6, 20), new THREE.MeshBasicMaterial({ color: PAL.hex.white, toneMapped: false }));
-  socketRing.visible = false;
 
   // ---------- helpers for the physical path ----------
   const worldPos = (obj, out) => obj.getWorldPosition(out);
@@ -443,7 +438,6 @@ export function buildFixtures(THREE, world, { rig, camera, send, sfx = () => {},
       worldPos(tools.gen.userData.handle, b);
       offer(b.distanceTo(p), GRAB_CORD, { kind: 'cord', start: p.clone() });
     }
-    F.plugs.forEach((plug, n) => { if (plugLoose(n) && !plug.userData.held) offer(worldPos(plug, b).distanceTo(p), GRAB_PLUG, { kind: 'plug', i: n }); });
     if (st.scene?.wheel === 1) offer(worldPos(F.wheel, b).distanceTo(p), 0.5, { kind: 'wheel', start: p.clone() });
     return best;
   }
@@ -482,7 +476,7 @@ export function buildFixtures(THREE, world, { rig, camera, send, sfx = () => {},
     get refusedAt() { return refusedAt; },
     // Meshes that can be pointed at right now.
     targets: () => hits.filter(m => m.userData.enabled() && m.parent && isShown(m)),
-    click(mesh) { mesh.userData.click(); },
+    click(mesh, point) { mesh.userData.click(point); },
 
     // Desk keys for the things you cannot point at, and Q to put the held tool down.
     patchSuit, pullCord,
@@ -523,7 +517,6 @@ export function buildFixtures(THREE, world, { rig, camera, send, sfx = () => {},
       if (!what) return false;
       if (what.kind === 'tool') { take(what.id, i); return true; }
       held[i] = what;
-      if (what.kind === 'plug') { F.plugs[what.i].userData.held = true; selectedPlug = -1; }
       if (what.kind === 'wheel') F.wheel.userData.held = true;
       sfx('click');
       pulse(i, 0.7, 50);
@@ -535,7 +528,6 @@ export function buildFixtures(THREE, world, { rig, camera, send, sfx = () => {},
       if (!h) return;
       if (isTool(h)) { const v = velocity(h.id), fast = Math.hypot(...v) > 1.5; drop(i, v); if (fast) pulse(i, 0.8, 60); return; }
       held[i] = null;
-      if (h.kind === 'plug') F.plugs[h.i].userData.held = false;
       if (h.kind === 'wheel') F.wheel.userData.held = false;
     },
     holding: i => held[i],
@@ -582,11 +574,9 @@ export function buildFixtures(THREE, world, { rig, camera, send, sfx = () => {},
         }
       }
       held.forEach((h, i) => { // you cannot work what is already fixed
-        if (h?.kind === 'plug' && !plugLoose(h.i)) { F.plugs[h.i].userData.held = false; held[i] = null; }
         if (h?.kind === 'wheel' && s.scene?.wheel !== 1) { F.wheel.userData.held = false; held[i] = null; }
         if (h?.kind === 'cord' && T.gen.state === 'gone') held[i] = null;
       });
-      if (selectedPlug >= 0 && !plugLoose(selectedPlug)) selectedPlug = -1;
     },
 
     // Every frame. hands: [{ obj, point, side, tracked }] for the two hands (obj is where a held tool is
@@ -638,22 +628,6 @@ export function buildFixtures(THREE, world, { rig, camera, send, sfx = () => {},
           cord.geometry.attributes.position.needsUpdate = true;
           once('cordBuzz' + i, () => pulse(i, Math.min(1, 0.2 + out / CORD_PULL * 0.6), 40), 0.08);
           if (out > CORD_PULL) { pullCord(); pulse(i, 1, 200); held[i] = null; }
-        } else if (h.kind === 'plug') {
-          const plug = F.plugs[h.i];
-          F.board.worldToLocal(plug.position.copy(p));
-          plug.rotation.set(0, 0, 0); // pointing at the board, ready to go in
-          // The nearest socket lights up as the plug comes close: white if it is free, red if it is full.
-          let j = -1, best = 0.3;
-          F.sockets.forEach((sk, n) => { const d = sk.distanceTo(plug.position); if (d < best) { best = d; j = n; } });
-          const full = j >= 0 && st.scene.board.some(x => x.seated && x.socket === j);
-          socketRing.visible = j >= 0;
-          if (j >= 0) { socketRing.position.copy(F.sockets[j]).setZ(0.09); socketRing.material.color.setHex(full ? PAL.hex.red : PAL.hex.white); }
-          // One try per push: after a spark the plug drops, and the hand has to come back for it.
-          if (j >= 0 && !full && best < SOCKET_SNAP && clock() >= plugCooldown) {
-            plugCooldown = clock() + 0.6;
-            tryPlug(h.i, j); pulse(i, 1, 80);
-            plug.userData.held = false; held[i] = null;
-          }
         } else if (h.kind === 'wheel') {
           world.rover.worldToLocal(F.wheel.position.copy(p));
           const out = p.distanceTo(h.start);
@@ -663,13 +637,26 @@ export function buildFixtures(THREE, world, { rig, camera, send, sfx = () => {},
           const g = tools[h.id];
           g.updateWorldMatrix(true, false);
           const tip = g.localToWorld(b.copy(g.userData.tip));
-          if (h.id === 'brush' && st.scene?.dust) {
-            F.dustCells.forEach((cell, n) => {
-              if (!st.scene.dust[n]) return;
-              cell.worldToLocal(c.copy(tip));
-              const { width, height } = cell.geometry.parameters;
-              if (Math.abs(c.x) < width / 2 + 0.05 && Math.abs(c.y) < height / 2 + 0.05 && Math.abs(c.z) < 0.2 && brushCell(n)) pulse(i, 0.5, 35);
+          if (h.id === 'brush') {
+            // The bristles on a panel's face wipe the dust where they go (client/dust.js); a cell brushed
+            // across far enough is reported. The scrape follows the speed of the stroke, in the ear and the hand.
+            let on = -1;
+            if (st.scene?.dust) F.dustCells.forEach((cell, n) => {
+              if (on >= 0 || n % 6) return; // one test per panel, against its first cell's frame
+              const panel = cell.parent;
+              panel.worldToLocal(c.copy(tip));
+              if (Math.abs(c.x) < 1.13 && Math.abs(c.y) < 0.68 && c.z > -0.02 && c.z < 0.15) on = n / 6;
             });
+            const prev = brushPrev[i];
+            if (on >= 0 && prev && prev.panel === on) {
+              const moved = prev.p.distanceTo(tip), speed = moved / Math.max(dt, 1 / 120);
+              for (const n of F.dust.stroke(on, prev.p, tip, dt)) if (brushCell(n)) pulse(i, 0.5, 35);
+              if (speed > 0.08) {
+                once('brushSfx' + i, () => sfxAt ? sfxAt('brush', tip, Math.min(1, 0.25 + speed * 0.5)) : sfx('brush'), Math.max(0.06, 0.16 - speed * 0.05));
+                once('brushBuzz' + i, () => pulse(i, Math.min(0.45, 0.12 + speed * 0.15), 25), 0.07);
+              }
+            }
+            brushPrev[i] = on >= 0 ? { panel: on, p: (prev?.p || new THREE.Vector3()).copy(tip) } : null;
           }
           if (h.id === 'welder' && st.scene?.hull) {
             // The torch lights by itself when the tip is on the crack. Stay on a point until it beads.
@@ -693,7 +680,6 @@ export function buildFixtures(THREE, world, { rig, camera, send, sfx = () => {},
       // Each point of the crack glows as it heats, so you can see how long to stay on it (world.js draws it).
       F.crack.userData.heat = weldHits.map(m => Math.min(1, (m.userData.dwell || 0) / WELD_DWELL));
       if (!held.some(h => h?.kind === 'cord')) cord.visible = false;
-      if (!held.some(h => h?.kind === 'plug')) socketRing.visible = false;
 
       // Gloves on controllers, and a ring on whatever each empty hand could grab. A light tick as the ring lands on something.
       hands.forEach((hand, i) => {
@@ -705,10 +691,10 @@ export function buildFixtures(THREE, world, { rig, camera, send, sfx = () => {},
         const ring = rings[i], name = what ? what.kind + (what.id || what.i || '') : null;
         ring.visible = !!what;
         if (what) {
-          const obj = what.kind === 'plug' ? F.plugs[what.i] : what.kind === 'wheel' ? F.wheel : what.kind === 'cord' ? tools.gen.userData.handle : tools[what.id];
+          const obj = what.kind === 'wheel' ? F.wheel : what.kind === 'cord' ? tools.gen.userData.handle : tools[what.id];
           worldPos(obj, ring.position);
           const big = what.kind === 'wheel' || BIG(what.id);
-          ring.scale.setScalar((big ? 0.3 : what.kind === 'plug' || what.kind === 'cord' ? 0.09 : 0.14) * (0.94 + Math.sin(now * 8) * 0.06));
+          ring.scale.setScalar((big ? 0.3 : what.kind === 'cord' ? 0.09 : 0.14) * (0.94 + Math.sin(now * 8) * 0.06));
           ring.quaternion.copy(camera.getWorldQuaternion(q4));
           // Red if the other hand already has a tool: one at a time.
           ring.material.color.setHex(what.kind === 'tool' && inHand() ? PAL.hex.red : PAL.hex.green);
@@ -719,9 +705,6 @@ export function buildFixtures(THREE, world, { rig, camera, send, sfx = () => {},
 
       // Crack hit targets follow the crack to its current spot.
       weldHits.forEach((m, n) => m.position.copy(F.crackPts[n]));
-
-      // A plug chosen by pointing swells until you point at a socket.
-      F.plugs.forEach((plug, n) => plug.scale.setScalar(n === selectedPlug ? 1.5 : 1));
 
       // The suit-leak spot sits on the forearm of the hand that is not holding the patch kit.
       // On a laptop it sits low in the view and F patches it.

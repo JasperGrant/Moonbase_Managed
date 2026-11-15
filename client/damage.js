@@ -3,7 +3,7 @@
 // fault is fixed, everything goes back where it was.
 //
 // Each breakable listens to one fault in the server's scene (the same object the surface uses):
-//   board   the switchboard trips: a ceiling panel over it drops, the conduit cable tears loose and sparks
+//   power   the base blacks out: the ceiling panel by the junction box drops, its conduit cable tears loose and sparks
 //   hull    a hull breach: a wall panel by the airlock pops and falls flat, the pipe behind it vents
 //   meteor  a shower is landing: a ceiling panel up the hall swings down, a gantry cable drops
 //
@@ -187,9 +187,9 @@ export function buildDamage(THREE, group, { sfx = () => {} } = {}) {
   }
 
   // ---------- the breakables ----------
-  // board: over the switchboard on the west wall (z -7.7)
-  ceilingPanel('board', { hingeAt: new THREE.Vector3(-3.0, 3.2, -8.2), away: new THREE.Vector3(1, 0, 0), w: 0.9, d: 0.9 });
-  cable('board', { from: [-3.33, 2.6, -5.0], to: [-3.33, 2.6, -7.25], n: 12, slack: 1.15, sparks: true });
+  // power: by the junction box on the west wall (z -7.7)
+  ceilingPanel('power', { hingeAt: new THREE.Vector3(-3.0, 3.2, -8.2), away: new THREE.Vector3(1, 0, 0), w: 0.9, d: 0.9 });
+  cable('power', { from: [-3.33, 2.6, -5.0], to: [-3.33, 2.6, -7.25], n: 12, slack: 1.15, sparks: true });
   // hull: the wall panel left of the airlock, and the vent pipe behind it
   const hullPanel = wallPanel('hull', { at: new THREE.Vector3(-2.3, 1.15, -0.01), inward: new THREE.Vector3(0, 0, -1), w: 1.0, h: 1.5 });
   // meteor: a ceiling panel up the hall, and a cable off the gantry
@@ -197,7 +197,7 @@ export function buildDamage(THREE, group, { sfx = () => {} } = {}) {
   cable('meteor', { from: [0.9, 2.26, -5.35], to: [1.4, 2.28, -5.5], n: 9, slack: 2.6, r: 0.022 });
 
   // ---------- running it ----------
-  const active = { board: false, hull: false, meteor: false };
+  const active = { power: false, hull: false, meteor: false };
   function breakPiece(p) {
     if (p.state === 'down' || p.state === 'falling') return;
     if (p.kind === 'wall') Object.assign(p, { state: 'falling', vy: 0, out: 0.04, th: 0, w: 0, landed: false });
@@ -245,7 +245,7 @@ export function buildDamage(THREE, group, { sfx = () => {} } = {}) {
     set audible(on) { audible = on; },
     // Pass the server's scene each frame (null when no round is running).
     set(scene) {
-      const want = { board: !!scene?.board, hull: !!scene?.hull, meteor: scene?.meteor != null && scene.meteor > 0.5 };
+      const want = { power: !!scene?.dark, hull: !!scene?.hull, meteor: scene?.meteor != null && scene.meteor > 0.5 };
       for (const k in want) {
         if (want[k] === active[k]) continue;
         active[k] = want[k];

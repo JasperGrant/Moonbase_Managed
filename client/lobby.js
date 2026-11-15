@@ -22,7 +22,7 @@ const INFO = {
   tech: { name: 'Technician', line: 'The radar and the rover. Knows where', url: '/tech' },
 };
 // In a 2-player game the Mission Ops panel stands for the one person on Earth.
-const OPERATOR = { name: 'Mission Operator', line: 'Radio, gauges, wiring, radar and rover' };
+const OPERATOR = { name: 'Mission Operator', line: 'Radio, gauges, radar and rover' };
 const ARC = { x: 355, y: 1096 }; // where the welding torch touches VIPER, in the art's coordinates
 
 // ---------- motion overlays, one per scene, in the art's 900 x 1800 coordinates ----------

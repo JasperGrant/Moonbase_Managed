@@ -2,8 +2,8 @@
 //
 // The shape of the game: faults break things, every fault eventually costs oxygen, and oxygen at
 // zero is the only way to lose. The astronaut reports physical work (a cell brushed, a point
-// welded, a plug seated) with act(); this file alone decides whether it counted.
-import { CFG, TOOLS, FAULTS, PLACES, SCRIPTS, MODES, CABLE_COLORS, DUST_CELLS, CRACK_POINTS } from '../client/shared/config.js';
+// welded, a wheel fitted) with act(); this file alone decides whether it counted.
+import { CFG, TOOLS, FAULTS, PLACES, SCRIPTS, MODES, DUST_CELLS, CRACK_POINTS } from '../client/shared/config.js';
 import { sheltered, areaName } from '../client/shared/rules.js';
 
 export class Game {
@@ -37,7 +37,7 @@ export class Game {
     this.log = [];
     this.ev = null;
     this.result = null;
-    this.stats = { fixed: 0, mistakes: 0, hits: 0, blackouts: 0 };
+    this.stats = { fixed: 0, hits: 0, blackouts: 0 };
     const door = PLACES.doors[CFG.spawn.door];
     this.astro = { x: door.x, z: door.z, ry: Math.PI, h: 1.65, inside: !!CFG.spawn.inside, door: CFG.spawn.door };
     this.rover = { x: PLACES.rover.x, z: PLACES.rover.z, ry: Math.PI, throttle: 0, steer: 0 };
@@ -133,7 +133,7 @@ export class Game {
     if (d < CFG.habRadius + 1.5 && d > 0) { const k = (CFG.habRadius + 1.5) / d; r.x *= k; r.z *= k; }
 
     // Power: a power fault drains the battery, and an empty battery blacks the base out.
-    const draining = this.faults.dust || this.faults.board;
+    const draining = this.faults.dust;
     this.battery += (draining ? -100 / CFG.batterySeconds : 100 / CFG.rechargeSeconds) * dt;
     this.battery = Math.max(0, Math.min(100, this.battery));
     if (!this.blackout && this.battery <= 0) {
@@ -175,12 +175,6 @@ export class Game {
     if (type === 'dust') d = { cells: Array(DUST_CELLS).fill(true) };
     if (type === 'hull') d = { spot: this.int(0, PLACES.cracks.length - 1), welded: Array(CRACK_POINTS).fill(false) };
     if (type === 'wheel') d = { stage: 0 }; // 0 = broken wheel still on, 1 = pulled off
-    if (type === 'board') {
-      // Each cable belongs in one socket. Three pop out, one stays put.
-      const sockets = this.shuffle(CABLE_COLORS.map((_, i) => i));
-      const stays = this.int(0, CABLE_COLORS.length - 1);
-      d = { cables: CABLE_COLORS.map((color, i) => ({ color, socket: sockets[i], seated: i === stays })) };
-    }
     this.faults[type] = d;
     if (!quiet) this.note('alarm', `${FAULTS[type].name}.`);
   }
@@ -226,15 +220,6 @@ export class Game {
       if (!Number.isInteger(a.cell) || !f.cells[a.cell]) return;
       f.cells[a.cell] = false;
       if (!f.cells.some(Boolean)) this.solve('dust');
-    } else if (a.fix === 'board') {
-      const f = this.faults.board;
-      if (!f || !this.astro.inside) return; // the board is on the hall's west wall
-      const cable = f.cables[a.cable];
-      if (!cable || cable.seated || !Number.isInteger(a.socket) || a.socket < 0 || a.socket >= f.cables.length) return;
-      if (f.cables.some(c => c.seated && c.socket === a.socket)) return; // that socket is full
-      if (cable.socket !== a.socket) return this.mistake('Cable pushed into the wrong socket.', CFG.wrongPlug);
-      cable.seated = true;
-      if (f.cables.every(c => c.seated)) this.solve('board');
     } else if (a.fix === 'wheel') {
       const f = this.faults.wheel;
       if (!f || !this.near(this.rover)) return;
@@ -263,12 +248,6 @@ export class Game {
     this.note('solve', `${FAULTS[type].name}: fixed.`, 0, CFG.fixPoints);
   }
 
-  mistake(text, cost) {
-    this.stats.mistakes++;
-    this.oxygen -= cost;
-    this.note('mistake', text, -cost);
-  }
-
   end(won, reason) {
     this.phase = 'results';
     this.debriefLeft = CFG.debriefSeconds;
@@ -293,10 +272,6 @@ export class Game {
     const f = this.faults.dust;
     return f ? Math.round(15 + 85 * f.cells.filter(c => !c).length / f.cells.length) : 100;
   }
-  boardOut() {
-    const f = this.faults.board;
-    return f ? Math.round(this.solar() * f.cables.filter(c => c.seated).length / f.cables.length) : this.solar();
-  }
 
   // What can physically be seen out on the surface: the astronaut's eyes and the rover camera.
   scene() {
@@ -304,8 +279,6 @@ export class Game {
     return {
       dark: !this.powered,
       dust: f.dust ? [...f.dust.cells] : null,
-      // A loose cable does not say where it belongs.
-      board: f.board ? f.board.cables.map(c => ({ color: c.color, seated: c.seated, socket: c.seated ? c.socket : -1 })) : null,
       wheel: f.wheel ? f.wheel.stage + 1 : 0, // 0 fine, 1 broken, 2 pulled off
       hull: f.hull ? { spot: f.hull.spot, welded: [...f.hull.welded] } : null,
       meteor: m && m.falling ? this.elapsed - m.start : null,
@@ -344,11 +317,9 @@ export class Game {
       if (v.radar && this.meteor) v.meteor = { eta: Math.max(0, this.meteor.start - this.elapsed), falling: this.meteor.falling };
     }
     if (role === 'sci' || all) {
-      v.power = { battery: this.battery, solar: this.solar(), board: this.boardOut() };
+      v.power = { battery: this.battery, solar: this.solar() };
       v.leak = this.leaking; // one lamp: it does not say where
       v.drain = this.drain;
-      // The wiring diagram: only the cables that are out.
-      if (this.faults.board) v.wiring = this.faults.board.cables.filter(c => !c.seated).map(c => ({ color: c.color, socket: c.socket }));
     }
     return v;
   }
