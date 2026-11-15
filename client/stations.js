@@ -70,6 +70,7 @@ export function buildFixtures(THREE, world, { rig, camera, send, sfx = () => {},
   const sent = new Map();    // repairs already reported, so one sweep does not send a cell fifty times
   const once = (key, fn, every = 1) => { const t = clock(); if ((sent.get(key) || -9) + every > t) return false; sent.set(key, t); fn(); return true; };
   let refusedAt = -9, refused = '';
+  let inVR = false; // set each frame by update(): a headset is on
   const DESK = 2, DESK_L = 3;
   const isDesk = i => i === DESK || i === DESK_L;
   // The server's hand for one of ours: 0 left, 1 right.
@@ -185,7 +186,9 @@ export function buildFixtures(THREE, world, { rig, camera, send, sfx = () => {},
     lay(id, 'hall', sp.x, sp.y, sp.z);
     // One invisible box per tool to point at: click a loose tool to take it.
     const [w, h, d, z] = g.userData.hit;
-    target(add(g, new THREE.BoxGeometry(w, h, d), ghost, 0, 0, z), () => T[id].state === 'loose' && running(), () => take(id, DESK)).userData.pickup = true;
+    // Laptop only: in a headset a tool is taken by closing the hand on it (grab) and is held only while the
+    // trigger stays down. A point-and-click pickup would pin it to the rig with no hand to let go of it.
+    target(add(g, new THREE.BoxGeometry(w, h, d), ghost, 0, 0, z), () => T[id].state === 'loose' && running() && !inVR, () => take(id, DESK)).userData.pickup = true;
   }
   const running = () => !!st.tools;
   const isTool = h => h?.kind === 'tool';
@@ -763,6 +766,7 @@ export function buildFixtures(THREE, world, { rig, camera, send, sfx = () => {},
     // Every frame. hands: [{ obj, point, side, tracked }] for the two hands (obj is where a held tool is
     // drawn, point is where the fingers are, tracked means bare hands, not controllers); empty on a laptop.
     update(dt, now, hands, vr) {
+      inVR = !!vr;
       camera.getWorldPosition(headXZ);
       const place = placeNow();
       handObj[0] = hands[0]?.obj || null; handObj[1] = hands[1]?.obj || null;
