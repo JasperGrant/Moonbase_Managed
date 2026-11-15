@@ -28,7 +28,7 @@ export const CFG = {
 
   reach: 4.5,                 // metres: the server refuses work on a fixture further away than this
   roverSpeed: 2.7,            // m/s, about 6 mph (crewed lunar terrain vehicle class)
-  bounds: 22,                 // metres from the habitat that players and rover may go
+  bounds: 45,                 // metres from the habitat that players and rover may go
   habRadius: 2.9,
   // The astronaut starts inside the hall (room coordinates, see client/interior.js), facing up it, with
   // the tools lying round. The server sees them at door S until they go out.

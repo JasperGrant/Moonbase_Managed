@@ -1,6 +1,6 @@
 // The one game room, as a Cloudflare Durable Object. Every WebSocket in the deployment lands
 // here (the worker always asks for the object named "main"), so there is exactly one mission,
-// the same as one laptop running server.js. The rules and the delay are in server/hub.js.
+// the same as one laptop running server.js. The rules are in server/hub.js.
 import { Hub } from '../server/hub.js';
 import { CFG } from '../client/shared/config.js';
 

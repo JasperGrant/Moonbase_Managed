@@ -23,7 +23,7 @@ const clock = s => `${Math.floor(Math.max(0, s) / 60)}:${String(Math.floor(Math.
 const C = { bg: PAL.consoleDeep, line: PAL.rule, ink: PAL.ink, dim: PAL.inkDim, green: PAL.green, amber: PAL.amber, red: PAL.red, blue: PAL.blue };
 
 const BRIEF = {
-  ops: '<b>You are the only voice the astronaut hears.</b> Hold SPACE to talk; it takes 1.3 s to reach the Moon. The astronaut holds one tool at a time. Your TOOL LOG says roughly where each one lies: tell them where to look, and what to fix first. When they are suited up, you call them GO.',
+  ops: '<b>You are the only voice the astronaut hears.</b> Hold SPACE to talk. The astronaut holds one tool at a time. Your TOOL LOG says roughly where each one lies: tell them where to look, and what to fix first. When they are suited up, you call them GO.',
   tech: '<b>You know WHERE and WHEN.</b> The radar map and the rover camera. The radar is on the rover. Arrow keys drive.',
   sci: '<b>You know WHAT is wrong.</b> Two screens of gauges: POWER and AIR. Read them and work out the cause.',
 };
@@ -68,7 +68,7 @@ $('run').innerHTML = [
     <h2>Tool log</h2><canvas id="toolCv" class="pic" width="560" height="330"></canvas></div>`,
   has('tech') && `<div class="panel"><h3>Technician</h3>
     ${tabs('tech', ['RADAR', 'ROVER CAM'])}
-    <div data-pane="tech0"><canvas id="map" width="460" height="460"></canvas></div>
+    <div data-pane="tech0"><canvas id="map" width="640" height="640"></canvas></div>
     <div data-pane="tech1" hidden><canvas id="cam"></canvas><p class="hint" id="camHint">Arrow keys drive.</p></div></div>`,
   has('sci') && `<div class="panel"><h3>Scientist</h3>
     ${tabs('sci', ['POWER', 'AIR'])}
@@ -312,7 +312,8 @@ function drawMap(s) {
   glass.addColorStop(0, '#152015'); glass.addColorStop(1, PAL.glass);
   g.fillStyle = glass; g.fillRect(0, 0, W, W);
   g.strokeStyle = phos(0.13); g.lineWidth = 1;
-  for (let m = -20; m <= 20; m += 5) { g.beginPath(); g.moveTo(X(m), 0); g.lineTo(X(m), W); g.moveTo(0, Y(m)); g.lineTo(W, Y(m)); g.stroke(); }
+  const G = Math.ceil(CFG.bounds / 10) * 10; // a 10 m graticule out to the edge of the play area
+  for (let m = -G; m <= G; m += 10) { g.beginPath(); g.moveTo(X(m), 0); g.lineTo(X(m), W); g.moveTo(0, Y(m)); g.lineTo(W, Y(m)); g.stroke(); }
   g.strokeStyle = phos(0.35); g.beginPath(); g.arc(X(0), Y(0), CFG.bounds * k, 0, 7); g.stroke();
   // the sweep, with an afterglow behind it
   const sweep = (Date.now() / 1000 * 1.6) % (Math.PI * 2);
@@ -450,7 +451,7 @@ if (has('tech')) {
 function paintPtt() {
   const b = $('ptt'); if (!b) return;
   b.className = talking ? 'tx' : rx ? 'rx' : '';
-  b.textContent = talking ? 'TRANSMITTING... (1.3 s to the Moon)' : rx ? 'ASTRONAUT IS TRANSMITTING' : 'HOLD SPACE TO TALK TO THE ASTRONAUT';
+  b.textContent = talking ? 'TRANSMITTING...' : rx ? 'ASTRONAUT IS TRANSMITTING' : 'HOLD SPACE TO TALK TO THE ASTRONAUT';
 }
 if (has('ops')) {
   const rb = $('radioBtn');

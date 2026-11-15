@@ -312,7 +312,7 @@ export function buildFixtures(THREE, world, { rig, camera, send, sfx = () => {},
     for (const [x0, x1, z0, z1, top] of SOLIDS) fixedBox('hall', x1 - x0, top, z1 - z0, (x0 + x1) / 2, top / 2, (z0 + z1) / 2);
     for (const d of Object.values(D)) chamber('hall', d.hall, false, true);
     // The Moon: the ground, the habitat's core and its two side modules, and the four chambers.
-    if (world.height) P.terrain(world.height, CFG.bounds + 3, 1);
+    if (world.height) P.terrain(world.ground || world.height, CFG.bounds + 3, 1);
     P.fixed('surface', new C.Cylinder(2.5, 2.5, 3.6, 16), 0, 1.8, 0);
     fixedBox('surface', 2.4, 2.6, 1.9, -3.4, 1.3, 0);
     fixedBox('surface', 5.2, 2.8, 2.9, 4.8, 1.4, 0);

@@ -1,5 +1,5 @@
 // The transport-independent half of the server: who is connected, what each role may send,
-// the 1.3 s Earth-Moon delay on everything that crosses between the astronaut and mission
+// the optional Earth-Moon delay (off unless the admin turns it on) on what crosses between the astronaut and mission
 // control, and the simulation loop. Both the Node server (server.js) and the Cloudflare
 // Durable Object (worker/room.js) drive one of these, so the rules live in exactly one place.
 //
@@ -151,7 +151,7 @@ export class Hub {
     const game = this.game;
     if (!ws.role && isBinary) return;
 
-    // Binary frames are radio audio. Astronaut <-> Mission Ops only, always delayed.
+    // Binary frames are radio audio. Astronaut <-> Mission Ops only, delayed only if the admin turned the delay on.
     // A blackout kills the radio in both directions.
     if (isBinary) {
       if (data.byteLength > 64000 || this.silent()) return;
@@ -217,7 +217,7 @@ export class Hub {
       return;
     }
 
-    // Everything below comes from Earth, so it reaches the Moon one light-delay later.
+    // Everything below comes from Earth: with the delay on, it reaches the Moon one light-delay later.
     // Nothing from Earth gets through a blackout except a released talk key and starting over.
     if (this.silent() && m.t !== 'reset' && !(m.t === 'ptt' && !m.on)) return;
     if (m.t === 'rover' && (ws.role === 'tech' || ws.role === 'all')) {
@@ -232,7 +232,7 @@ export class Hub {
     }
   }
 
-  // Call every CFG.tickMs. The astronaut sees the present; mission control sees 1.3 s ago.
+  // Call every CFG.tickMs. With the delay on, mission control sees the base one light-delay late.
   tick() {
     const now = Date.now();
     const dt = Math.min(0.5, (now - this.last) / 1000);

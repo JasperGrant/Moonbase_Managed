@@ -28,7 +28,7 @@ export function startRoverCam(canvas, getState) {
     world.update(ms / 1000);
     if (s.scene) world.apply(s.scene, ms / 1000);
     world.avatar.visible = !!s.astro && s.crew.includes('astronaut');
-    if (s.astro) { world.avatar.position.set(s.astro.x, 0, s.astro.z); world.avatar.rotation.y = s.astro.ry; world.avatar.scale.y = Math.min(1, s.astro.h / 1.65); }
+    if (s.astro) { world.avatar.position.set(s.astro.x, world.ground ? world.ground(s.astro.x, s.astro.z) : 0, s.astro.z); world.avatar.rotation.y = s.astro.ry; world.avatar.scale.y = Math.min(1, s.astro.h / 1.65); }
     renderer.render(scene, camera);
   });
 }

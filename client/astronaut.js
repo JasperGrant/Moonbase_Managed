@@ -20,7 +20,7 @@ import { music } from '/music.js';
 const REACH = 3.2;        // metres: how far away the mouse can work something
 const REACH_VR = 1.6;     // metres: pointing in VR is a fallback for grabbing, so it only works close up
 const CROUCH = 0.9;       // metres: eye height while C is held on a laptop
-const WALK = 2.4;         // m/s
+const WALK = 4.0;         // m/s: a brisk lunar lope (the play area is 45 m in every direction)
 const GRAVITY = 1.62;     // m/s^2, lunar
 
 const net = connect('astronaut');
@@ -336,7 +336,7 @@ const useAny = controller => use(controller);
 // pinch to use the hatch or the READY board, pinch at the ground to teleport there, pinch the left
 // hand in empty air and drag it sideways to turn, hold the left hand up to your helmet to talk, and
 // pinch both empty hands and pull them apart to zoom the visor (push them together to zoom back out).
-const TELEPORT_MAX = 8;   // metres per hop
+const TELEPORT_MAX = 14;  // metres per hop
 const TURN_STEP = 0.1;    // metres of left-hand drag per 30-degree snap turn
 const HELMET = 0.22;      // metres from the head that counts as "hand on helmet"
 const ZOOM_MAX = 6;       // visor magnification with the hands pulled wide apart
@@ -365,6 +365,7 @@ function inModule(x, z) {
 function groundTarget(controller, out) {
   if (mode === 'vr' && state?.phase === 'lobby') return null; // no teleporting about before the start
   aim(controller);
+  ground.constant = -rig.position.y; // the level the feet are on; the hop lands on the real ground
   const p = raycaster.ray.intersectPlane(ground, out);
   if (!p || p.distanceTo(raycaster.ray.origin) > TELEPORT_MAX) return null;
   if (where === 'in') { const l = interior.toLocal(p.x, p.z); return interior.walkable(l.x, l.z) ? p : null; }
@@ -916,7 +917,7 @@ function placeInside() {
   }
   showPlace('in');
   door = CFG.spawn.door;
-  rig.position.y = 0; vy = 0;
+  rig.position.y = 0; vy = 0; grounded = true;
   rig.rotation.set(0, 0, 0);
   rig.updateMatrixWorld(true);
   camera.getWorldPosition(headPos);
@@ -974,7 +975,15 @@ function clampWalk() {
   }
 }
 
-let vy = 0, turnArmed = true, lastPose = 0, shake = 0;
+let vy = 0, turnArmed = true, lastPose = 0, shake = 0, grounded = true;
+const footV = new THREE.Vector3();
+// The height of the ground under the head: the drawn lunar surface outside, the floor (0) indoors
+// and in an airlock.
+function floorY() {
+  if (where !== 'out' || cycle) return 0;
+  camera.getWorldPosition(footV);
+  return world.ground ? world.ground(footV.x, footV.z) : 0;
+}
 function control(dt, now) {
   let mx = 0, mz = 0, jump = false, ptt = mode === 'desk' && !!keys.tab;
   const waiting = mode === 'vr' && !!state && state.phase === 'lobby'; // before the start, by the status board: look around, but stay put
@@ -1016,10 +1025,14 @@ function control(dt, now) {
   rig.position.x += (-mz * fwd.x + mx * -fwd.z) * speed;
   rig.position.z += (-mz * fwd.z + mx * fwd.x) * speed;
 
-  if (jump && rig.position.y === 0) vy = 2.0; // a slow, floaty lunar hop
+  // Feet on the ground: follow it over craters and slopes; a hop is a slow, floaty lunar arc.
+  const floor = floorY();
+  if (jump && grounded) { vy = 2.0; grounded = false; }
   vy -= GRAVITY * dt;
-  rig.position.y = Math.max(0, rig.position.y + vy * dt);
-  if (rig.position.y === 0) vy = 0;
+  let y = rig.position.y + vy * dt;
+  if (grounded && y - floor < 0.3) y = floor; // walking downhill: stay on the slope rather than drift off it
+  if (y <= floor) { y = floor; vy = 0; grounded = true; } else grounded = false;
+  rig.position.y = y;
 
   // Stay inside the play area and outside the habitat walls; or, indoors, inside the hall; or in an airlock.
   clampWalk();

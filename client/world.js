@@ -285,16 +285,20 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
     return h * k - 0.05 * (1 - k);
   }
   void craters;
-  const SIZE = 1500, SEG = 230;
+  // Vertices are packed toward the base with a power curve: about 0.4 m apart at the habitat,
+  // 1 m at 10 m out and 2.4 m at the edge of the 45 m play area.
+  const SIZE = 1500, SEG = 300, POW = 2.2, HALF = SIZE / 2, ROW = SEG + 1;
+  const remap = t => Math.sign(t) * Math.pow(Math.abs(t), POW) * HALF; // grid coordinate (-1..1) -> metres
+  const gridX = Float32Array.from({ length: ROW }, (_, i) => remap(2 * i / SEG - 1));
+  const hgrid = new Float32Array(ROW * ROW);
   const groundGeo = new THREE.PlaneGeometry(SIZE, SIZE, SEG, SEG);
   groundGeo.rotateX(-Math.PI / 2);
   {
     const gp = groundGeo.attributes.position, col = new Float32Array(gp.count * 3), uv = groundGeo.attributes.uv;
     for (let i = 0; i < gp.count; i++) {
-      // Denser vertices near the base: remap the regular grid with a power curve.
-      const u = gp.getX(i) / (SIZE / 2), v = gp.getZ(i) / (SIZE / 2);
-      const x = Math.sign(u) * Math.pow(Math.abs(u), 2.0) * (SIZE / 2), z = Math.sign(v) * Math.pow(Math.abs(v), 2.0) * (SIZE / 2);
+      const x = gridX[i % ROW], z = gridX[Math.floor(i / ROW)];
       const h = height(x, z);
+      hgrid[i] = h;
       gp.setXYZ(i, x, h, z);
       uv.setXY(i, x / SIZE + 0.5, z / SIZE + 0.5);
       // Vertex colour breaks up texture tiling: broad bright/dark patches.
@@ -307,6 +311,17 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
   const ground = new THREE.Mesh(groundGeo, regolithMat);
   ground.receiveShadow = true;
   scene.add(ground);
+  // The height of the ground as drawn (the mesh, not the formula behind it), so feet, wheels and tools
+  // sit on what you see even where a crater is smaller than the mesh spacing.
+  const cellOf = v => { // index of the grid cell holding v, and how far across it
+    const t = Math.sign(v) * Math.pow(Math.min(1, Math.abs(v) / HALF), 1 / POW);
+    const i = Math.min(SEG - 1, Math.max(0, Math.floor((t + 1) / 2 * SEG)));
+    return [i, Math.min(1, Math.max(0, (v - gridX[i]) / (gridX[i + 1] - gridX[i])))];
+  };
+  function groundAt(x, z) {
+    const [i, fx] = cellOf(x), [j, fz] = cellOf(z), a = j * ROW + i;
+    return (hgrid[a] * (1 - fx) + hgrid[a + 1] * fx) * (1 - fz) + (hgrid[a + ROW] * (1 - fx) + hgrid[a + ROW + 1] * fx) * fz;
+  }
 
   // The skyline: the real 360-degree horizon seen from the site (LOLA, out to 290 km, with the
   // Moon's curvature). A band of ground runs from the edge of the terrain mesh out to a ring at
@@ -337,8 +352,11 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
   // Two shapes (jagged, rounded), each displaced by noise, instanced many times.
   const SITES = [...Object.values(PLACES.doors).map(d => ({ x: d.x + Math.sin(d.ry) * 2, z: d.z + Math.cos(d.ry) * 2 })), ...PLACES.panels, PLACES.rover, PLACES.depot, PLACES.dish, PLACES.drill];
   const keepClear = (x, z, m) => Math.hypot(x, z) > 4.5 + m && SITES.every(s => Math.hypot(x - s.x, z - s.z) > 2.8 + m);
-  function rockGeo(detail, amp, seed) {
-    // Icosahedron geometry is unindexed (flat shaded); weld shared vertices first so normals smooth.
+  // A rock: a sphere pushed about by noise (low-frequency lumps plus ridged creases), stretched to its
+  // own proportions, then cut by random fracture planes so it has flat broken faces like a boulder
+  // that spalled off a crater rim. Normalised to a radius of about 1, centred.
+  function rockGeo(detail, seed, { amp = 0.3, cuts = 6, depth = [0.5, 0.85], squash = [1, 0.75, 1], ridged = 1 } = {}) {
+    // Icosahedron geometry is unindexed; weld shared vertices so the noise moves them together.
     const raw = new THREE.IcosahedronGeometry(1, detail), rp = raw.attributes.position;
     const index = [], verts = [], seen = new Map();
     for (let i = 0; i < rp.count; i++) {
@@ -350,38 +368,70 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3));
     g.setIndex(index);
-    const p = g.attributes.position, v = new THREE.Vector3(), uv = new Float32Array(p.count * 2);
+    const planes = Array.from({ length: cuts }, () => {
+      const u = rnd() * 2 - 1, a = rnd() * Math.PI * 2, r = Math.sqrt(1 - u * u);
+      return { n: new THREE.Vector3(r * Math.cos(a), u, r * Math.sin(a)), d: depth[0] + rnd() * (depth[1] - depth[0]) };
+    });
+    const p = g.attributes.position, v = new THREE.Vector3();
+    const box = new THREE.Box3();
     for (let i = 0; i < p.count; i++) {
       v.fromBufferAttribute(p, i);
-      const n = N.fbm(v.x * 1.6 + seed, v.y * 1.6, v.z * 1.6, 3) + 0.35 * N.fbm(v.x * 5 + seed, v.y * 5, v.z * 5, 2);
-      uv[i * 2] = Math.atan2(v.z, v.x) / Math.PI; uv[i * 2 + 1] = v.y;
-      v.multiplyScalar(1 + n * amp).multiply(new THREE.Vector3(1, 0.72, 1));
+      const lump = N.fbm(v.x * 1.3 + seed, v.y * 1.3 + seed * 0.7, v.z * 1.3, 4);
+      const crease = 1 - Math.abs(N.noise3(v.x * 3.1 + seed, v.y * 3.1, v.z * 3.1 - seed));
+      v.multiplyScalar(1 + amp * (lump + ridged * 0.45 * (crease - 0.5)));
+      v.set(v.x * squash[0], v.y * squash[1], v.z * squash[2]);
+      for (const pl of planes) { const out = v.dot(pl.n) - pl.d; if (out > 0) v.addScaledVector(pl.n, -out); }
       p.setXYZ(i, v.x, v.y, v.z);
+      box.expandByPoint(v);
+    }
+    const c = box.getCenter(new THREE.Vector3()), size = box.getSize(new THREE.Vector3()), k = 2 / Math.max(size.x, size.y, size.z);
+    const uv = new Float32Array(p.count * 2);
+    for (let i = 0; i < p.count; i++) {
+      v.fromBufferAttribute(p, i).sub(c).multiplyScalar(k);
+      p.setXYZ(i, v.x, v.y, v.z);
+      uv[i * 2] = Math.atan2(v.z, v.x) / Math.PI; uv[i * 2 + 1] = v.y;
     }
     g.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
     g.computeVertexNormals();
+    g.computeBoundingBox();
+    g.userData.bottom = g.boundingBox.min.y; // how far the base sits below the centre, in unit scale
     return g;
   }
   const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler(), v3 = new THREE.Vector3(), sc = new THREE.Vector3(), c3 = new THREE.Color();
-  function scatter(geo, count, rMin, rMax, sMin, sMax, bury) {
+  // Scatter `count` copies of one shape. Each copy gets its own stretch, turn and tilt, so no two match.
+  function scatter(geo, count, rMin, rMax, sMin, sMax, { bury = 0.25, tilt = 0.5 } = {}) {
     const im = new THREE.InstancedMesh(geo, rockMat, count);
     for (let i = 0; i < count; i++) {
       let x, z, s;
       do { const a = rnd() * Math.PI * 2, r = rMin + Math.pow(rnd(), 1.4) * (rMax - rMin); x = Math.cos(a) * r; z = Math.sin(a) * r; s = sMin + rnd() * rnd() * (sMax - sMin); } while (!keepClear(x, z, s) || (s > 0.6 && Math.hypot(x, z) < CFG.bounds + 1)); // nothing you could walk through inside the play area
-      e.set(rnd() * 0.5, rnd() * Math.PI * 2, rnd() * 0.5);
-      m4.compose(v3.set(x, height(x, z) + s * (0.55 - bury), z), q.setFromEuler(e), sc.set(s * (0.8 + rnd() * 0.5), s, s * (0.8 + rnd() * 0.5)));
+      e.set((rnd() - 0.5) * 2 * tilt, rnd() * Math.PI * 2, (rnd() - 0.5) * 2 * tilt, 'YXZ');
+      sc.set(s * (0.65 + rnd() * 0.75), s * (0.55 + rnd() * 0.6), s * (0.65 + rnd() * 0.75));
+      m4.compose(v3.set(x, groundAt(x, z) - geo.userData.bottom * sc.y * (1 - bury), z), q.setFromEuler(e), sc);
       im.setMatrixAt(i, m4);
-      const t = 0.75 + rnd() * 0.4;
-      im.setColorAt(i, c3.setRGB(t, t * (0.98 + rnd() * 0.03), t * 0.95));
+      const t = 0.72 + rnd() * 0.42;
+      im.setColorAt(i, c3.setRGB(t, t * (0.97 + rnd() * 0.04), t * (0.93 + rnd() * 0.04)));
     }
     im.castShadow = im.receiveShadow = true;
     scene.add(im);
     return im;
   }
-  const jagged = rockGeo(3, 0.4, 3), rounded = rockGeo(2, 0.22, 11);
-  scatter(jagged, 70, 6, 120, 0.3, 2.6, 0.25);
-  scatter(rounded, 90, 5, 90, 0.25, 1.6, 0.3);
-  scatter(rounded, 500, 2.5, 60, 0.05, 0.3, 0.2);
+  // Eight shapes. Boulders (outside the play area): angular blocks, slabs, many-faceted chunks, knobbly
+  // breccia and two weathered rounded ones. Pebbles (everywhere): three small, sharp shapes.
+  const BOULDERS = [
+    rockGeo(3, 101, { amp: 0.30, cuts: 9, squash: [1.25, 0.80, 0.90] }),
+    rockGeo(3, 202, { amp: 0.32, cuts: 6, squash: [1.60, 0.55, 0.90] }),
+    rockGeo(3, 303, { amp: 0.26, cuts: 13, depth: [0.45, 0.75], squash: [0.95, 1.00, 1.10] }),
+    rockGeo(3, 404, { amp: 0.50, cuts: 4, squash: [1.10, 0.75, 1.35], ridged: 1.6 }),
+    rockGeo(2, 505, { amp: 0.24, cuts: 2, depth: [0.7, 0.9], squash: [1.00, 0.70, 1.15], ridged: 0.3 }),
+  ];
+  const PEBBLES = [
+    rockGeo(1, 606, { amp: 0.30, cuts: 5, squash: [1.30, 0.70, 0.90] }),
+    rockGeo(1, 707, { amp: 0.35, cuts: 4, squash: [0.90, 0.60, 1.20] }),
+    rockGeo(1, 808, { amp: 0.25, cuts: 7, squash: [1.10, 0.85, 1.00] }),
+  ];
+  [24, 18, 18, 16, 0].forEach((n, i) => n && scatter(BOULDERS[i], n, 6, 120, 0.3, 2.6, { bury: 0.3, tilt: 0.45 }));     // big, mostly far
+  [20, 14, 16, 18, 22].forEach((n, i) => scatter(BOULDERS[i], n, 5, 90, 0.25, 1.6, { bury: 0.35, tilt: 0.6 }));        // medium
+  [240, 230, 230].forEach((n, i) => scatter(PEBBLES[i], n, 2.5, 80, 0.05, 0.3, { bury: 0.2, tilt: Math.PI }));          // small, any way up
 
   // ---------- sky ----------
   {
@@ -846,7 +896,7 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
   prop('support-cradle', depot, -2.6, -1.0, -0.2, { by: { spstob_fss_1: { rough: 0.7 } } });
 
   return {
-    rover, avatar, sun, height, hab,
+    rover, avatar, sun, height, hab, ground: groundAt, // ground(x, z): the height of the ground as drawn
     // Handles for the astronaut's hands (stations.js). Vectors are local to their fixture group.
     doors, height,
     fixtures: { board, sockets, plugs, plugRest, dustCells, crack, crackPts, wheel: rover.userData.wheel, hub: rover.userData.hub },
@@ -946,6 +996,7 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
     moveRover(r, k = 0.2) {
       rover.position.x += (r.x - rover.position.x) * k;
       rover.position.z += (r.z - rover.position.z) * k;
+      rover.position.y = groundAt(rover.position.x, rover.position.z);
       let d = r.ry - rover.rotation.y;
       d = Math.atan2(Math.sin(d), Math.cos(d));
       rover.rotation.y += d * k;
