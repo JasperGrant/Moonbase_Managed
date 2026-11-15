@@ -18,6 +18,7 @@ import { PAL, FONT, nixie, fontsReady } from '/shared/palette.js';
 import { createLobby } from '/lobby.js';
 import { isHeadset } from '/device.js';
 import { music } from '/music.js';
+import { makeCueOverlay } from '/hand.js';
 
 const REACH = 3.2;        // metres: how far away the mouse can work something
 const REACH_VR = 1.6;     // metres: pointing in VR is a fallback for grabbing, so it only works close up
@@ -73,7 +74,7 @@ function pulse(i, strength = 0.5, ms = 40) {
   src?.gamepad?.hapticActuators?.[0]?.pulse?.(strength, ms)?.catch?.(() => {});
 }
 const phys = buildPhysics();
-const fx = buildFixtures(THREE, world, { rig, camera, send: a => net.send({ t: 'do', a }), sfx: k => radio.sfx(k), sfxAt: (k, p, g, o) => radio.sfxAt(k, p, g, o), pulse, phys, interior, where: () => where, onRail: i => mount(i) });
+const fx = buildFixtures(THREE, world, { rig, camera, send: a => net.send({ t: 'do', a }), sfx: k => radio.sfx(k), sfxAt: (k, p, g, o) => radio.sfxAt(k, p, g, o), pulse, phys, interior, where: () => where, onRail: i => mount(i), rideCue: desk => rideCue(desk) });
 
 // The samples banked so far stand in a rack on the hall's bench, one canister each.
 const rack = [];
@@ -646,7 +647,7 @@ function deskExit(_dt, now) {
   }
 }
 function leaveDesk() {
-  mode = null; keyed = false; $('cross').hidden = true;
+  mode = null; keyed = false; $('cross').hidden = true; cueOverlay.set(null);
   try { document.exitPointerLock?.(); } catch {}
   lobby.show(true);
 }
@@ -1082,6 +1083,35 @@ function clampWalk() {
 let riding = false, rideAt = 0, rideWas = null, rideFloor = 0, rumbleAt = 0;
 const plateW = new THREE.Vector3(), rideM = new THREE.Matrix4(), rideT = new THREE.Matrix4();
 const haulerStopped = () => Math.abs(state?.rovers?.hauler?.v || 0) < 0.25;
+// ---------- the hand on a laptop: the centre dot becomes a badge on whatever is in reach (client/hand.js) ----------
+// What the Hauler's rail offers: ride it, wait for it to stop, come closer, or step off once it has stopped.
+function rideCue(desk) {
+  const v = verb => ({ shape: 'open', verb: desk ? 'E: ' + verb : verb });
+  if (riding) return haulerStopped() ? v('STEP OFF') : null;
+  if (!haulerStopped()) return { shape: 'open', verb: 'WAIT', dim: true };
+  camera.getWorldPosition(headPos); world.fixtures.plate.getWorldPosition(plateW);
+  return Math.hypot(plateW.x - headPos.x, plateW.z - headPos.z) > CFG.ride.mountReach ? { shape: 'open', verb: 'CLOSER', dim: true } : v('RIDE');
+}
+const cueOverlay = makeCueOverlay(document.getElementById('handCue'));
+let cueCount = -1, cueFist = 0;
+function deskCue(now) {
+  if (mode !== 'desk' || !running() || debrief) { cueOverlay.set(null); if (mode === 'desk') $('cross').hidden = false; return; }
+  // A grab that worked: the hand closes for a moment.
+  const count = fx.hands.filter(Boolean).length + (state.carry || []).length; // tools and samples in hand
+  if (cueCount >= 0 && count > cueCount) cueFist = now + 0.4;
+  cueCount = count;
+  let cue = null, onRail = false;
+  if (now < cueFist) cue = { shape: 'fist', verb: '' };
+  else {
+    aim(null); raycaster.far = 8;
+    const hit = raycaster.intersectObjects(fx.targets(), false)[0];
+    const c = hit && hit.object.userData.cue ? hit.object.userData.cue() : null;
+    if (c) { cue = hit.distance > REACH ? { shape: c.shape, verb: 'CLOSER', dim: true } : c; onRail = hit.object === fx.railHit && !cue.dim; }
+  }
+  cueOverlay.set(cue);
+  $('cross').hidden = !!cue;
+  world.fixtures.grip?.userData.glow(onRail, now);
+}
 function mount(i) {
   if (riding) return true; // already aboard: the hand just holds the rail
   if (!running() || where !== 'out') return false;
@@ -1320,6 +1350,7 @@ renderer.setAnimationLoop(() => {
     h.obj = c; h.side = c.userData.hand || ''; h.tracked = !!c.userData.isHand; handPoint(i, h.point);
   }
   fx.update(dt, now, vr ? handInfo : [], vr);
+  deskCue(now);
   // Under cover while rocks are falling: the cuff says so, because there is no other way to know.
   covered = run && s.scene.meteor !== null && sheltered(myPose(), s.rovers.hauler);
   // The shadow map's box follows the head round the field.

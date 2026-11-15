@@ -123,7 +123,8 @@ function installVR() {
     holding: s => mb.fx.holding(index(s)),
     haptics: () => X.dev.haptics.splice(0),
     until: async (test, seconds = 5) => { for (const end = Date.now() + seconds * 1000; Date.now() < end;) { const v = test(mb.state()); if (v) return v; await sleep(50); } return null; },
-    ring: s => { const r = mb.fx.rings[index(s)]; return r.visible ? '#' + r.material.color.getHexString() : null; },
+    // The hand badge (client/hand.js) by whatever that hand could grab or use: 'open:TAKE', 'point:WELD', ... or null.
+    ring: s => { const b = mb.fx.badges[index(s)]; return b.sprite.visible && b.cue ? b.cue.shape + ':' + (b.cue.verb || '') : null; },
     // Where a tool is: in a hand, loose (lying somewhere), or nowhere (used up).
     parentOf: tool => { const i = [0, 1].find(k => mb.fx.holding(k)?.id === tool); if (i !== undefined) return 'hand:' + side(i); const st = mb.fx.toolState(tool)?.state; return st === 'loose' ? 'loose' : st === 'gone' ? 'nowhere' : st; },
     pose: tool => mb.fx.toolState(tool),
@@ -251,7 +252,7 @@ try {
   const brushSpot = PLACES.toolSpots[PLACES.demoTools.brush];
   await stand(HALL_X + brushSpot.x, brushSpot.z + 0.75, HALL_X + brushSpot.x, brushSpot.z);
   let r = await grabTool('right', 'brush');
-  check(r.ring === PAL.green, 'hall: no green ring on the brush before grabbing it: ' + r.ring);
+  check(r.ring === 'open:TAKE', 'hall: no open hand saying TAKE on the brush before grabbing it: ' + r.ring);
   check(g.hands[1] === 'brush' && g.tools.brush.at === 'hand', 'hall: gripping the brush on the bench did not put it in the hand on the server');
   check(r.held === 'brush' && r.parent === 'hand:right', 'hall: the brush should be in the right hand: ' + JSON.stringify(r));
   let buzz = await P(() => window.vr.haptics());
@@ -270,7 +271,7 @@ try {
     out.after = v.holding('left')?.id || null;
     return out;
   });
-  check(r.ring === PAL.green, 'two hands: the ring on a second tool should be green with the other hand full: ' + r.ring);
+  check(r.ring === 'open:TAKE', 'two hands: a second tool should still offer TAKE with the other hand full: ' + r.ring);
   check(r.held === 'welder' && r.parent === 'hand:left' && g.hands[1] === 'brush', 'two hands: the left trigger did not take the welder with the brush in the right: ' + JSON.stringify(r));
   check(!r.after && await serverUntil(() => g.hands[0] === null && g.tools.welder.at === 'loose', 3), 'two hands: releasing the trigger did not let go of the welder: ' + JSON.stringify(r));
   // Drop it: it falls to the floor, comes to rest, and the server (and Mission Ops' tool log) hears where.
