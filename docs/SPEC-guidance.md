@@ -137,6 +137,70 @@ The astronaut gets no meteor *warning* line: they do not get the warning, so it 
   - `sci.parked`: `SCOUT IS THERE. DESCRIBE THE ROCK ON THE RADIO.`
   - `sci.leak`: `LEAK LAMP: HULL OR SUIT. ASK THE ASTRONAUT.`
 
+## Role briefings (what pops up)
+
+One card per seat: who you are, what to do, your controls, who you talk to. It replaces the brief on Mission Control's briefing sheet (`console.js` 26-30 `BRIEF`, the sheet at 45) and the astronaut's folded "Controls" text (`astronaut.html` 28). Both changes are copy only, in the same elements, with the lobby's look untouched. The card **pops up once on its own** the first time a person takes a seat in a game (decision 12), and is on the existing button after that. It is set in Courier Prime on a cream `dial` card, with the four headings in Michroma.
+
+### Astronaut
+
+> **The story.** You are the only person on the Moon. The base stands on the ridge between Shackleton and de Gerlache craters at the south pole, built by people who learned their trade on Gemini. Mission Control is 384,000 km away and can see everything except what is in front of you.
+>
+> **Your job.** Bring rock samples home. Mission Ops will tell you which rock and where. When something breaks, you are the only one with hands: find the right tool, go out, fix it. Get inside before a meteor shower, or crouch beside the Hauler. Your oxygen refills inside.
+>
+> **Your controls.**
+>
+> | | Headset | Bare hands | Laptop |
+> | --- | --- | --- | --- |
+> | Move | Left stick, right stick turns, A hops | Pinch the ground to hop there | W A S D, mouse to look, Space hops |
+> | Take a tool or rock | Hold the trigger or grip on it | Pinch it | Click it |
+> | Put it down | Let go (swing to throw) | Let go | Q |
+> | Use a tool | Hold it against the broken thing | The same | Click, hold to keep brushing or welding |
+> | Radio | Raise your left wrist like a watch | Left hand to your helmet | Hold Tab |
+> | Ride the Hauler | Grab its rail | Pinch its rail | E (E again to step off) |
+> | Through a door | Walk into the airlock | The same | The same |
+> | Patch your suit, the generator | Touch the kit to the leak, pull the cord | The same | F, G |
+> | Crouch, leave | Crouch; hold a finger on EXIT on your cuff | The same | C; hold X |
+>
+> **Who you talk to.** Only Mission Ops. Your wrist shows your oxygen, the clock, what is in each hand, and a triangle when something is broken.
+
+### Mission Ops
+
+> **The story.** You are CAPCOM, the one voice the astronaut hears across 384,000 km. The Scientist and the Technician know things the astronaut needs, but only you are on the radio.
+>
+> **Your job.** Turn what the others know into what the astronaut does. Ask the Scientist which rock and which fault; ask the Technician where the rovers are. Tell the astronaut where each tool lies (your tool log knows), where to go, and what to pick up. When the astronaut is suited, call them GO in the lobby.
+>
+> **Your controls.** Hold **Space** (or the big button) to talk. The **Enable radio** button turns your microphone on. Click **GO** under the astronaut in the lobby, then **Ready** for yourself. The **HANDS** panel shows what the astronaut holds, the **TOOL LOG** where every tool lies, and the **SAMPLE LOG** what is in hand, in the tray and banked.
+>
+> **Who you talk to.** Everyone. You are the only seat that talks to the astronaut.
+
+### Technician
+
+> **The story.** You drive two robots across the Moon from a chair in Houston: the Scout, a quick prospector, and the Hauler, the big rover the astronaut rides. You have no map. You have two camera screens, a compass and a needle that points home.
+>
+> **Your job.** Take the Scout where the Scientist asks, so the chart fills in and samples show up. Bring the Hauler to the astronaut, wait for the RIDER lamp, and drive them out and back gently. You alone get the meteor warning: tell Ops at once, so the astronaut gets inside or crouches by a stopped Hauler.
+>
+> **Your controls.** **W A S D** drive the Scout, the **arrow keys** the Hauler, both at once; let go and a rover stops. **C** or a click on the left screen switches the Scout's view between first and third person, and **/** or a click on the right screen does the same for the Hauler. The mouse **wheel** over a screen moves the chase camera. **HOME** needles point to base, with the range in metres. A **WHEEL** lamp means that rover is stuck, **RIDER** means the astronaut is aboard, and **METEOR** counts down to impact.
+>
+> **Who you talk to.** The Scientist, for where to go. Ops, for the astronaut and the meteor warning.
+
+### Scientist
+
+> **The story.** You are the mission's geologist, with an orbital survey of the ridge and a field guide to what the mission came for. Anorthosite, the Moon's oldest crust. Basalt, pitted with gas holes. The orange glass of old fire fountains. Ice, from craters the sun never touches. Each one has a lookalike.
+>
+> **Your job.** Read the chart: bright ground may hold samples. Send the Technician's Scout there; the chart sharpens wherever a rover drives, and samples appear on it. Describe the right rock from your field guide so Ops can tell the astronaut. When something breaks, its symbol blinks on your chart: work out what it is and tell Ops which tool fixes it.
+>
+> **Your controls.** Four tabs. **SURVEY** is the chart: click **RANGE** to zoom, and **CENTRE** to follow the base, the Scout or the Hauler. **GUIDE** has the card for each wanted sample (what it looks like, where it lies, its telltale, and NOT THIS) and the **ASSAY** lamps: FOUND or DUD. **POWER** has the battery, solar and board gauges, and the wiring card when the switchboard trips. **AIR** has oxygen, drain and the LEAK lamp.
+>
+> **Who you talk to.** The Technician, for where to drive. Ops, for which rock and which fault.
+
+### Mission Operator (2-player)
+
+> **The story.** A shoestring crew: you are Mission Control, all of it.
+>
+> **Your job and controls.** Everything on the three cards above: the radio (**Space**), the rovers (**W A S D** and the **arrows**), the chart and guide (the tabs). Read the chart, drive the Scout to bright ground, find the sample, bring the astronaut on the Hauler, and talk them onto the right rock. When something breaks, the chart's symbol says what; tell the astronaut which tool.
+>
+> **Who you talk to.** The astronaut, and nobody else.
+
 ## How the server picks a line
 
 The server picks, so the hiding stays in one place and works the same on a laptop and on Cloudflare. The page words the line, because only it knows headset from laptop.
@@ -157,7 +221,7 @@ Each phase is one mergeable PR that leaves the game playable. Phase 1 is the sma
 
 | Phase | What | Files | It runs when |
 | --- | --- | --- | --- |
-| 1. Your job and the objective | The teletype strip. The page shows `*.role` for 20 s, then `*.goal`, then `tech.keys`. The MISSION board in the hall. | `client/shared/guide.js` (new), `console.js`, `style.css` (period section), `astronaut.js` 134-200 | Every console shows its role and goal at the start; the hall board shows the tally and says when the base is dark |
+| 1. Your job and the objective | The role briefings (copy, and popping up once per seat). The teletype strip. The page shows `*.role` for 20 s, then `*.goal`, then `tech.keys`. The MISSION board in the hall. | `client/shared/guide.js` (new), `console.js`, `style.css` (period section), `astronaut.html` 28, `astronaut.js` 134-200 | Every console shows its role and goal at the start; the hall board shows the tally and says when the base is dark |
 | 2. Names on things | Tags on the tools and decoys; the five plates. Canvas text waits for the font (DESIGN.md). | `tools.js`, `stations.js` 145-155, `world.js`, `interior.js` | Every tag reads from 1.5 m, with its purpose on the back; the fixtures are labelled |
 | 3. Faults and danger, from the server | `v.alarm`, `v.me`, the picker, the memory, tiers 1 and 2 for all seats, the cuff tape, and the tick, buzz and arm-up | `game.js` 485, `hub.js`, `guide.js`, `console.js`, `arm.js` 335-412, `astronaut.js` 128-131 | Dust gives the lines in the Goal section; a wheel tells the Technician which rover; the second dust shows the short form; read every `v.guide` the astronaut, Ops and the Technician get in a demo and find nothing they may not know |
 | 4. The sample run, step by step | Tiers 3 and 4: the scout, seen, parked, carry, tray, mount, ride, rail, sample and bank lines | `guide.js`, `hub.js` | A first-time crew is talked from chart to bank by the lines; a dud never says which rock was real |
@@ -191,3 +255,4 @@ The spec is written to each recommendation. None blocks phase 1.
 9. **Lobby copy only:** Scientist "The chart and the field guide. Knows what", Technician "Two rovers, two cameras. Knows where" (recommended), or leave the lobby exactly as is.
 10. **Hall board** stays up as the MISSION board (recommended), or it goes when the mission starts.
 11. **Decoy tags** with `SPARE` on the back (recommended), or decoys left bare.
+12. **Briefings pop up** once on their own the first time a person takes a seat in a game (recommended), or they stay behind the button as now.
