@@ -137,6 +137,35 @@ The astronaut gets no meteor *warning* line: they do not get the warning, so it 
   - `sci.parked`: `SCOUT IS THERE. DESCRIBE THE ROCK ON THE RADIO.`
   - `sci.leak`: `LEAK LAMP: HULL OR SUIT. ASK THE ASTRONAUT.`
 
+### The hand: what you can do, right where you can do it
+
+Today the headset draws a thin green ring round whatever an empty hand would grab, with a buzz when it changes (`stations.js` 396-403). The laptop draws a fixed white dot that never changes (`astronaut.html` 16), so a laptop player cannot tell that the rail, a plug or a rock can be taken until they click it. Both become one strong indicator: **a hand**.
+
+- **The glyph** is a glove pictogram in the period hand, the same drawing as the field guide's glove (`console.js` `pictoSize`). It is drawn in `ink-dial` on a round cream `dial` badge in a `bezel` ring. It has three shapes:
+  - **Open hand:** you can take or hold this.
+  - **Pointing finger:** you can use this: brush, weld, plug, bank.
+  - **Fist:** you have it. It closes over 0.15 s when the grab works, with the existing clank and buzz.
+- **Under the glyph, one verb** of at most 10 characters, in Michroma: what happens if you do it.
+- **In the headset,** the badge is about 7 cm across. It sits 8 cm off the thing, toward the hand that would act, faces the eyes and draws over everything. Only the nearest target per hand gets one. The thing's own grip area also lights warm (`lamp-amber` on value): the Hauler's rail gets a band of grip tape that glows while it can be taken. The ring goes.
+- **On a laptop,** the centre dot becomes the badge, 32 px, whenever the centre of the view is on a target in reach. On a target in sight but too far away, it shows the dim hand with `CLOSER`. Laptop-only keys go in the verb: `E: RIDE`.
+- **When it is not allowed yet,** the hand shows with `WAIT` (the Hauler is moving) or `HANDS FULL`. It never just disappears, so the player learns why.
+- **It never tells anyone something they may not know.** It only marks what this player can do right now, which the page already knows (`fx.targets()`). Every rock on the ground gets the same open hand and `TAKE`: nothing marks the real sample.
+
+| Thing | Glyph | Verb |
+| --- | --- | --- |
+| Tool, rock, decoy | Open hand | `TAKE` |
+| The Hauler's rail | Open hand | `RIDE` (laptop `E: RIDE`), `WAIT` while it moves; riding and stopped: `STEP OFF` (`E: STEP OFF`) |
+| A loose plug / its socket, plug in hand | Open hand / pointing | `PLUG` / `HERE` |
+| Dusty cell, brush in hand | Pointing | `BRUSH` |
+| Crack point, welder in hand | Pointing | `WELD` |
+| Broken wheel / bare hub, tire in hand | Open hand / pointing | `PULL` / `FIT` |
+| Generator | Open hand | `PULL CORD` |
+| The leak on your arm, kit in hand | Pointing | `PATCH` (laptop `F: PATCH`) |
+| Tray cup / sample port, rock in hand | Pointing | `STOW` / `BANK` |
+| EXIT on the cuff, in the debrief | Pointing | `EXIT` |
+
+A thing that needs a tool you are not holding keeps today's floating tool outline (`stations.js` 379-393) instead of a hand.
+
 ## Role briefings (what pops up)
 
 One card per seat: who you are, what to do, your controls, who you talk to. It replaces the brief on Mission Control's briefing sheet (`console.js` 26-30 `BRIEF`, the sheet at 45) and the astronaut's folded "Controls" text (`astronaut.html` 28). Both changes are copy only, in the same elements, with the lobby's look untouched. The card **pops up once on its own** the first time a person takes a seat in a game (decision 12), and is on the existing button after that. It is set in Courier Prime on a cream `dial` card, with the four headings in Michroma.
@@ -222,7 +251,7 @@ Each phase is one mergeable PR that leaves the game playable. Phase 1 is the sma
 | Phase | What | Files | It runs when |
 | --- | --- | --- | --- |
 | 1. Your job and the objective | The role briefings (copy, and popping up once per seat). The teletype strip. The page shows `*.role` for 20 s, then `*.goal`, then `tech.keys`. The MISSION board in the hall. | `client/shared/guide.js` (new), `console.js`, `style.css` (period section), `astronaut.html` 28, `astronaut.js` 134-200 | Every console shows its role and goal at the start; the hall board shows the tally and says when the base is dark |
-| 2. Names on things | Tags on the tools and decoys; the five plates. Canvas text waits for the font (DESIGN.md). | `tools.js`, `stations.js` 145-155, `world.js`, `interior.js` | Every tag reads from 1.5 m, with its purpose on the back; the fixtures are labelled |
+| 2. Names on things, and the hand | Tags on the tools and decoys; the five plates. The hand badge and its verbs (headset and laptop), the rail's glowing grip tape, the ring removed. Canvas text waits for the font (DESIGN.md). | `tools.js`, `stations.js` 145-155 and 396-403, `world.js`, `interior.js`, `astronaut.js`, `astronaut.html` 16 | Every tag reads from 1.5 m, with its purpose on the back; the fixtures are labelled; walking up to the rail shows the open hand and `RIDE` (`E: RIDE` on a laptop), and the hand closes when you grab it |
 | 3. Faults and danger, from the server | `v.alarm`, `v.me`, the picker, the memory, tiers 1 and 2 for all seats, the cuff tape, and the tick, buzz and arm-up | `game.js` 485, `hub.js`, `guide.js`, `console.js`, `arm.js` 335-412, `astronaut.js` 128-131 | Dust gives the lines in the Goal section; a wheel tells the Technician which rover; the second dust shows the short form; read every `v.guide` the astronaut, Ops and the Technician get in a demo and find nothing they may not know |
 | 4. The sample run, step by step | Tiers 3 and 4: the scout, seen, parked, carry, tray, mount, ride, rail, sample and bank lines | `guide.js`, `hub.js` | A first-time crew is talked from chart to bank by the lines; a dud never says which rock was real |
 | 5. Instruments, and going quiet | Captions; the idle lines; the short forms; `learned` from the pages; a GUIDE switch (`ON` / `QUIET` keeps tiers 1-2), stored per seat in `localStorage` inside a try/catch | `console.js`, `guide.js`, `hub.js` | A seat is not told what it has done, in later missions of the same game; on QUIET only danger and faults show and the game plays as before |
@@ -236,7 +265,7 @@ Each phase is one mergeable PR that leaves the game playable. Phase 1 is the sma
 | The words do the talking | Lines say who to ask, not the answer. If seats act without speaking, cut the line. |
 | A line leaks | The picker never sees `game`; read lists are narrower than the views; phase 3's check of every `v.guide`. |
 | Too much text in the headset | 20 characters, urgent-only buzz, lines that retire. Fall back to the board, tags and plates only (decision 2). |
-| Flicker | The 4 s hold. |
+| Flicker | The 4 s hold for lines; one hand badge per hand, on the nearest target only. |
 | Words drift from the rules | One table beside `config.js`, with numbers from `CFG`. |
 | Quest cost | One texture for nine tags and five plates. |
 
@@ -256,3 +285,4 @@ The spec is written to each recommendation. None blocks phase 1.
 10. **Hall board** stays up as the MISSION board (recommended), or it goes when the mission starts.
 11. **Decoy tags** with `SPARE` on the back (recommended), or decoys left bare.
 12. **Briefings pop up** once on their own the first time a person takes a seat in a game (recommended), or they stay behind the button as now.
+13. **The hand's verb.** A glyph and one verb (recommended), or the glyph alone, which is quieter but does not say what will happen.
