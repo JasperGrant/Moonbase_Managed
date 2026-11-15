@@ -7,6 +7,7 @@ import { drawShape } from '/shared/icons.js';
 import { HORIZON, TERRAIN, SUN_AZ_DEG } from '/shared/horizon.js';
 import { PAL, CABLE_HEX } from '/shared/palette.js';
 import { loadPeriod, loadModel } from '/shared/assets.js';
+import { buildAvatar } from '/avatar.js';
 
 // The base sits on the Connecting Ridge between Shackleton and de Gerlache craters at the lunar
 // south pole (89.45 S, 222.69 E), an Artemis III candidate region. The ground beyond the pad and
@@ -205,7 +206,6 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
   const dark = new THREE.MeshStandardMaterial({ color: PAL.hex.consoleDeep, roughness: 0.85, metalness: 0.2 });
   const steel = new THREE.MeshStandardMaterial({ color: PAL.hex.aluminium, roughness: 0.42, metalness: 0.85 });
   const solar = new THREE.MeshStandardMaterial({ map: solarTex, roughness: 0.22, metalness: 0.55 });
-  const visor = new THREE.MeshStandardMaterial({ color: 0xc89a3e, metalness: 1, roughness: 0.12 });
   const orange = new THREE.MeshStandardMaterial({ color: PAL.hex.orange, roughness: 0.75 });
   const warmGlow = new THREE.MeshBasicMaterial({ color: 0xe8b872, toneMapped: false });
   const windowGlow = new THREE.MeshBasicMaterial({ color: 0xe8b872, toneMapped: false });
@@ -872,22 +872,11 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
     scene.add(F);
   }
 
-  // ---------- astronaut figure, shown in the rover camera ----------
-  const avatar = new THREE.Group();
-  {
-    mesh(new THREE.CapsuleGeometry(0.27, 0.7, 4, 12), whitePlain, 0, 1.0, 0, avatar);
-    for (const s of [-1, 1]) { mesh(new THREE.CapsuleGeometry(0.1, 0.55, 4, 8), whitePlain, s * 0.36, 1.1, 0, avatar).rotation.z = s * 0.25; mesh(new THREE.CapsuleGeometry(0.12, 0.7, 4, 8), whitePlain, s * 0.15, 0.4, 0, avatar); }
-    mesh(new THREE.SphereGeometry(0.25, 16, 12), whitePlain, 0, 1.72, 0, avatar);
-    mesh(new THREE.SphereGeometry(0.19, 16, 12, 0, Math.PI * 2, 0, Math.PI * 0.6), visor, 0, 1.72, 0.1, avatar).rotation.x = Math.PI / 2 - 0.3;
-    mesh(new THREE.BoxGeometry(0.5, 0.65, 0.3), whitePlain, 0, 1.2, -0.32, avatar);
-    mesh(new THREE.BoxGeometry(0.3, 0.14, 0.06), new THREE.MeshBasicMaterial({ color: PAL.hex.phosphor, toneMapped: false }), 0, 1.25, 0.29, avatar);
-    mesh(new THREE.BoxGeometry(0.1, 0.1, 0.1), orange, 0, 1.55, -0.5, avatar);
-  }
+  // ---------- astronaut figure, shown in the rover camera: it walks, crouches and reaches (client/avatar.js) ----------
+  const figure = buildAvatar(THREE, { shadows, ground: height });
+  const avatar = figure.group;
   avatar.visible = false;
   scene.add(avatar);
-  // The NASA astronaut replaces the capsules (unrigged, in a T-pose: fine at rover-camera distance).
-  loadPeriod(THREE, 'astronaut', { merge: true, cast: shadows, rough: 0.85 }).then(m => { avatar.clear(); avatar.add(m); })
-    .catch(e => console.warn('astronaut', e));
 
   // ---------- scenery from the NASA set: an old Viking lander, cargo at the fuel depot ----------
   const props = new THREE.Group(); props.name = 'Scenery';
@@ -900,7 +889,7 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
   prop('support-cradle', depot, -2.6, -1.0, -0.2, { by: { spstob_fss_1: { rough: 0.7 } } });
 
   return {
-    rover, avatar, sun, height, hab,
+    rover, avatar, figure, sun, height, hab,
     // Handles for the astronaut's hands (stations.js). Vectors are local to their fixture group.
     fixtures: { locker, lockerSlots, board, sockets, plugs, plugRest, dustCells, crack, crackPts, wheel: rover.userData.wheel, hub: rover.userData.hub },
     // Call every frame.

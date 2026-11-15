@@ -5,7 +5,6 @@
 import { connect } from '/net.js';
 import { Radio } from '/voice.js';
 import { CFG, TOOLS, PLACES, MODES, ROLES, SOCKET_SHAPES } from '/shared/config.js';
-import { beltWeight } from '/shared/rules.js';
 import { drawTool, drawShape } from '/shared/icons.js';
 import { seatTaken, seatRefused, kicked } from '/seat.js';
 import { createLobby } from '/lobby.js';
@@ -24,7 +23,7 @@ const clock = s => `${Math.floor(Math.max(0, s) / 60)}:${String(Math.floor(Math.
 const C = { bg: PAL.consoleDeep, line: PAL.rule, ink: PAL.ink, dim: PAL.inkDim, green: PAL.green, amber: PAL.amber, red: PAL.red, blue: PAL.blue };
 
 const BRIEF = {
-  ops: '<b>You are the only voice the astronaut hears.</b> Hold SPACE to talk; it takes 1.3 s to reach the Moon. You see what is on their belt and what is left in the locker. Decide what they carry and what gets fixed first.',
+  ops: '<b>You are the only voice the astronaut hears.</b> Hold SPACE to talk; it takes 1.3 s to reach the Moon. You see what is in each of their hands, what is lying out on the ground and what is left in the locker. Decide what they carry and what gets fixed first.',
   tech: '<b>You know WHERE and WHEN.</b> The radar map and the rover camera. The radar is on the rover. Arrow keys drive.',
   sci: '<b>You know WHAT is wrong.</b> Two screens of gauges: POWER and AIR. Read them and work out the cause.',
 };
@@ -61,7 +60,7 @@ const tabs = (id, names) => `<div class="tabs" data-tabs="${id}">${names.map((n,
 $('run').innerHTML = [
   has('ops') && `<div class="panel"><h3>Mission Ops</h3>
     <button id="ptt">HOLD SPACE TO TALK TO THE ASTRONAUT</button>
-    <h2>Belt</h2><canvas id="beltCv" class="pic" width="560" height="170"></canvas>
+    <h2>Hands</h2><canvas id="handsCv" class="pic" width="560" height="170"></canvas>
     <h2>Locker</h2><canvas id="lockerCv" class="pic" width="560" height="150"></canvas></div>`,
   has('tech') && `<div class="panel"><h3>Technician</h3>
     ${tabs('tech', ['RADAR', 'ROVER CAM'])}
@@ -234,27 +233,27 @@ function dial(g, x, y, r, value, max, name, { redBelow = 0, redAbove = Infinity,
   plate(g, name, x, y + r * 0.8, r * 1.4, r * 0.11);
 }
 
-// ---------- Mission Ops: the belt and the locker ----------
+// ---------- Mission Ops: the hands, what is lying out, and the locker ----------
 function drawKit(s) {
   {
-    const cv = $('beltCv'), g = cv.getContext('2d'), W = cv.width, H = cv.height;
+    const cv = $('handsCv'), g = cv.getContext('2d'), W = cv.width, H = cv.height;
     panelBg(g, W, H);
-    const used = beltWeight(s.belt), u = 100, gap = 12, x0 = (W - (CFG.beltCapacity * (u + gap) - gap)) / 2, y0 = 14;
-    for (let i = 0; i < CFG.beltCapacity; i++) { // a recessed bay per weight unit, a lamp under each
-      const x = x0 + i * (u + gap);
+    // A recessed bay for each hand, left and right, a lamp under each lit while it holds a tool.
+    const u = 104, y0 = 14;
+    s.hands.forEach((t, i) => {
+      const x = 30 + i * (u + 26);
       g.fillStyle = PAL.bakelite; g.fillRect(x, y0, u, u);
       g.strokeStyle = PAL.bezel; g.lineWidth = 2; g.strokeRect(x + 1, y0 + 1, u - 2, u - 2);
-      jewel(g, x + u / 2, y0 + u + 14, 6, 'green', i < used);
-    }
-    let slot = 0;
-    for (const t of s.belt) { // a heavy tool is drawn across the bays it fills
-      const w = TOOLS[t].weight, span = w * (u + gap) - gap;
-      drawTool(g, t, x0 + slot * (u + gap) + span / 2, y0 + u / 2, u - 24, C.ink);
-      slot += w;
-    }
-    nixie(g, `${used}/${CFG.beltCapacity}`, W - 52, H - 18, 18);
-    jewel(g, 30, H - 18, 7, 'amber', used >= CFG.beltCapacity);
-    label(g, 'FULL', 52, H - 18, 12, C.dim, 'left');
+      if (t) drawTool(g, t, x + u / 2, y0 + u / 2, u - 26, C.ink);
+      jewel(g, x + u / 2 - 14, y0 + u + 20, 6, 'green', !!t);
+      label(g, i ? 'R' : 'L', x + u / 2 + 8, y0 + u + 21, 13, C.dim, 'left');
+    });
+    // Lying out on the ground: what the astronaut has put down or thrown, and will have to go back for.
+    const out = Object.keys(s.ground || {}), x1 = 300;
+    label(g, 'ON THE GROUND', x1, 26, 12, C.dim, 'left');
+    out.forEach((t, k) => drawTool(g, t, x1 + 34 + (k % 3) * 74, 72 + Math.floor(k / 3) * 60, 52, C.amber));
+    jewel(g, x1 + 8, H - 18, 7, 'amber', out.length > 0);
+    label(g, 'TOOLS OUT', x1 + 24, H - 18, 12, C.dim, 'left');
   }
   {
     const cv = $('lockerCv'), g = cv.getContext('2d'), W = cv.width, H = cv.height;
@@ -265,7 +264,7 @@ function drawKit(s) {
       g.globalAlpha = here ? 1 : 0.18;
       drawTool(g, t, cx, 56, 78, C.ink);
       g.globalAlpha = 1;
-      for (let k = 0; k < TOOLS[t].weight; k++) jewel(g, cx - (TOOLS[t].weight - 1) * 9 + k * 18, 124, 5, 'amber', here); // one lamp per weight unit
+      jewel(g, cx, 124, 5, 'amber', here); // lit while it still hangs on the rack
     });
   }
 }

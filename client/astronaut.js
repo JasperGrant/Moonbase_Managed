@@ -7,7 +7,7 @@ import { buildWorld } from '/world.js';
 import { buildFixtures } from '/stations.js';
 import { buildInterior, ROOM } from '/interior.js';
 import { CFG, PLACES } from '/shared/config.js';
-import { beltWeight, sheltered } from '/shared/rules.js';
+import { sheltered } from '/shared/rules.js';
 import { seatRefused, seatTaken, kicked } from '/seat.js';
 import { buildArm } from '/arm.js';
 import { PAL } from '/shared/palette.js';
@@ -65,7 +65,21 @@ function pulse(i, strength = 0.5, ms = 40) {
   const src = session && [...session.inputSources].find(x => x.handedness === controllers[i]?.userData.hand);
   src?.gamepad?.hapticActuators?.[0]?.pulse?.(strength, ms)?.catch?.(() => {});
 }
-const fx = buildFixtures(THREE, world, { rig, camera, send: a => net.send({ t: 'do', a }), sfx: k => radio.sfx(k), pulse });
+// The ground under a point, for a tool that has been let go: the hall floor inside its walls, or the
+// regolith outside the habitat and inside the play area. { x, z } come back moved if they were not allowed.
+function floor(x, z) {
+  if (x > ROOM.origin.x / 2) {
+    const l = interior.toLocal(x, z), c = interior.clamp(l.x, l.z), w = interior.toWorld(c.x, c.z);
+    return { x: w.x, z: w.z, y: 0, in: true };
+  }
+  const d = Math.hypot(x, z), out = CFG.habRadius + 0.2;
+  if (d > CFG.bounds) { x *= CFG.bounds / d; z *= CFG.bounds / d; }
+  else if (d < out) { const k = out / Math.max(d, 0.01); x *= k; z *= k; }
+  const m = inModule(x, z);
+  if (m) { x += m.x; z += m.z; }
+  return { x, z, y: world.height(x, z), in: false };
+}
+const fx = buildFixtures(THREE, world, { rig, camera, send: a => net.send({ t: 'do', a }), sfx: k => radio.sfx(k), pulse, floor, place: () => where });
 
 const lamp = new THREE.SpotLight(PAL.hex.incandescent, 14, 16, 0.65, 0.7, 1.4); // candela; 40 blew out panels at arm's length
 lamp.target.position.set(0, -0.15, -1);
@@ -129,7 +143,7 @@ function alarms() {
 }
 function drawGauges(now) {
   arm.draw({ state, status: status(now), zoom: scopeOn() ? zoom : 1, total: CFG.roundSeconds, radio: radioState(),
-    alarms: alarms(), belt: running() ? beltWeight(state.belt) : 0, capacity: CFG.beltCapacity });
+    alarms: alarms(), held: running() ? state.hands.map(Boolean) : [false, false] });
   arm.signal(radioState(), now);
 }
 function show(what, seconds) { flash = what; flashUntil = performance.now() / 1000 + seconds; }
@@ -163,7 +177,7 @@ function faceOwnCard() {
 
 // ---------- network ----------
 // Take the server's word as it arrives, not once per frame: what can be grabbed must never lag behind what exists.
-const NOTHING = { belt: [], locker: [], scene: null, suit: false };
+const NOTHING = { hands: [null, null], ground: {}, locker: [], scene: null, suit: false };
 net.onState = s => { state = s; if (waitNote) { waitNote.remove(); waitNote = null; } lobby.update(s); fx.sync(s.phase === 'run' ? s : NOTHING); };
 // A headset can only ever be the Astronaut: if the seat is held, it waits for it instead of being sent away.
 let headset = false, waitNote = null;
@@ -192,6 +206,7 @@ addEventListener('keydown', e => {
   if (e.key === ' ' || (e.key === 'Tab' && mode === 'desk')) e.preventDefault();
   if (e.key.toLowerCase() === 'l' && mode === 'desk' && !e.repeat) debugOutage = !debugOutage;
   if (e.key.toLowerCase() === 'k' && mode === 'desk' && !e.repeat) debugDamage = !debugDamage;
+  if (e.key.toLowerCase() === 'q' && mode === 'desk' && !e.repeat && running()) fx.drop(); // toss what is in your hand
 });
 addEventListener('keyup', e => { keys[e.key.toLowerCase()] = false; });
 addEventListener('blur', () => { for (const k in keys) keys[k] = false; });
@@ -250,15 +265,18 @@ function useHatch(controller) {
 function use(controller, holding = false) {
   const hit = targetInReach(controller);
   if (!hit || (holding && !hit.object.userData.hold)) return !!hit && !holding;
-  fx.click(hit.object);
+  const hand = controller ? controllers.indexOf(controller) : -1;
+  fx.click(hit.object, hand >= 0 ? hand : null);
   return true;
 }
 // Use whatever is being pointed at: the READY board, the airlock hatch, or something to fix.
 const useAny = controller => useBoard(controller) || useHatch(controller) || use(controller);
 
 // ---------- hands and controllers ----------
-// Controllers: grip grabs (tools off the rack and the belt, plugs, the wheel, the generator cord),
-// right trigger points at things within arm's reach, left trigger talks, sticks walk and turn, A hops.
+// Controllers: hold the trigger (or the grip) on something to take it in that hand (tools off the rack
+// or the ground, plugs, the wheel, the generator cord) and let go to drop it, or throw it. With nothing
+// in reach the right trigger points at things within arm's reach and the left trigger talks. Sticks walk
+// and turn, A hops.
 // Hand tracking (put the controllers down): pinch on something to grab it, point the right hand and
 // pinch to use the hatch or the READY board, pinch at the ground to teleport there, pinch the left
 // hand in empty air and drag it sideways to turn, hold the left hand up to your helmet to talk, and
@@ -341,7 +359,7 @@ for (const i of [0, 1]) {
     }
   });
   c.addEventListener('disconnected', () => {
-    if (c.userData.grabbed) { c.userData.grabbed = false; fx.release(i, handPoint(i, new THREE.Vector3())); }
+    if (c.userData.grabbed) { c.userData.grabbed = null; fx.release(i, handPoint(i, new THREE.Vector3())); }
     c.userData.isHand = c.userData.pinched = c.userData.zoomed = false;
     marker.visible = false; leftDrag = null; endZoomGrab();
     if (pressed === c) pressed = null;
@@ -350,8 +368,10 @@ for (const i of [0, 1]) {
   c.addEventListener('selectstart', () => {
     music.unlock(); // a trigger pull or a pinch is a gesture the browser counts, and the page's click listeners never see it
     const other = controllers[1 - i];
-    // A bare hand that pinches on something grabs it. That is not a zoom, a turn or a teleport.
-    if (c.userData.isHand && running() && fx.grab(i, handPoint(i, new THREE.Vector3()))) { c.userData.grabbed = true; return; }
+    // A trigger pulled, or a bare hand pinched, on something in reach grabs it, and holds it until it lets
+    // go. That is not a zoom, a turn, a teleport, the radio or a point at the panel.
+    if (c.userData.grabbed) return; // already holding on with the grip
+    if (running() && fx.grab(i, handPoint(i, new THREE.Vector3()))) { c.userData.grabbed = 'select'; return; }
     c.userData.pinched = true;
     // Both bare hands pinched: this is a zoom, not a turn, a teleport or a panel press.
     if (c.userData.isHand && other.userData.isHand && other.userData.pinched) {
@@ -365,7 +385,7 @@ for (const i of [0, 1]) {
   });
   c.addEventListener('selectend', () => {
     if (pressed === c) pressed = null;
-    if (c.userData.grabbed) { c.userData.grabbed = false; fx.release(i, handPoint(i, new THREE.Vector3())); return; }
+    if (c.userData.grabbed === 'select') { c.userData.grabbed = null; fx.release(i, handPoint(i, new THREE.Vector3())); return; }
     const wasZoom = c.userData.zoomed, act = c.userData.pinched && !wasZoom;
     c.userData.pinched = c.userData.zoomed = false;
     endZoomGrab();
@@ -374,9 +394,9 @@ for (const i of [0, 1]) {
     // hand of a two-handed zoom does not fire on its way in. The ring shows where you will land.
     if (c.userData.isHand && act && !useAny(c) && groundTarget(c, hitPoint)) teleport(hitPoint);
   });
-  // The grip button closes the hand on whatever is within reach of it.
-  c.addEventListener('squeezestart', () => { if (running() && fx.grab(i, handPoint(i, new THREE.Vector3()))) c.userData.grabbed = true; });
-  c.addEventListener('squeezeend', () => { if (c.userData.grabbed) { c.userData.grabbed = false; fx.release(i, handPoint(i, new THREE.Vector3())); } });
+  // The grip button does the same as the trigger. Whichever closed the hand is the one that opens it.
+  c.addEventListener('squeezestart', () => { if (!c.userData.grabbed && running() && fx.grab(i, handPoint(i, new THREE.Vector3()))) c.userData.grabbed = 'squeeze'; });
+  c.addEventListener('squeezeend', () => { if (c.userData.grabbed === 'squeeze') { c.userData.grabbed = null; fx.release(i, handPoint(i, new THREE.Vector3())); } });
   rig.add(c);
   controllers.push(c);
 
@@ -700,10 +720,23 @@ function headHeight() {
   standing = Math.min(2.1, Math.max(standing, h)); // the tallest they have stood this session
   return h / standing * 1.65;
 }
+// Where each hand is, left then right, in the body's frame: x to the right, y up from the floor, z ahead,
+// scaled like the head height. For the figure the rover camera shows. null for a hand not being tracked.
+const armPos = new THREE.Vector3();
+function arms() {
+  if (!renderer.xr.isPresenting) return [null, null];
+  const k = 1.65 / standing, round = v => Math.round(v * 100) / 100;
+  return ['left', 'right'].map(side => {
+    const i = controllers.findIndex(c => c.userData.hand === side), c = controllers[i];
+    if (!c || !c.visible) return null;
+    handPoint(i, armPos).sub(headPos);
+    return [round((armPos.x * -fwd.z + armPos.z * fwd.x) * k), round((armPos.y + headPos.y - rig.position.y) * k), round((armPos.x * fwd.x + armPos.z * fwd.z) * k)];
+  });
+}
 function myPose() {
   const h = headHeight();
   camera.getWorldDirection(fwd); fwd.y = 0; fwd.normalize();
-  return { x: where === 'in' ? PLACES.airlock.x : headPos.x, z: where === 'in' ? PLACES.airlock.z : headPos.z, ry: Math.atan2(fwd.x, fwd.z), h };
+  return { x: where === 'in' ? PLACES.airlock.x : headPos.x, z: where === 'in' ? PLACES.airlock.z : headPos.z, ry: Math.atan2(fwd.x, fwd.z), h, in: where === 'in', arms: arms() };
 }
 function sendPose() { net.send({ t: 'pose', ...myPose() }); }
 

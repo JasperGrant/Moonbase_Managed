@@ -4,7 +4,7 @@
 // zero is the only way to lose. The astronaut reports physical work (a cell brushed, a point
 // welded, a plug seated) with act(); this file alone decides whether it counted.
 import { CFG, TOOLS, FAULTS, PLACES, SCRIPTS, MODES, CABLE_COLORS, DUST_CELLS, CRACK_POINTS } from '../client/shared/config.js';
-import { fits, sheltered } from '../client/shared/rules.js';
+import { freeHand, heldIn, sheltered } from '../client/shared/rules.js';
 
 export class Game {
   constructor(rng = Math.random) {
@@ -25,7 +25,8 @@ export class Game {
     this.battery = 100;
     this.blackout = false;
     this.genLeft = 0;
-    this.belt = [];
+    this.hands = [null, null];   // [left, right]: what the astronaut is holding
+    this.ground = {};            // tool id -> { x, y, z, ry, in }: where it came to rest once let go
     this.locker = Object.keys(TOOLS);
     this.tireBackAt = null;
     this.faults = {};          // keyed by type: at most one of each at a time
@@ -37,7 +38,7 @@ export class Game {
     this.ev = null;
     this.result = null;
     this.stats = { fixed: 0, mistakes: 0, hits: 0, blackouts: 0 };
-    this.astro = { x: CFG.spawn.x, z: CFG.spawn.z, ry: Math.PI, h: 1.65 };
+    this.astro = { x: CFG.spawn.x, z: CFG.spawn.z, ry: Math.PI, h: 1.65, in: false, arms: [null, null] };
     this.rover = { x: PLACES.rover.x, z: PLACES.rover.z, ry: Math.PI, throttle: 0, steer: 0 };
   }
 
@@ -66,7 +67,15 @@ export class Game {
   get leaking() { return !!(this.faults.hull || this.faults.suit); }
   // 1 with no leak, 3 with one, 5 with the hull and the suit both leaking.
   get drain() { return 1 + (CFG.leakMultiplier - 1) * ((this.faults.hull ? 1 : 0) + (this.faults.suit ? 1 : 0)); }
-  has(tool) { return this.belt.includes(tool); }
+  // In a hand. A tool lying on the ground does not count: you cannot weld with a welder at your feet.
+  has(tool) { return this.hands.includes(tool); }
+  // Wherever it is now, the tool is gone: fitted to the rover, or the generator spent.
+  useUp(tool) {
+    this.hands = this.hands.map(t => t === tool ? null : t);
+    delete this.ground[tool];
+  }
+  // Can the astronaut reach a tool on the ground? Indoors the server only knows they are inside.
+  reaches(spot) { return spot.in ? !!this.astro.in : !this.astro.in && this.near(spot, CFG.pickReach); }
   near(p, reach = CFG.reach) { return Math.hypot(this.astro.x - p.x, this.astro.z - p.z) <= reach; }
 
   tick(dt) {
@@ -167,17 +176,31 @@ export class Game {
     if (this.phase !== 'run' || !a || typeof a !== 'object') return;
 
     if (a.take !== undefined) {
-      if (!this.locker.includes(a.take) || !this.near(PLACES.locker) || !fits(this.belt, a.take)) return;
+      // Off the rack, into a hand. Once taken a tool never goes back on the rack: it is held or lying out.
+      const hand = freeHand(this.hands, a.hand);
+      if (!this.locker.includes(a.take) || !this.near(PLACES.locker) || hand < 0) return;
       this.locker = this.locker.filter(t => t !== a.take);
-      this.belt.push(a.take);
-    } else if (a.stow !== undefined) {
-      if (!this.has(a.stow) || !this.near(PLACES.locker)) return;
-      this.belt = this.belt.filter(t => t !== a.stow);
-      this.locker.push(a.stow);
+      this.hands[hand] = a.take;
+    } else if (a.pick !== undefined) {
+      // Off the ground (or caught in the air: the server already has it down where it was let go).
+      const spot = this.ground[a.pick], hand = freeHand(this.hands, a.hand);
+      if (!spot || hand < 0 || !this.reaches(spot)) return;
+      delete this.ground[a.pick];
+      this.hands[hand] = a.pick;
+    } else if (a.drop !== undefined) {
+      // Let go: it is on the ground where the hand was. Sent again when a thrown tool comes to rest.
+      const id = a.drop, hand = heldIn(this.hands, id);
+      if (hand < 0 && !this.ground[id]) return;
+      if (![a.x, a.y, a.z].every(Number.isFinite)) return;
+      const inside = !!a.in, r = Math.hypot(a.x, a.z);
+      if (!inside && r > CFG.bounds + 1) return; // no tool lands off the edge of the play area
+      if (hand >= 0) this.hands[hand] = null;
+      this.ground[id] = { x: a.x, y: Math.max(-1, Math.min(10, a.y)), z: a.z, ry: Number.isFinite(a.ry) ? a.ry : 0, in: inside };
     } else if (a.gen) {
-      // Once per mission: it is used up, so it does not go back in the locker.
-      if (!this.has('gen')) return;
-      this.belt = this.belt.filter(t => t !== 'gen');
+      // Set it down, then pull the cord. Once per mission: it is used up.
+      const spot = this.ground.gen;
+      if (!spot || !this.reaches(spot)) return;
+      this.useUp('gen');
       this.genLeft = CFG.generatorSeconds;
       this.note('gen', `Backup generator started: ${CFG.generatorSeconds} s of power.`);
     } else if (a.fix === 'dust') {
@@ -200,7 +223,7 @@ export class Game {
       if (!f || !this.near(this.rover)) return;
       if (a.pull && f.stage === 0) f.stage = 1;
       else if (a.fit && f.stage === 1 && this.has('tire')) {
-        this.belt = this.belt.filter(t => t !== 'tire'); // it is on the rover now
+        this.useUp('tire'); // it is on the rover now
         this.tireBackAt = this.elapsed + CFG.tireRestockSeconds;
         this.solve('wheel');
       }
@@ -266,6 +289,8 @@ export class Game {
       // A loose cable does not say where it belongs.
       board: f.board ? f.board.cables.map(c => ({ color: c.color, seated: c.seated, socket: c.seated ? c.socket : -1 })) : null,
       wheel: f.wheel ? f.wheel.stage + 1 : 0, // 0 fine, 1 broken, 2 pulled off
+      // The tools you can see: in the astronaut's hands, and lying out on the surface (not indoors).
+      tools: { held: [...this.hands], ground: Object.fromEntries(Object.entries(this.ground).filter(([, g]) => !g.in).map(([id, g]) => [id, { x: g.x, y: g.y, z: g.z, ry: g.ry }])) },
       hull: f.hull ? { spot: f.hull.spot, welded: [...f.hull.welded] } : null,
       meteor: m && m.falling ? this.elapsed - m.start : null,
     };
@@ -289,17 +314,17 @@ export class Game {
     const all = role === 'all';
 
     if (role === 'astronaut') {
-      // Hands and eyes: the belt, the locker rack, what is physically there, and the hiss.
-      Object.assign(v, { belt: [...this.belt], locker: [...this.locker], scene: this.scene(), suit: !!this.faults.suit, rover });
+      // Hands and eyes: what is in each hand, what is lying out, the locker rack, what is physically there, and the hiss.
+      Object.assign(v, { hands: [...this.hands], ground: this.groundView(), locker: [...this.locker], scene: this.scene(), suit: !!this.faults.suit, rover });
       return v;
     }
-    if (role === 'ops' || all) Object.assign(v, { belt: [...this.belt], locker: [...this.locker] });
+    if (role === 'ops' || all) Object.assign(v, { hands: [...this.hands], ground: this.groundView(), locker: [...this.locker] });
     if (role === 'tech' || all) {
       // The rover carries the radar. Its camera still works on a broken wheel.
       v.radar = !this.faults.wheel;
       v.rover = rover;
       v.scene = this.scene();
-      v.astro = { ...this.astro }; // drawn by the rover camera; the map only shows it with radar
+      v.astro = { ...this.astro, arms: this.astro.arms.map(a => a && [...a]) }; // drawn by the rover camera; the map only shows it with radar
       if (v.radar && this.meteor) v.meteor = { eta: Math.max(0, this.meteor.start - this.elapsed), falling: this.meteor.falling };
     }
     if (role === 'sci' || all) {
@@ -311,6 +336,8 @@ export class Game {
     }
     return v;
   }
+
+  groundView() { return Object.fromEntries(Object.entries(this.ground).map(([id, g]) => [id, { ...g }])); }
 
   pick(arr) { return arr[Math.floor(this.rng() * arr.length)]; }
   int(lo, hi) { return lo + Math.floor(this.rng() * (hi - lo + 1)); }

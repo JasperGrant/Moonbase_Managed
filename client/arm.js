@@ -330,9 +330,9 @@ export function buildArm(THREE) {
   function draw(info) {
     const s = info.state;
     const o2 = s ? Math.round(s.oxygen) : null, t = s ? Math.max(0, Math.ceil(s.timeLeft)) : null, alarms = info.alarms || 0;
-    const belt = info.belt || 0, cap = info.capacity || 0;
+    const held = info.held || [false, false];
     const level = info.zoom > 1.01 ? Math.max(1, Math.min(5, Math.round(info.zoom - 1))) : 0;
-    const k = [o2, s && s.o2Max, t, alarms, info.radio, level, info.status, belt, cap].join('|');
+    const k = [o2, s && s.o2Max, t, alarms, info.radio, level, info.status, held].join('|');
     if (k === key) return;
     key = k;
 
@@ -371,13 +371,14 @@ export function buildArm(THREE) {
     if (info.radio === 'rx') speaker(506, 196, BLUE);
     else microphone(506, 198, radio ? radio[1] : PAL.inkDim, info.radio === 'tx', info.radio === 'dead' ? RED : info.radio === 'nomic' ? AMBER : null);
 
-    // The tool belt: a row of jewel lamps, one per weight unit it can carry, lit for each unit in use.
-    for (let i = 0; i < cap; i++) jewel(g, 468 + i * 30, 330, 10, belt >= cap ? 'amber' : 'green', i < belt);
+    // The hands: a jewel lamp for each, left and right, lit while that hand holds a tool. Icons only on
+    // the cuff: the lamps sit left and right of each other, as the hands do.
+    held.forEach((on, i) => jewel(g, 486 + i * 44, 330, 11, 'green', on));
     for (let i = 0; i < 2; i++) at(592, 96 + i * 72, 0.78, () => warning(0, 0, i < alarms));
     at(594, 258, 0.88, () => magnifier(0, 0, level));
 
     tex.needsUpdate = true;
-    shown = { radio: radio ? radio[0] : 'STANDBY', icon: info.radio === 'rx' ? 'speaker' : info.radio === 'tx' ? 'microphone, live' : radio ? 'microphone, barred' : 'microphone, off', lamp: radio ? radio[1] : null, oxygen: o2, seconds: t, alarms, zoomPips: level, status: info.status || '', belt };
+    shown = { radio: radio ? radio[0] : 'STANDBY', icon: info.radio === 'rx' ? 'speaker' : info.radio === 'tx' ? 'microphone, live' : radio ? 'microphone, barred' : 'microphone, off', lamp: radio ? radio[1] : null, oxygen: o2, seconds: t, alarms, zoomPips: level, status: info.status || '', held: [...held] };
   }
 
   // ---------- raising and lowering ----------

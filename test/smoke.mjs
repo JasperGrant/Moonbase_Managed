@@ -176,16 +176,19 @@ function installHelpers() {
   }
   const F = mb.world.fixtures;
   const toolBox = id => m => owns(mb.fx.tools[id], m);
-  const rackSlot = id => m => m.parent === F.locker && m.position.distanceTo(F.lockerSlots[id]) < 0.35 && !owns(mb.fx.tools[id], m);
   window.smoke = {
     sleep, until, face, work,
-    // Take a tool off the rack, putting others back first if the belt would be too heavy.
+    // Take a tool off the rack (or up off the ground) into a free hand, first tossing down the tools in
+    // `drop` (Q on a laptop tosses one; here the hand holding that tool is chosen).
     async carry(id, drop = []) {
-      for (const d of drop) if (mb.state().belt.includes(d)) { const r = await work(rackSlot(d), `the ${d} slot on the rack`, 20); if (!r.ok) return r; }
-      if (mb.state().belt.includes(id)) return { ok: true };
+      for (const d of drop) if (mb.state().hands.includes(d)) {
+        if (!mb.fx.dropTool(d)) return { ok: false, why: `could not let go of the ${d}` };
+        if (!(await until(s => !s.hands.includes(d) && s.ground[d], 8))) return { ok: false, why: `the ${d} never reached the ground` };
+      }
+      if (mb.state().hands.includes(id)) return { ok: true };
       const r = await work(toolBox(id), `the ${id} on the rack`, 20);
       if (!r.ok) return r;
-      return (await until(s => s.belt.includes(id), 8)) ? { ok: true } : { ok: false, why: `the ${id} never reached the belt` };
+      return (await until(s => s.hands.includes(id), 8)) ? { ok: true } : { ok: false, why: `the ${id} never reached a hand` };
     },
     dust: () => work(m => F.dustCells.includes(m), 'a dusty cell', 60),
     pullWheel: () => work(m => owns(F.wheel, m), 'the broken wheel', 20),
@@ -283,7 +286,7 @@ try {
   await act(astro, 'brush the panels', () => window.smoke.dust());
   await waitFor(astro, 'the panels to be clean', s => !s.scene.dust, 8);
 
-  // 0:45 the rover wheel breaks and the radar goes with it. Brush (1) + tire (3) fits the belt.
+  // 0:45 the rover wheel breaks and the radar goes with it. Brush in one hand, the tire in the other.
   await waitFor(astro, 'the rover wheel to break', s => s.scene.wheel === 1, 60);
   await ctl.waitForFunction(() => window.moonbase.state().radar === false, null, POLL).catch(() => problems.push('console: the Technician still has radar with the wheel broken'));
   await act(astro, 'take the tire', () => window.smoke.carry('tire'));
@@ -321,7 +324,8 @@ try {
   await waitFor(astro, 'the hull to be sealed', s => !s.scene.hull, 8);
 
   // 2:30 the suit leaks. Patch kit, then F.
-  await act(astro, 'take the patch kit', () => window.smoke.carry('patch'));
+  // Both hands are full (welder and brush): put the brush down to take the patch kit.
+  await act(astro, 'put the brush down and take the patch kit', () => window.smoke.carry('patch', ['brush']));
   await waitFor(astro, 'the suit leak', s => s.suit || s.phase !== 'run', 60);
   await astro.keyboard.down('f');
   await waitFor(astro, 'the suit to be patched', s => !s.suit, 8);

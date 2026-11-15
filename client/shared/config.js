@@ -18,7 +18,11 @@ export const CFG = {
   blackoutEndsAt: 10,         // battery % at which a blackout lifts
   generatorSeconds: 25,       // power from one pull of the backup generator
 
-  beltCapacity: 4,            // weight units the astronaut can carry
+  hands: 2,                   // tools the astronaut can hold: one in each hand, nothing else (no belt)
+  // A tool let go keeps the hand's speed and flies (docs/design/hands-and-avatar.md). Client-side only:
+  // the server is told where it came to rest.
+  throw: { gravity: 1.62, bounce: 0.3, slide: 5, maxSpeed: 12, settle: 0.08, maxSeconds: 8 },
+  pickReach: 2.5,             // metres from the astronaut's head to a tool on the ground the server will let them pick up
   tireRestockSeconds: 30,     // a new space tire appears in the locker this long after one is fitted
 
   meteorWarnSeconds: 15,      // radar warning before the first impact
@@ -57,14 +61,14 @@ export const covers = (held, role) => held === role || (held === 'all' && role !
 // 4 players: one person per role. Nobody can take a seat the game does not have.
 export const PLAYERS = { 2: ['astronaut', 'all'], 4: ['astronaut', 'ops', 'sci', 'tech'] };
 
-// The tool belt. Welder + brush + patch kit fill it exactly, so the tire or the
-// generator always means leaving something behind.
+// The tools. Each starts on the locker rack; once taken it is in a hand or lying on the ground.
+// Two hands, one tool each: the choice of what to carry is the choice of what to leave behind.
 export const TOOLS = {
-  brush:  { name: 'Brush',            weight: 1 },
-  patch:  { name: 'Patch kit',        weight: 1 },
-  welder: { name: 'Welder',           weight: 2 },
-  tire:   { name: 'Space tire',       weight: 3 },
-  gen:    { name: 'Backup generator', weight: 3 },
+  brush:  { name: 'Brush' },
+  patch:  { name: 'Patch kit' },
+  welder: { name: 'Welder' },
+  tire:   { name: 'Space tire' },
+  gen:    { name: 'Backup generator' },
 };
 
 // What can break, the tool that fixes it, and the line for the results log.
