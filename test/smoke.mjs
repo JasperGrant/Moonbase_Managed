@@ -49,6 +49,7 @@ function watch(p, name) {
   // Errors, and WebGL complaints, which arrive as warnings (a failed draw leaves a black surface, not an exception).
   p.on('console', m => { if (m.type() === 'error' || /GL_INVALID|WebGL: INVALID/.test(m.text())) problems.push(`${name}: ${m.text()}`); });
   p.on('response', r => { if (r.status() >= 400) problems.push(`${name}: HTTP ${r.status()} ${r.url()}`); });
+  p.on('crash', () => { problems.push(`${name}: the page crashed`); step(`${name}: PAGE CRASHED`); });
 }
 // For the mission, one browser per page: with software GL the astronaut's 3D scene hogs the GPU
 // process, and a console sharing it falls minutes behind.
