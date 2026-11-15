@@ -1375,6 +1375,7 @@ renderer.setAnimationLoop(() => {
   radio.listen(headPos, tmpV);
   shake *= 0.86;
   if (mode === 'desk') camera.rotation.z = (Math.random() - 0.5) * shake;
+  drawBoard(); // the flight status board: drawn in the lobby, gone once the mission starts
   drawResultBoard();
   debriefStep(Math.min(0.25, now - armFrame), now); // real time, like the arm and the airlock: a second of reading is a second on a slow machine too
   // On a laptop the radio key swings the arm up. In a headset it is on your own arm (see followArm).

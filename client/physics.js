@@ -31,6 +31,10 @@ export function buildPhysics() {
   const fixed = (place, shape, x, y, z, q) => {
     const b = new CANNON.Body({ mass: 0, type: CANNON.Body.STATIC, shape });
     b.position.set(x, y, z); if (q) b.quaternion.copy(q);
+    // The box cannon worked out when the shape went in was at the origin, and a static body never moves to
+    // refresh it. The sweep-and-prune broadphase sorts by that box, so a stale one hides the body from
+    // whatever falls on it (a tool sank through the wall rack's shelf).
+    b.updateAABB();
     b.userData = { kind: 'fixed' };
     worlds[place].addBody(b); return b;
   };
@@ -138,6 +142,7 @@ export function buildPhysics() {
       const hf = new CANNON.Heightfield(data, { elementSize: step });
       const b = new CANNON.Body({ mass: 0 });
       b.addShape(hf); b.position.set(-half, 0, half); b.quaternion.setFromEuler(-Math.PI / 2, 0, 0);
+      b.updateAABB(); // see fixed()
       b.userData = { kind: 'ground' };
       worlds.surface.addBody(b);
       return b;
