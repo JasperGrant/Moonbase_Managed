@@ -871,6 +871,13 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
       const railPath = new THREE.CatmullRomCurve3([[-0.42, 0.66, -1.24], [-0.42, 1.3, -1.3], [-0.3, 1.42, -1.3], [0.3, 1.42, -1.3], [0.42, 1.3, -1.3], [0.42, 0.66, -1.24]].map(p => new THREE.Vector3(...p)), false, 'catmullrom', 0.1);
       const rail = mesh(new THREE.TubeGeometry(railPath, 24, 0.022, 8), new THREE.MeshStandardMaterial({ color: PAL.hex.hazard, roughness: 0.55, metalness: 0.3 }), 0, 0, 0, rover);
       rail.name = 'Rail_Rider';
+      // Grip tape on the rail's top bar: where you take hold. It glows warm while the rail can be taken (the hand,
+      // client/hand.js), and sits dark the rest of the time.
+      const gripMat = new THREE.MeshStandardMaterial({ color: PAL.hex.bakelite, roughness: 0.92, metalness: 0, bumpMap: regolithBump, bumpScale: 0.02, emissive: PAL.hex.amber, emissiveIntensity: 0 });
+      const grip = mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.5, 14), gripMat, 0, 1.42, -1.3, rover);
+      grip.rotation.z = Math.PI / 2; grip.name = 'Grip_Rail';
+      grip.userData.glow = (on, t) => { gripMat.emissiveIntensity = on ? 0.55 + 0.25 * Math.sin(t * 5) : 0; };
+      rover.userData.grip = grip;
       rover.userData.rail = new THREE.Object3D(); rover.userData.rail.position.set(0, 1.42, -1.3); rover.add(rover.userData.rail);
       rover.userData.plate = new THREE.Object3D(); rover.userData.plate.position.set(P.x, P.y, P.z); rover.add(rover.userData.plate);
       // The tray: four open sample cups on the aft bay.
@@ -1090,59 +1097,15 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
     stains.count = stainN; stains.instanceMatrix.needsUpdate = true;
   }
 
-  // ---------- a lander on the horizon, with its flag ----------
-  {
-    const L = new THREE.Group(); L.position.set(-30, height(-30, -34) - 0.1, -34); L.rotation.y = 0.6;
-    mesh(new THREE.CylinderGeometry(2.3, 2.3, 1.7, 8), gold, 0, 1.9, 0, L);
-    mesh(new THREE.CylinderGeometry(2.0, 2.0, 0.3, 8), dark, 0, 2.9, 0, L);
-    mesh(new THREE.BoxGeometry(2.6, 2.1, 2.4), silverFoil, 0, 4.0, 0, L);
-    mesh(new THREE.CylinderGeometry(0.9, 1.2, 1.2, 12), grey, 0, 0.6, 0, L); // engine bell
-    for (const [x, z] of [[-0.6, 1.21], [0.6, 1.21]]) mesh(new THREE.BoxGeometry(0.4, 0.3, 0.02), dark, x, 4.3, z, L);
-    for (let i = 0; i < 4; i++) {
-      const a = (i / 4) * Math.PI * 2 + Math.PI / 4, fx = Math.cos(a) * 4.2, fz = Math.sin(a) * 4.2;
-      tube(gold, [Math.cos(a) * 2.1, 1.3, Math.sin(a) * 2.1], [fx, 0.1, fz], 0.1, L);
-      tube(steel, [Math.cos(a) * 2.1, 2.4, Math.sin(a) * 2.1], [fx * 0.75, 0.6, fz * 0.75], 0.04, L);
-      mesh(new THREE.CylinderGeometry(0.7, 0.8, 0.15, 12), gold, fx, 0.08, fz, L);
-    }
-    for (let i = 0; i < 8; i++) tube(steel, [0.9, 0.3 + i * 0.4, 2.1 + i * 0.12], [1.5, 0.3 + i * 0.4, 2.1 + i * 0.12], 0.015, L); // ladder
-    scene.add(L);
-    // The Apollo LM model replaces the hand-built one when it loads: its foil warmed toward foil gold.
-    loadPeriod(THREE, 'apollo-lm', { merge: true, receive: shadows, rough: 0.5, metal: 0.6, sat: 0.7,
-      by: { 'blinn1SG.002': { color: PAL.hex.foilGold, rough: 0.35, metal: 0.9 }, 'blinn9SG.001': { color: PAL.hex.foilGold, rough: 0.4, metal: 0.85 } } }).then(m => {
-      L.clear(); L.add(m);
-    }).catch(e => console.warn('apollo-lm', e));
-    const F = new THREE.Group(); F.position.set(-24, height(-24, -28), -28);
-    tube(steel, [0, 0, 0], [0, 2.4, 0], 0.02, F);
-    tube(steel, [0, 2.38, 0], [1.1, 2.38, 0], 0.012, F);
-    const flagTex = canvasTexture(THREE, 128, 80, (d, w, h, g) => { g.fillStyle = '#ddd6c4'; g.fillRect(0, 0, w, h); g.fillStyle = '#2f4a7a'; g.fillRect(0, 0, w, 24); g.fillRect(0, 56, w, 24); g.fillStyle = '#d9662b'; g.beginPath(); g.arc(64, 40, 12, 0, 7); g.fill(); });
-    const flag = mesh(new THREE.PlaneGeometry(1.0, 0.65), new THREE.MeshStandardMaterial({ map: flagTex, side: THREE.DoubleSide, roughness: 0.9 }), 0.55, 2.05, 0, F);
-    flag.rotation.y = -Math.PI / 2; flag.rotation.y = 0;
-    scene.add(F);
-  }
-
   // ---------- astronaut figure, shown in the rover camera: it walks, crouches and reaches (client/avatar.js) ----------
   const figure = buildAvatar(THREE, { shadows, ground: (x, z) => groundAt(x, z) });
   const avatar = figure.group;
   avatar.visible = false;
   scene.add(avatar);
 
-  // ---------- scenery from the NASA set: an old Viking lander, cargo at the fuel depot ----------
+  // The Scenery group stays (the astronaut page counts it as outdoors); nothing decorative is in it now.
   const props = new THREE.Group(); props.name = 'Scenery';
-  scene.add(props); // added now, so the astronaut page counts it as outdoors and hides it inside the habitat
-  const prop = (id, parent, x, z, ry, opts = {}) => loadPeriod(THREE, id, { cast: shadows, receive: shadows, ...opts }).then(m => {
-    m.position.set(x, parent === props ? height(x, z) - 0.05 : 0, z); m.rotation.y = ry; parent.add(m); return m;
-  }).catch(e => console.warn(id, e));
-  prop('viking-lander', props, 16, -15, 2.3, { merge: true, cast: false, by: { blinn4SG: { color: PAL.hex.enamel }, blinn11SG: { color: PAL.hex.enamel } } });
-  prop('spectrograph-crate', depot, 2.5, -0.5, 0.25);
-  // Further out, landmarks to steer by: a crashed probe half sunk in a crater, and cargo dropped from a lander.
-  for (const l of LANDMARKS) if (l.model) {
-    prop(l.model, props, l.x, l.z, l.x * 0.13, { merge: true, cast: false, rough: 0.8, sat: 0.3 }).then(m => {
-      if (!m) return;
-      if (l.model === 'ladee-probe') { m.rotation.z = 0.42; m.position.y -= 0.7; } // nose down where it hit
-      else m.rotation.x = 0.08;
-    });
-  }
-  prop('support-cradle', depot, -2.6, -1.0, -0.2, { by: { spstob_fss_1: { rough: 0.7 } } });
+  scene.add(props);
 
   return {
     rover, rovers, avatar, figure, sun, height, hab, port, follow, normalAt, ground: groundAt, // ground(x, z): the height of the ground as drawn
@@ -1150,7 +1113,7 @@ export function buildWorld(THREE, scene, { shadows = true, renderer = null } = {
     doors,
     fixtures: { dustCells, dust, crack, crackPts, wheel: rover.userData.wheel, hub: rover.userData.hub,
       wheels: Object.fromEntries(Object.entries(rovers).map(([id, r]) => [id, { wheel: r.userData.wheel, hub: r.userData.hub }])),
-      rail: rover.userData.rail, plate: rover.userData.plate, cups: rover.userData.cups, portMouth: port.userData.mouth },
+      rail: rover.userData.rail, grip: rover.userData.grip, plate: rover.userData.plate, cups: rover.userData.cups, portMouth: port.userData.mouth },
     // A puff of dust kicked up at a point (boots landing, a rock picked up).
     puff(p, n = 10, speed = 0.6) { for (let i = 0; i < n; i++) { const a = Math.random() * 6.28; kick(p.x, p.y + 0.05, p.z, Math.cos(a) * speed * Math.random(), 0.3 + Math.random() * speed, Math.sin(a) * speed * Math.random()); } },
     // Where a sample in a hand (or falling) is drawn: (id) => world position, or null to leave it to the server's word.

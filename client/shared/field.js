@@ -4,7 +4,7 @@
 //   FIELD      the grid: 5 m cells for what has been explored, 30 m blocks for the orbital heat map
 //   CRATERS    the small craters on top of the LOLA ground (world.js digs them, the chart draws their rims)
 //   BOULDERS   rocks big enough to stop a rover or a walker, 30 m out to the edge
-//   LANDMARKS  named places, for directions: the lander, the Viking, the probe, the cargo, two big rocks
+//   LANDMARKS  named places, for directions: the dish, the depot, the drill, two big rocks
 //   OBSTACLES  everything a rover bumps into, as circles
 //   layField   where this mission's samples and their lookalikes lie, and the heat map made from them
 import { CFG, PLACES, SAMPLES } from './config.js';
@@ -65,14 +65,9 @@ const BASE = [
 
 // ---------- landmarks ----------
 export const LANDMARKS = [
-  { name: 'LM', x: -30, z: -34, r: 4.6 },
-  { name: 'FLAG', x: -24, z: -28, r: 0.4 },
-  { name: 'VIKING', x: 16, z: -15, r: 2.2 },
   { name: 'DISH', x: PLACES.dish.x, z: PLACES.dish.z, r: 2.0 },
   { name: 'DEPOT', x: PLACES.depot.x, z: PLACES.depot.z, r: 2.6 },
   { name: 'DRILL', x: PLACES.drill.x, z: PLACES.drill.z, r: 2.0 },
-  { name: 'PROBE', x: -62, z: 78, r: 1.6, model: 'ladee-probe' },
-  { name: 'CARGO', x: 88, z: -42, r: 2.2, model: 'grace-satellite' },
   { name: 'SPLIT ROCK', x: 41, z: 56, r: 2.8, rock: true },
   { name: 'THE TOOTH', x: -82, z: -20, r: 1.6, rock: true },
 ];

@@ -48,6 +48,7 @@ function watch(p, name) {
   // Errors, and WebGL complaints, which arrive as warnings (a failed draw leaves a black surface, not an exception).
   p.on('console', m => { if (m.type() === 'error' || /GL_INVALID|WebGL: INVALID/.test(m.text())) problems.push(`${name}: ${m.text()}`); });
   p.on('response', r => { if (r.status() >= 400) problems.push(`${name}: HTTP ${r.status()} ${r.url()}`); });
+  p.on('crash', () => { problems.push(`${name}: the page crashed`); step(`${name}: PAGE CRASHED`); });
 }
 // For the mission, one browser per page: with software GL the astronaut's 3D scene hogs the GPU
 // process, and a console sharing it falls minutes behind.
@@ -141,18 +142,28 @@ function installHelpers() {
     const p = mesh.getWorldPosition(new T.Vector3());
     const here = new T.Vector3(mb.rig.position.x, 1.65, mb.rig.position.z);
     if (clear(here, p, mesh)) { look(here, p); return true; }
-    for (const dist of [1.8, 1.3, 2.4, 2.9]) for (let k = 0; k < 16; k++) {
+    let fallback = null; // the first spot that looked clear before the game had its say
+    for (const dist of [1.8, 1.3, 2.4, 0.9, 2.9]) for (let k = 0; k < 16; k++) {
       const a = k * Math.PI / 8, eye = new T.Vector3(p.x + Math.cos(a) * dist, 1.65, p.z + Math.sin(a) * dist);
       // Somewhere a head can be: outside the dome, or indoors on the floor of the hall, with nothing in the way.
       const l = mb.interior.toLocal(eye.x, eye.z);
       if (mb.where() === 'in' ? !mb.interior.walkable(l.x, l.z) : Math.hypot(eye.x, eye.z) < 3.0) continue;
       if (!clear(eye, p, mesh)) continue;
+      fallback ??= eye;
       mb.rig.position.set(eye.x, 0, eye.z);
       look(eye, p);
       mb.sendPose(); // the page reports where it is ten times a second; frames are slow here, so do not wait for one
       await sleep(150);
+      // The game's walk rules may have nudged us meanwhile (off a chamber wall, onto the ground's height):
+      // aim again from where the head really is, and try the next spot if the view is now blocked.
+      mb.rig.updateMatrixWorld(true);
+      const head = mb.camera.getWorldPosition(new T.Vector3());
+      if (!clear(head, p, mesh)) continue;
+      look(head, p);
       return true;
     }
+    // Nowhere stayed clear after the nudge (a cramped corridor): stand at the first clear spot and trust it.
+    if (fallback) { mb.rig.position.set(fallback.x, 0, fallback.z); look(fallback, p); mb.sendPose(); await sleep(150); return true; }
     return false;
   }
   // Click every enabled target that `pick` accepts, until none are left or time runs out.
@@ -264,6 +275,10 @@ try {
   const pitch = await astro.evaluate(() => Math.abs(window.moonbase.camera.rotation.x));
   if (pitch > 0.2) problems.push(`astronaut: camera pitched ${pitch.toFixed(2)} rad right after entering (pointer-lock jump)`);
   await astro.evaluate(installHelpers);
+  // Software WebGL draws about a frame a second, and every scripted step waits on frames, so the mission's
+  // clock outran the script. Draw one frame in 8 during the mission; the logic still runs every frame.
+  await astro.evaluate(() => window.moonbase.drawEvery(8));
+  await ctl.evaluate(() => window.moonbase.drawEvery(8)); // Mission Control's rover camera starved the page the same way
 
   // Ready up. The astronaut does not: entering the game (the desk button here) tells the server they are
   // suited, and Mission Control (2-player mode, so the crew is complete) calls them GO from their panel
@@ -280,7 +295,7 @@ try {
   // 0:05 the solar panels get dusty. Find the brush in the hall, take it out through the airlock, brush every cell.
   await waitFor(astro, 'dust on the panels', s => s.phase === 'run' && s.scene.dust, 30);
   await ctl.waitForFunction(() => window.moonbase.state().power?.solar < 60, null, POLL).catch(() => problems.push('console: the Scientist\'s solar gauge should be low with dusty panels'));
-  await ctl.waitForFunction(() => window.moonbase.state().tools?.brush?.area === 'BENCH', null, POLL).catch(() => problems.push('console: the tool log does not have the brush on the bench'));
+  await ctl.waitForFunction(() => window.moonbase.state().tools?.brush?.area === 'TOOL RACK', null, POLL).catch(() => problems.push('console: the tool log does not have the brush on its rack'));
   await shot(ctl, 'mission-control-dust');
   await act(astro, 'take the brush', () => window.smoke.carry('brush'));
   await act(astro, 'brush the panels', () => window.smoke.dust());
@@ -335,6 +350,8 @@ try {
   // leaves first: the crew goes to the lobby, the astronaut is back at the READY board, and the
   // console keeps its results up with the CREW IN LOBBY lamp lit until it leaves too.
   step('the debrief and the way back to the lobby');
+  await astro.evaluate(() => window.moonbase.drawEvery(1)); // every frame drawn again for the checks that look at pictures
+  await ctl.evaluate(() => window.moonbase.drawEvery(1));
   const ctlOut = await ctl.evaluate(() => ({ button: !!document.querySelector('#results [data-lobby]'), lamp: document.getElementById('crewLamp')?.classList.contains('on'), left: document.getElementById('debriefLeft')?.textContent }));
   if (!ctlOut.button || ctlOut.lamp || !(Number(ctlOut.left) > 0)) problems.push('console: the results should have BACK TO LOBBY, the lamp off and the seconds left: ' + JSON.stringify(ctlOut));
   const cuff = await astro.evaluate(async () => { for (let i = 0; i < 40 && !window.moonbase.arm.shown?.debrief; i++) await new Promise(r => setTimeout(r, 100)); return { debrief: window.moonbase.debrief(), shown: window.moonbase.arm.shown, board: window.moonbase.resultBoard.visible }; });
@@ -472,6 +489,8 @@ try {
   const indoors = await astro.evaluate(async () => {
     const mb = window.moonbase, T = mb.THREE, wait = ms => new Promise(r => setTimeout(r, ms));
     if (mb.where() === 'in') { const r = await window.smoke.through('out'); if (!r.ok) return 'out: ' + r.why; }
+    // The airlock re-arms only once a drawn frame has seen us outside it; frames are slow here, so wait for two.
+    await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
     mb.standAt('out', 0.1, 3.25, 0); // in airlock S's chamber, facing the inner hatch
     const local = () => { const ch = (mb.where() === 'in' ? mb.interior.doors : mb.world.doors).S; return ch.root.worldToLocal(mb.camera.getWorldPosition(new T.Vector3())); };
     const before = local();

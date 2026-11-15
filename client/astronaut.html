@@ -14,6 +14,8 @@
   #gateActions summary { cursor:pointer; text-align:center; color:var(--dim); }
   #vrSlot button { position:static !important; transform:none !important; width:auto !important; opacity:1 !important; font:inherit !important; font-weight:700 !important; padding:.8em 1.6em !important; background:var(--green) !important; color:#000 !important; border:0 !important; border-radius:4px !important; }
   #cross { position:fixed; left:50%; top:50%; width:6px; height:6px; margin:-3px; border-radius:50%; background:#fff; opacity:.7; pointer-events:none; }
+  /* The hand (client/hand.js): replaces the dot while the view is on something you can take or use. */
+  #handCue { position:fixed; left:50%; top:50%; width:88px; height:110px; margin:-44px 0 0 -44px; pointer-events:none; }
   #err { color:var(--red); }
 </style>
 <script type="importmap">{ "imports": { "three": "/vendor/three/build/three.module.js", "three/addons/": "/vendor/three/examples/jsm/", "cannon-es": "/vendor/cannon-es/cannon-es.js" } }</script>
@@ -30,6 +32,7 @@
   <span id="err" class="lb-hint" style="color:var(--red)"></span>
 </div>
 <div id="cross" hidden></div>
+<canvas id="handCue" hidden></canvas>
 <script type="module" src="/astronaut.js"></script>
 <script>addEventListener('error', e => { document.getElementById('err').textContent = 'Could not start: ' + (e.message || 'a file failed to load. Did you run "npm install"?'); }, true);</script>
 </body>

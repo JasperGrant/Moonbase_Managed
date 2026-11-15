@@ -21,6 +21,9 @@ const GLIDE = 6;                     // 1/s: how fast the two views blend into e
 const KEY = 'moonbase.camviews';
 const smooth = t => t * t * (3 - 2 * t);
 
+// Tests only: draw one frame in `every` (see the console's moonbase.drawEvery). Players never change it.
+export const camDraw = { every: 1, n: 0 };
+
 export function startRoverCam(canvas, getState) {
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
   renderer.setPixelRatio(1);
@@ -92,6 +95,7 @@ export function startRoverCam(canvas, getState) {
     if (w && h && (canvas.width !== w || canvas.height !== h)) renderer.setSize(w, h, false);
     const s = getState();
     if (!w || !h || !s || !s.rovers || document.hidden) return;
+    if (camDraw.every > 1 && ++camDraw.n % camDraw.every) return;
     const t = ms / 1000, fdt = Math.min(0.1, Math.max(0, t - lastT));
     lastT = t;
     world.moveRovers(s.rovers, 1 - Math.exp(-dt * 10));
